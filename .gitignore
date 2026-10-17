@@ -1,0 +1,47 @@
+# .NET build output and local IDE state
+**/bin/
+**/obj/
+**/.vs/
+**/.idea/
+*.user
+*.suo
+
+# Binary dependencies and distributables; their licensing/distribution is handled separately
+*.dll
+*.exe
+*.ico
+*.png
+
+# Local build output, caches, logs, screenshots, and generated reports
+build/*
+!build/*.cs
+!build/*.py
+!build/*.ps1
+!build/*.md
+build/**/__pycache__/
+build/**/cli-home/
+build/**/publish*/
+build/**/*.log
+build/**/*.json
+build/**/*.zip
+build/**/*.exe
+build/**/*.dll
+build/**/*.pdb
+build/**/*.cache
+build/**/*.tmp
+build/**/*.bak
+
+# Historical snapshots and verification evidence are not part of the source repo
+history/
+verification/
+*.json
+*.log
+*.zip
+
+# Handoff prompts and raw agent working notes are not product documentation
+README-UI与动画优化Prompt.md
+UI优化后续交接Prompt.md
+第三位agent-窗口外壳与动效优化原始说明.md
+另一位agent-界面更新原始交付说明.md
+代码核验报告-*.md
+

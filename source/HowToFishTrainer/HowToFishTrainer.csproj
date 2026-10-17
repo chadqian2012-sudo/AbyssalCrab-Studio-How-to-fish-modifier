@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>HowToFishTrainer</AssemblyName>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>True</UseWPF>
+    <TargetFramework>net8.0-windows7.0</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+  <PropertyGroup>
+    <LangVersion>12.0</LangVersion>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
+  </PropertyGroup>
+  <PropertyGroup>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <RootNamespace />
+  </PropertyGroup>
+  <ItemGroup>
+    <None Remove="HowToFishTrainer.Runtime.dll" />
+    <None Remove="0Harmony.dll" />
+    <EmbeddedResource Include="HowToFishTrainer.Runtime.dll" LogicalName="HowToFishTrainer.Runtime.dll" />
+    <EmbeddedResource Include="0Harmony.dll" LogicalName="0Harmony.dll" />
+    <ApplicationDefinition Remove="HowToFishTrainer\App\App.xaml" />
+    <ApplicationDefinition Include="HowToFishTrainer\App\App.xaml" Generator="MSBuild:Compile" SubType="Designer" LogicalName="app.xaml" />
+    <Page Remove="HowToFishTrainer\App\ActivationWindow.xaml" />
+    <Page Remove="HowToFishTrainer\App\MainWindow.xaml" />
+    <Page Remove="themes\theme.xaml" />
+    <Page Include="HowToFishTrainer\App\ActivationWindow.xaml" Generator="MSBuild:Compile" SubType="Designer" LogicalName="activationwindow.xaml" />
+    <Page Include="HowToFishTrainer\App\MainWindow.xaml" Generator="MSBuild:Compile" SubType="Designer" LogicalName="mainwindow.xaml" />
+    <!-- 原程序集把主题编译为 themes/theme.baml（不是 theme.xaml）；文件名必须一致，
+         否则 Application.LoadComponent("Themes/Theme.xaml") 找不到资源、所有 StaticResource 失效。 -->
+    <Page Include="themes\theme.xaml" Generator="MSBuild:Compile" SubType="Designer" LogicalName="themes/theme.baml" />
+    <!-- 减少动画降级档：与主题同样作为逻辑资源名 themes/MotionReduced.baml 打包，
+         由 App.xaml.cs 在启动时按 SystemParameters.ClientAreaAnimation 决定是否合并。 -->
+    <Page Remove="themes\MotionReduced.xaml" />
+    <Page Include="themes\MotionReduced.xaml" Generator="MSBuild:Compile" SubType="Designer" LogicalName="themes/MotionReduced.baml" />
+    <!-- 实色材质降级档：由 App.xaml.cs 按 RenderCapability.Tier 决定是否合并。 -->
+    <Page Remove="themes\MaterialSolid.xaml" />
+    <Page Include="themes\MaterialSolid.xaml" Generator="MSBuild:Compile" SubType="Designer" LogicalName="themes/MaterialSolid.baml" />
+    <!-- 着色玻璃档（默认）与通透档：由 App.xaml.cs / 顶栏「材质」菜单切换。 -->
+    <Page Remove="themes\MaterialTinted.xaml" />
+    <Page Include="themes\MaterialTinted.xaml" Generator="MSBuild:Compile" SubType="Designer" LogicalName="themes/MaterialTinted.baml" />
+    <Page Remove="themes\MaterialClear.xaml" />
+    <Page Include="themes\MaterialClear.xaml" Generator="MSBuild:Compile" SubType="Designer" LogicalName="themes/MaterialClear.baml" />
+    <Resource Remove="assets\brand\abyssalcrab-app-icon.png" />
+    <Resource Include="assets\brand\abyssalcrab-app-icon.png" LogicalName="assets/brand/abyssalcrab-app-icon.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="HowToFishTrainer.Core">
+      <HintPath>..\..\patched\HowToFishTrainer.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="HowToFishTrainer.Memory">
+      <HintPath>..\..\references\HowToFishTrainer.Memory.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

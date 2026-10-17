@@ -1,0 +1,2488 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ===========================================================================
+  AbyssalCrab Studio V1.1.37 · Themes/Theme.xaml（UI 美化重写版 / 设计系统 + 动效基础）
+  ===========================================================================
+  · 纯 ResourceDictionary，由 App.xaml 以 <ResourceDictionary Source="Themes/Theme.xaml"/>
+    合并，必须能被 Application.LoadComponent 作为 themes/theme.xaml 加载。
+  · 配色令牌逐字沿用，未新增/修改任何识别色。
+  · 全部动效 ≤ 260ms；颜色过渡用 Opacity 叠加层或可动画画笔，位移/滑块用
+    TranslateTransform / ScaleTransform，缓动统一取 Ease* 资源。
+  · 材质使用 DynamicResource，动效使用 WPF 原生时间线与时长 token；无第三方库。
+  ===========================================================================
+  动效令牌类型说明（契约 §4）：
+    EaseStandard / EaseEnter / EaseExit / EaseSwitch / EaseSoft 为 Freezable，
+    以对象元素形式声明（<CubicEase .../>），可供任意 XAML 用 {StaticResource} 引用。
+    DurationFast / DurationBase / DurationSwitch / DurationPage 以
+    <Duration x:Key="...">0:0:0.18</Duration> 形式声明（Duration 带 DurationConverter，
+    支持以文本内容初始化），这样外部写成 Duration="{StaticResource MotionRelease}" 时
+    拿到的就是 Duration 结构体本身，不需要隐式转换。
+    若某个 WPF/.NET 版本的标记编译器不接受该写法，请改为
+      xmlns:sys="clr-namespace:System;assembly=System.Runtime" 加
+      <sys:TimeSpan x:Key="DurationBase">0:0:0.18</sys:TimeSpan>，
+    或直接删除这四个键、在动画里写 Duration="{StaticResource MotionRelease}"（本文件内部动画已全部使用
+    字面量时长，不依赖这四个键）。
+  ===========================================================================
+  动画实现要点（避免 Freezable 冻结异常）：
+    · 主题画刷（SolidColorBrush 资源）会被冻结，绝不对它们做 Color 动画。
+    · 轨道/底色的颜色过渡用两层叠加元素 + Opacity 动画实现，视觉与 Color 动画一致，
+      且动画目标是 UIElement.Opacity（永不冻结）。
+    · 滑块位移动画的路径为 (UIElement.RenderTransform).(TranslateTransform.X)。
+    · 所有动画放在 ControlTemplate.Triggers 的 EnterActions / ExitActions 中，
+      并给出值类型属性的静态 Setter 兜底（保证初始状态就正确）。
+    · 不要用 Setter 去替换 RenderTransform 这类 Freezable 实例：替换会让正在运行的
+      动画失去目标，位移动画会退化成瞬间跳变。
+  ===========================================================================
+-->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime"
+                    xmlns:app="clr-namespace:HowToFishTrainer.App">
+
+  <!-- =======================================================================
+       1. 调色板（既有令牌，色值一字不改）
+       ======================================================================= -->
+  <SolidColorBrush x:Key="BgBrush" Color="#F8F6FA" />
+  <SolidColorBrush x:Key="PanelBrush" Color="#FCFBFD" />
+  <SolidColorBrush x:Key="CardBrush" Color="#FFFFFF" />
+  <SolidColorBrush x:Key="AccentBrush" Color="#466E7D" />
+  <SolidColorBrush x:Key="AccentDarkBrush" Color="#32525E" />
+  <SolidColorBrush x:Key="AccentSoftBrush" Color="#E9EEF1" />
+  <SolidColorBrush x:Key="GoldBrush" Color="#8C6A32" />
+  <SolidColorBrush x:Key="TextBrush" Color="#251F2A" />
+  <!-- 次文字：由 #776D7C 收到 #6F6575。依据是**合成后**的实测对比度（verification/polish/composited-contrast-audit.json），不是纸面换算：
+       #776D7C 在玻璃底上会掉到 4.5:1 以下 —— 页头说明 3.73、禁用主按钮文字 4.14、等待态 4.46；
+       #6F6575 在所有这些底色上都 >= 4.66，同时仍是同一色系的次级灰，与 TextBrush 的层次关系不变。 -->
+  <SolidColorBrush x:Key="MutedBrush" Color="#6F6575" />
+  <SolidColorBrush x:Key="SuccessBrush" Color="#347B5C" />
+  <SolidColorBrush x:Key="WarningBrush" Color="#95651F" />
+  <SolidColorBrush x:Key="DangerBrush" Color="#B24C62" />
+  <SolidColorBrush x:Key="LineBrush" Color="#DEE5E8" />
+
+  <!-- =======================================================================
+       1b. Liquid Glass 材质层与层级 token（新增，不改上面任何既有键的值）
+
+       目标：借鉴 iOS 26/27 Liquid Glass 的「清透但可读、柔和圆角、有层次的表面」，
+       在纯 WPF 里用受控底色 + 渐变着色 + 细边缘高光做出来，不使用 AllowsTransparency、
+       不逐帧截屏、不把 BlurEffect 挂在含文字的整卡上。
+
+       分层约定（自下而上）：
+         GlassCanvasBrush  独立背景层，静态渐变 + 光晕，IsHitTestVisible=False
+         GlassChromeBrush  顶栏/底部状态栏工具层——玻璃感最强
+         GlassNavBrush     顶部导航带——其次
+         GlassCardBrush    功能卡片——更实的磨砂面，保证长文本可读
+         FieldBrush        输入框——最实（接近不透明白）
+       边缘高光统一「上亮下柔」，光源方向一致，不在每张卡上放随机斑点。
+       ======================================================================= -->
+
+  <!-- 页面背景：极浅冷灰青渐变，比原纯色 #F8F6FA 多一点纵深 -->
+  <LinearGradientBrush x:Key="GlassCanvasBrush" StartPoint="0,0" EndPoint="0.35,1">
+    <GradientStop Color="#EDF3F7" Offset="0" />
+    <GradientStop Color="#E5EDF2" Offset="0.55" />
+    <GradientStop Color="#DDE7ED" Offset="1" />
+  </LinearGradientBrush>
+
+  <!-- 背景光晕：非常克制的低饱和冷色，只做层次，不形成彩色渐变 -->
+  <RadialGradientBrush x:Key="GlassHaloAccentBrush" GradientOrigin="0.5,0.5" Center="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+    <GradientStop Color="#3D7FA3B4" Offset="0" />
+    <GradientStop Color="#007FA3B4" Offset="1" />
+  </RadialGradientBrush>
+  <RadialGradientBrush x:Key="GlassHaloWarmBrush" GradientOrigin="0.5,0.5" Center="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+    <GradientStop Color="#29C6B9A6" Offset="0" />
+    <GradientStop Color="#00C9BCA8" Offset="1" />
+  </RadialGradientBrush>
+
+  <!-- 顶栏/底栏工具层：最通透的一层 -->
+  <LinearGradientBrush x:Key="GlassChromeBrush" StartPoint="0,0" EndPoint="0,1">
+    <GradientStop Color="#F2FAFCFD" Offset="0" />
+    <GradientStop Color="#E6F2F7FA" Offset="1" />
+  </LinearGradientBrush>
+
+  <!-- 导航带：介于工具层与内容层之间 -->
+  <LinearGradientBrush x:Key="GlassNavBrush" StartPoint="0,0" EndPoint="0,1">
+    <GradientStop Color="#EEF6FAFC" Offset="0" />
+    <GradientStop Color="#DEF0F6F9" Offset="1" />
+  </LinearGradientBrush>
+
+  <!-- 玻璃面：卡片用更实的磨砂面，压住后面的背景，保证长说明文字可读。
+       注意透明度只作用在这一层，文字用稳定不透明色，不做整卡 Opacity 降低。 -->
+  <LinearGradientBrush x:Key="GlassCardBrush" StartPoint="0,0" EndPoint="0,1">
+    <GradientStop Color="#EEFFFFFF" Offset="0" />
+    <GradientStop Color="#E4F3F8FB" Offset="1" />
+  </LinearGradientBrush>
+
+  <!-- 边缘高光拆成两组描边画笔。
+       注意：BorderBrush 是"描边"不是"填充"，所以这里必须是竖向渐变（上亮下柔），
+       不能用 GlassEdgeBrush 那种带强白头的面渐变；否则 1px 描边会变成一条渐变实带，
+       看起来像加粗的玻璃边。光源统一来自上方，不在每张卡上放随机斑点。 -->
+  <LinearGradientBrush x:Key="GlassEdgeHBrush" StartPoint="0,0" EndPoint="0,1">
+    <GradientStop Color="#D9FFFFFF" Offset="0" />
+    <GradientStop Color="#59A0B8C4" Offset="1" />
+  </LinearGradientBrush>
+  <LinearGradientBrush x:Key="GlassEdgeVBrush" StartPoint="0,0" EndPoint="1,0">
+    <GradientStop Color="#6BADC2CD" Offset="0" />
+    <GradientStop Color="#4D9DB4C0" Offset="1" />
+  </LinearGradientBrush>
+  <!-- 顶栏/导航层的上边缘更亮一档，做出"浮动工具层"的光学边 -->
+  <LinearGradientBrush x:Key="GlassEdgeChromeBrush" StartPoint="0,0" EndPoint="0,1">
+    <GradientStop Color="#CCFFFFFF" Offset="0" />
+    <GradientStop Color="#4DA6BCC7" Offset="1" />
+  </LinearGradientBrush>
+
+  <!-- 顶边镜面高光：这一条**不是描边，是面**（横向渐变，左侧最亮、向右收敛）。
+       用途是把「光源在上方」这条统一光照约定再明确一档：描边画的是轮廓，
+       镜面画的是"玻璃被光源扫到的那一条"。只在外壳与工具层最上沿用，
+       不做成每张卡都有的随机斑点。 -->
+  <LinearGradientBrush x:Key="GlassSpecularBrush" StartPoint="0,0" EndPoint="1,0">
+    <GradientStop Color="#B3FFFFFF" Offset="0" />
+    <GradientStop Color="#66FFFFFF" Offset="0.42" />
+    <GradientStop Color="#00FFFFFF" Offset="1" />
+  </LinearGradientBrush>
+
+  <!-- 浮动选中胶囊的材质：比导航带再实一点，让"被选中的那一项"浮在导航之上。
+       它是装饰层，IsHitTestVisible 由外层 Canvas 统一设为 False，不参与命中。 -->
+  <LinearGradientBrush x:Key="GlassNavCapsuleBrush" StartPoint="0,0" EndPoint="0,1">
+    <GradientStop Color="#EEFFFFFF" Offset="0" />
+    <GradientStop Color="#E8F2F7FA" Offset="1" />
+  </LinearGradientBrush>
+
+  <!-- 玻璃面下方的柔和落影：比原来的 ShadowSoft 更淡更宽，避免"重黑边"观感 -->
+  <DropShadowEffect x:Key="GlassShadowSoft" BlurRadius="12" ShadowDepth="2" Direction="270"
+                    Color="#3D5A6B78" Opacity="0.075" RenderingBias="Performance" />
+  <DropShadowEffect x:Key="GlassShadowRaised" BlurRadius="24" ShadowDepth="3" Direction="270"
+                    Color="#3D5A6B78" Opacity="0.12" RenderingBias="Performance" />
+  <!-- 顶栏/导航层用的极淡阴影，做出"浮动"而不脏 -->
+  <DropShadowEffect x:Key="GlassShadowChrome" BlurRadius="18" ShadowDepth="2" Direction="270"
+                    Color="#3D5A6B78" Opacity="0.07" RenderingBias="Performance" />
+
+  <!-- 窗口外壳的高程落影。刻意与卡片阴影分开：外壳只有一处、要读成"整个面板浮起来"，
+       卡片有 12 处、只需要极轻的层次。混用会把 12 张卡一起压重。
+       参数按"必须完全落在 12 DIP 的外壳外边距里、不被窗口边缘硬裁"反推：
+       BlurRadius 9（高斯 sigma≈4.5）+ ShadowDepth 2，在 12 DIP 处的剩余 alpha 已低于
+       0.01，肉眼不可见，所以看不到被裁出来的硬边。
+       外壳外边距刻意取小（12 DIP 而不是 24）：窗口最小尺寸是 1180×720，
+       每边 12 已经要吃掉 2% 的内容宽度，再大会把顶部导航推到第三行。
+       这不是"越糊越好"的取舍——外壳阴影要的是"有一条明确的分界"，
+       所以宁可窄而清楚，也不要宽到被裁。 -->
+  <DropShadowEffect x:Key="GlassShadowWindow" BlurRadius="9" ShadowDepth="2" Direction="270"
+                    Color="#3D5A6B78" Opacity="0.18" RenderingBias="Performance" />
+
+  <!-- 层级圆角：窗口 22 / 主容器 20 / 卡片 18 / 字段 11 / 胶囊按高度一半 -->
+  <CornerRadius x:Key="RadiusWindow">22</CornerRadius>
+  <CornerRadius x:Key="RadiusContainer">20</CornerRadius>
+  <CornerRadius x:Key="RadiusCard">18</CornerRadius>
+  <CornerRadius x:Key="RadiusField">11</CornerRadius>
+  <!-- 控件级圆角。这三个原先是散落在各模板里的字面量（按钮 8 / 导航项 12 / 胶囊标签 16），
+       收成令牌只是为了让"层级圆角"这一套说法在磁盘上真的成立，
+       取值一个都没改，所以不会改变任何现有观感。 -->
+  <CornerRadius x:Key="RadiusControl">8</CornerRadius>
+  <CornerRadius x:Key="RadiusNav">12</CornerRadius>
+  <CornerRadius x:Key="RadiusChip">16</CornerRadius>
+  <!-- RectangleGeometry.RadiusX/RadiusY 是 Double 而不是 CornerRadius，
+       所以窗口圆角需要一份同值的 Double 形式给裁剪几何用。
+       两者必须同值：改了 RadiusWindow 就要同时改这里，否则窗口轮廓与内容裁切会错位。
+       当前都是 22。 -->
+  <sys:Double x:Key="RadiusWindowSize">22</sys:Double>
+
+  <!-- 间距节奏：4 / 8 / 12 / 16 / 24 / 32 -->
+  <sys:Double x:Key="Space1">4</sys:Double>
+  <sys:Double x:Key="Space2">8</sys:Double>
+  <sys:Double x:Key="Space3">12</sys:Double>
+  <sys:Double x:Key="Space4">16</sys:Double>
+  <sys:Double x:Key="Space5">24</sys:Double>
+  <sys:Double x:Key="Space6">32</sys:Double>
+
+  <!-- 字号阶梯：页标题 26 / 分区 17 / 卡片标题 15 / 正文 12.5 / 辅助 11 -->
+  <sys:Double x:Key="FontPage">26</sys:Double>
+  <sys:Double x:Key="FontSection">17</sys:Double>
+  <sys:Double x:Key="FontCardTitle">15</sys:Double>
+  <sys:Double x:Key="FontBody">12.5</sys:Double>
+  <sys:Double x:Key="FontCaption">11</sys:Double>
+
+  <!-- 控件高度：一般字段/按钮 36，紧急停用入口不能过小 -->
+  <sys:Double x:Key="ControlHeight">36</sys:Double>
+
+  <!-- 禁用态不透明度。原先是 15 处各自硬编码的 0.42 —— 值一个都没改，
+       收成令牌是为了让「禁用态到底多淡」有一个可审计的单点，
+       也让禁用态过渡动画有一个统一的终值可以引用。
+
+       配套约定：引用本令牌的 15 处禁用态 EnterActions（以及配对的 ExitActions 回 1）
+       都写了 FillBehavior="Stop"。理由是这两条动画的终值与触发器的静态 Setter 兜底值
+       **完全相等**（进入 = 0.42，退出 = 1），所以时钟结束即释放、属性回落到基值不会产生
+       任何视觉跳变；反之若用默认的 HoldEnd，每一个"启动时就处于禁用态"的控件都会常驻一个
+       时钟（实测 18 → 54）。这与 PageFadeIn 是同一条理由。
+       注意：不是所有保持态都能这么处理 —— 导航项选中态 SelFill、失焦遮罩的终值
+       **不等于**基值，必须靠 HoldEnd 维持，改成 Stop 会直接破坏该状态。 -->
+  <sys:Double x:Key="DisabledOpacity">0.42</sys:Double>
+
+  <!-- =======================================================================
+       1c. Motion token：统一时长与缓动，不在各处散落随机数值
+       既有缓动键（EaseSoft / EaseStandard / EaseSwitch / EaseEnter 等）在下面的
+       动效令牌区声明并保持原值，这里只补新增的时长与一个克制的选中缓动。
+       ======================================================================= -->
+  <x:Static x:Key="MotionHover" Member="app:UiMotion.Hover"/>
+  <x:Static x:Key="MotionPress" Member="app:UiMotion.Press"/>
+  <x:Static x:Key="MotionRelease" Member="app:UiMotion.Release"/>
+  <x:Static x:Key="MotionFocus" Member="app:UiMotion.Focus"/>
+  <x:Static x:Key="MotionSelect" Member="app:UiMotion.Select"/>
+  <x:Static x:Key="MotionPage" Member="app:UiMotion.Page"/>
+  <x:Static x:Key="MotionSwitch" Member="app:UiMotion.Switch"/>
+  <x:Static x:Key="MotionStatus" Member="app:UiMotion.Status"/>
+  <x:Static x:Key="MotionExpand" Member="app:UiMotion.Expand"/>
+  <x:Static x:Key="MotionPopup" Member="app:UiMotion.Popup"/>
+
+  <!-- 给"移动的选中指示面"用的克制弹簧：过冲比 EaseSwitch 更小 -->
+  <BackEase x:Key="EaseSelect" EasingMode="EaseOut" Amplitude="0.18" />
+
+
+  <SolidColorBrush x:Key="HoverBrush" Color="#EFF4F6" />
+  <SolidColorBrush x:Key="AccentWashBrush" Color="#F2F6F7" />
+  <SolidColorBrush x:Key="AccentLineBrush" Color="#B9CDD5" />
+  <!-- 激活窗口“赞助版”对比卡的浅底与边线（原为字面量，值未改，只是收成令牌） -->
+  <SolidColorBrush x:Key="AccentTintBrush" Color="#F4F8F9" />
+  <SolidColorBrush x:Key="AccentEdgeBrush" Color="#A8C3CC" />
+  <SolidColorBrush x:Key="FieldBrush" Color="#FFFFFF" />
+  <!-- 输入框边线单独一档：白底白面时边线是唯一的边界线索，原 #B9CDD5 对白底只有 1.65:1。
+       #96B0BB 是同一个色相向主色混 30% 得到的，对白底 2.28:1，明显看得清又不显得加粗。
+       没有取到 WCAG 非文本 3:1 是有意的：3:1 需要 #7494A0 这种深度，会让 170 个输入框的
+       边框整体变重，与「保留原有观感」冲突。此处按「明显改善 + 不改变整体气质」取舍。 -->
+  <SolidColorBrush x:Key="FieldLineBrush" Color="#96B0BB" />
+  <SolidColorBrush x:Key="SuccessSoftBrush" Color="#EDF8F2" />
+  <SolidColorBrush x:Key="SuccessLineBrush" Color="#CDE8D8" />
+  <SolidColorBrush x:Key="WarningSoftBrush" Color="#FFF9EA" />
+  <SolidColorBrush x:Key="WarningLineBrush" Color="#ECD9A8" />
+  <SolidColorBrush x:Key="DangerSoftBrush" Color="#FCE8EA" />
+  <SolidColorBrush x:Key="DangerLineBrush" Color="#E8A6AE" />
+  <!-- 面板内的次级填充/边线：原先散落在 MainWindow 里的字面量，值未改，只是收成令牌，
+       避免同一颜色在多处各写一遍导致后续改色漏改。 -->
+  <SolidColorBrush x:Key="SurfaceBrush" Color="#F1F5F7" />
+  <SolidColorBrush x:Key="SurfaceBorderBrush" Color="#D6E3E8" />
+  <SolidColorBrush x:Key="FieldBorderBrush" Color="#D2E0E5" />
+  <!-- 进度条轨道：比 AccentSoftBrush 略深，保证浅色面上仍能看清轨道范围 -->
+  <SolidColorBrush x:Key="ProgressTrackBrush" Color="#EBEFF1" />
+  <!-- 功能卡右上角状态胶囊的四态底色（原先硬编码在 MainWindow 的 DataTrigger 里） -->
+  <SolidColorBrush x:Key="CardStateIdleBrush" Color="#EDF1F3" />
+  <SolidColorBrush x:Key="CardStateWaitBrush" Color="#FFF0C8" />
+  <!-- “已生效”用比 SuccessSoftBrush 更饱和一点的绿，保留原有层次差别 -->
+  <SolidColorBrush x:Key="CardStateAppliedBrush" Color="#E6F4EC" />
+  <!-- 小型“N 个”计数胶囊底色：比 HoverBrush 略深，保留原有层次差别 -->
+  <SolidColorBrush x:Key="CardStateCountBrush" Color="#EDF2F4" />
+  <SolidColorBrush x:Key="CardStateRiskBrush" Color="#FFFBFB" />
+  <SolidColorBrush x:Key="CardStateRiskSoftBrush" Color="#FFF5EF" />
+
+  <!-- =======================================================================
+       2. 阴影（描边优先，阴影只做极轻层次）
+       ======================================================================= -->
+  <DropShadowEffect x:Key="CardShadow" Color="#22404A" BlurRadius="12" ShadowDepth="1" Opacity="0.09" />
+  <DropShadowEffect x:Key="ShadowSoft" Color="#1F3A43" BlurRadius="8" ShadowDepth="1" Opacity="0.06" />
+  <DropShadowEffect x:Key="ShadowRaised" Color="#1F3A43" BlurRadius="18" ShadowDepth="3" Opacity="0.13" />
+
+  <!-- =======================================================================
+       3. 共享动效资源（契约 §4）
+       ======================================================================= -->
+  <CubicEase x:Key="EaseStandard" EasingMode="EaseOut" />
+  <CubicEase x:Key="EaseEnter" EasingMode="EaseOut" />
+  <CubicEase x:Key="EaseExit" EasingMode="EaseIn" />
+  <BackEase x:Key="EaseSwitch" Amplitude="0.28" EasingMode="EaseOut" />
+  <QuadraticEase x:Key="EaseSoft" EasingMode="EaseInOut" />
+
+  <Duration x:Key="DurationFast">0:0:0.15</Duration>
+  <Duration x:Key="DurationBase">0:0:0.18</Duration>
+  <Duration x:Key="DurationSwitch">0:0:0.22</Duration>
+  <Duration x:Key="DurationPage">0:0:0.24</Duration>
+
+  <!-- =======================================================================
+       4. 焦点视觉：2px AccentBrush 描边（替代系统虚线框）
+       · 圆角改成令牌 RadiusControl（原先写死 4）；FeatureSwitch 那种药丸控件用
+         下面的 FocusRingPill（RadiusChip），不去把共用样式拉变形。
+       · 画在 AdornerLayer 上：Margin="-2" 只向外扩，不参与布局、不改变控件测量尺寸；
+         IsHitTestVisible=False 保证不吃命中。又因为它不在控件子树里，控件自身
+         Opacity 掉到禁用态时，焦点环仍按 AccentBrush 全不透明绘制 ——
+         这正是「禁用观感但可聚焦」的控件也要看得见焦点环所需要的。
+       · 淡入用 MotionFocus + EaseEnter（MotionReduced 会把它归零）；
+         静态兜底 Opacity=1，保证不播动画时焦点环依然可见。
+         动画不写 Storyboard.TargetName：EventTrigger 的目标默认就是它所在的那个
+         Border，避免模板名字域解析带来的风险。
+       ======================================================================= -->
+  <Style x:Key="FocusRing">
+    <Setter Property="Control.Template">
+      <Setter.Value>
+        <ControlTemplate>
+          <Border Margin="-2"
+                  BorderBrush="{StaticResource AccentBrush}"
+                  BorderThickness="2"
+                  CornerRadius="{StaticResource RadiusControl}"
+                  IsHitTestVisible="False"
+                  Opacity="1"
+                  SnapsToDevicePixels="True">
+            <Border.Triggers>
+              <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     From="0" To="1" Duration="{StaticResource MotionFocus}"
+                                     EasingFunction="{StaticResource EaseEnter}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </EventTrigger>
+            </Border.Triggers>
+          </Border>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- 药丸形控件的焦点环（FeatureSwitch，高 32）：圆角取 RadiusChip（16 = 高度一半）。
+       单独一份，而不是把 FocusRing 的圆角改大 —— 方形控件上的焦点环不该被拉成药丸。 -->
+  <Style x:Key="FocusRingPill">
+    <Setter Property="Control.Template">
+      <Setter.Value>
+        <ControlTemplate>
+          <Border Margin="-2"
+                  BorderBrush="{StaticResource AccentBrush}"
+                  BorderThickness="2"
+                  CornerRadius="{StaticResource RadiusChip}"
+                  IsHitTestVisible="False"
+                  Opacity="1"
+                  SnapsToDevicePixels="True">
+            <Border.Triggers>
+              <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     From="0" To="1" Duration="{StaticResource MotionFocus}"
+                                     EasingFunction="{StaticResource EaseEnter}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </EventTrigger>
+            </Border.Triggers>
+          </Border>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- =======================================================================
+       5. 排版（隐式 TextBlock 必须保留 FontFamily 与 TextWrapping）
+       ======================================================================= -->
+  <Style x:Key="{x:Type TextBlock}" TargetType="{x:Type TextBlock}">
+    <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="TextOptions.TextFormattingMode" Value="Ideal" />
+  </Style>
+  <Style x:Key="H1" TargetType="{x:Type TextBlock}">
+    <Setter Property="FontSize" Value="28" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+  </Style>
+  <Style x:Key="SectionTitle" TargetType="{x:Type TextBlock}">
+    <Setter Property="FontSize" Value="17" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+  </Style>
+  <Style x:Key="Muted" TargetType="{x:Type TextBlock}">
+    <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+  </Style>
+  <Style x:Key="Caption" TargetType="{x:Type TextBlock}">
+    <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+    <Setter Property="FontSize" Value="10" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style x:Key="FieldLabel" TargetType="{x:Type TextBlock}">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+  </Style>
+  <Style x:Key="StatusText" TargetType="{x:Type TextBlock}">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    <Setter Property="TextWrapping" Value="NoWrap" />
+  </Style>
+
+  <!-- =======================================================================
+       6. 按钮族（Apple 质感：白面 + 1px 极浅边线 + 悬停/按下动效）
+       ======================================================================= -->
+
+  <!-- 6.1 隐式 Button：8px 圆角、白面、悬停 HoverBrush + AccentLineBrush 边线（MotionHover）、
+       按下 0.98 缩放、禁用 DisabledOpacity 透明 -->
+  <Style x:Key="{x:Type Button}" TargetType="{x:Type Button}">
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    <Setter Property="Background" Value="{StaticResource CardBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource LineBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Padding" Value="15,9" />
+    <Setter Property="FrameworkElement.Cursor" Value="Hand" />
+    <Setter Property="FrameworkElement.FocusVisualStyle" Value="{StaticResource FocusRing}" />
+    <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="SnapsToDevicePixels" Value="True" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="{x:Type Button}">
+          <Grid Name="Root" RenderTransformOrigin="0.5,0.5" SnapsToDevicePixels="True">
+            <Grid.RenderTransform>
+              <ScaleTransform ScaleX="1" ScaleY="1" />
+            </Grid.RenderTransform>
+            <Border Name="Surface"
+                    Background="{TemplateBinding Control.Background}"
+                    BorderBrush="{TemplateBinding Control.BorderBrush}"
+                    BorderThickness="{TemplateBinding Control.BorderThickness}"
+                    CornerRadius="{StaticResource RadiusControl}" />
+            <Border Name="HoverFill" Background="{StaticResource HoverBrush}" CornerRadius="{StaticResource RadiusControl}"
+                    Opacity="0" IsHitTestVisible="False" />
+            <Border Name="HoverLine" BorderBrush="{StaticResource AccentLineBrush}" BorderThickness="1"
+                    CornerRadius="{StaticResource RadiusControl}" Opacity="0" IsHitTestVisible="False" />
+            <ContentPresenter Margin="{TemplateBinding Control.Padding}"
+                              HorizontalAlignment="{TemplateBinding Control.HorizontalContentAlignment}"
+                              VerticalAlignment="{TemplateBinding Control.VerticalContentAlignment}"
+                              RecognizesAccessKey="True"
+                              TextElement.Foreground="{TemplateBinding Control.Foreground}" />
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="UIElement.IsMouseOver" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionHover}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="HoverLine" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionHover}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionHover}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="HoverLine" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionHover}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="ButtonBase.IsPressed" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="0.98" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="0.98" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="1" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseStandard}" />
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="1" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseStandard}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="UIElement.IsEnabled" Value="False">
+              <Setter Property="UIElement.Opacity" Value="{StaticResource DisabledOpacity}" />
+              <!-- 静态 Setter 兜底初始状态；过渡用 Opacity 动画（值类型，永不冻结）。
+                   目标不写 TargetName，默认就是模板父级（控件自身）。 -->
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="{StaticResource DisabledOpacity}" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- 6.2 PrimaryButton：AccentBrush 面 + 白字，悬停 AccentDarkBrush（MotionHover），按下 0.98 -->
+  <Style x:Key="PrimaryButton" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
+    <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+    <Setter Property="Foreground" Value="#FFFFFFFF" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="{x:Type Button}">
+          <Grid Name="Root" RenderTransformOrigin="0.5,0.5" SnapsToDevicePixels="True">
+            <Grid.RenderTransform>
+              <ScaleTransform ScaleX="1" ScaleY="1" />
+            </Grid.RenderTransform>
+            <Border Name="Surface"
+                    Background="{TemplateBinding Control.Background}"
+                    BorderBrush="{TemplateBinding Control.BorderBrush}"
+                    BorderThickness="{TemplateBinding Control.BorderThickness}"
+                    CornerRadius="{StaticResource RadiusControl}" />
+            <Border Name="HoverFill" Background="{StaticResource AccentDarkBrush}" CornerRadius="{StaticResource RadiusControl}"
+                    Opacity="0" IsHitTestVisible="False" />
+            <ContentPresenter Margin="{TemplateBinding Control.Padding}"
+                              HorizontalAlignment="{TemplateBinding Control.HorizontalContentAlignment}"
+                              VerticalAlignment="{TemplateBinding Control.VerticalContentAlignment}"
+                              RecognizesAccessKey="True"
+                              TextElement.Foreground="{TemplateBinding Control.Foreground}" />
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="UIElement.IsMouseOver" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionHover}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionHover}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="ButtonBase.IsPressed" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="0.98" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="0.98" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="1" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseStandard}" />
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="1" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseStandard}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="UIElement.IsEnabled" Value="False">
+              <!-- 禁用态不再只靠整体 0.42 透明度：那会让实心主色按钮塌成一条边界不清的灰条
+                   （例如未连接游戏时的“来一波”）。改为中性实色 + 次级文字，仍明确不可点，
+                   但保留按钮轮廓；文字对比度约 4.1:1。 -->
+              <Setter Property="Control.Background" Value="#E8ECEE" />
+              <Setter Property="Control.BorderBrush" Value="{StaticResource AccentLineBrush}" />
+              <Setter Property="Control.Foreground" Value="{StaticResource MutedBrush}" />
+              <Setter Property="UIElement.Opacity" Value="1" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- 6.3 DangerButton：浅危险面 + DangerBrush 文字，悬停 DangerSoftBrush/DangerLineBrush -->
+  <Style x:Key="DangerButton" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
+    <Setter Property="Background" Value="#FFF8F9" />
+    <Setter Property="Foreground" Value="{StaticResource DangerBrush}" />
+    <Setter Property="BorderBrush" Value="#E8BCC6" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="{x:Type Button}">
+          <Grid Name="Root" RenderTransformOrigin="0.5,0.5" SnapsToDevicePixels="True">
+            <Grid.RenderTransform>
+              <ScaleTransform ScaleX="1" ScaleY="1" />
+            </Grid.RenderTransform>
+            <Border Name="Surface"
+                    Background="{TemplateBinding Control.Background}"
+                    BorderBrush="{TemplateBinding Control.BorderBrush}"
+                    BorderThickness="{TemplateBinding Control.BorderThickness}"
+                    CornerRadius="{StaticResource RadiusControl}" />
+            <Border Name="HoverFill" Background="{StaticResource DangerSoftBrush}" CornerRadius="{StaticResource RadiusControl}"
+                    Opacity="0" IsHitTestVisible="False" />
+            <Border Name="HoverLine" BorderBrush="{StaticResource DangerLineBrush}" BorderThickness="1"
+                    CornerRadius="{StaticResource RadiusControl}" Opacity="0" IsHitTestVisible="False" />
+            <ContentPresenter Margin="{TemplateBinding Control.Padding}"
+                              HorizontalAlignment="{TemplateBinding Control.HorizontalContentAlignment}"
+                              VerticalAlignment="{TemplateBinding Control.VerticalContentAlignment}"
+                              RecognizesAccessKey="True"
+                              TextElement.Foreground="{TemplateBinding Control.Foreground}" />
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="UIElement.IsMouseOver" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionHover}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="HoverLine" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionHover}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionHover}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="HoverLine" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionHover}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="ButtonBase.IsPressed" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="0.98" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="0.98" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="1" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseStandard}" />
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="1" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseStandard}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="UIElement.IsEnabled" Value="False">
+              <Setter Property="UIElement.Opacity" Value="{StaticResource DisabledOpacity}" />
+              <!-- 静态 Setter 兜底初始状态；过渡用 Opacity 动画（值类型，永不冻结）。
+                   目标不写 TargetName，默认就是模板父级（控件自身）。 -->
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="{StaticResource DisabledOpacity}" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- 6.4 GhostButton：透明底、AccentDarkBrush 文字，悬停 AccentWashBrush 底 -->
+  <Style x:Key="GhostButton" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
+    <Setter Property="Background" Value="#00FFFFFF" />
+    <Setter Property="BorderBrush" Value="#00FFFFFF" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Foreground" Value="{StaticResource AccentDarkBrush}" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="{x:Type Button}">
+          <Grid Name="Root" RenderTransformOrigin="0.5,0.5" SnapsToDevicePixels="True">
+            <Grid.RenderTransform>
+              <ScaleTransform ScaleX="1" ScaleY="1" />
+            </Grid.RenderTransform>
+            <Border Name="Surface"
+                    Background="{TemplateBinding Control.Background}"
+                    BorderBrush="{TemplateBinding Control.BorderBrush}"
+                    BorderThickness="{TemplateBinding Control.BorderThickness}"
+                    CornerRadius="{StaticResource RadiusControl}" />
+            <Border Name="HoverFill" Background="{StaticResource AccentWashBrush}" CornerRadius="{StaticResource RadiusControl}"
+                    Opacity="0" IsHitTestVisible="False" />
+            <ContentPresenter Margin="{TemplateBinding Control.Padding}"
+                              HorizontalAlignment="{TemplateBinding Control.HorizontalContentAlignment}"
+                              VerticalAlignment="{TemplateBinding Control.VerticalContentAlignment}"
+                              RecognizesAccessKey="True"
+                              TextElement.Foreground="{TemplateBinding Control.Foreground}" />
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="UIElement.IsMouseOver" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionHover}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionHover}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="ButtonBase.IsPressed" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="0.98" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="0.98" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="1" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseStandard}" />
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="1" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseStandard}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="UIElement.IsEnabled" Value="False">
+              <Setter Property="UIElement.Opacity" Value="{StaticResource DisabledOpacity}" />
+              <!-- 静态 Setter 兜底初始状态；过渡用 Opacity 动画（值类型，永不冻结）。
+                   目标不写 TargetName，默认就是模板父级（控件自身）。 -->
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="{StaticResource DisabledOpacity}" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- 6.5 IconButton：32×32、圆角 8、居中图标，悬停 HoverBrush、按下 0.94 -->
+  <Style x:Key="IconButton" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
+    <Setter Property="Width" Value="32" />
+    <Setter Property="Height" Value="32" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Background" Value="#00FFFFFF" />
+    <Setter Property="BorderBrush" Value="#00FFFFFF" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="{x:Type Button}">
+          <Grid Name="Root" RenderTransformOrigin="0.5,0.5" SnapsToDevicePixels="True">
+            <Grid.RenderTransform>
+              <ScaleTransform ScaleX="1" ScaleY="1" />
+            </Grid.RenderTransform>
+            <Border Name="Surface"
+                    Background="{TemplateBinding Control.Background}"
+                    BorderBrush="{TemplateBinding Control.BorderBrush}"
+                    BorderThickness="{TemplateBinding Control.BorderThickness}"
+                    CornerRadius="{StaticResource RadiusControl}" />
+            <Border Name="HoverFill" Background="{StaticResource HoverBrush}" CornerRadius="{StaticResource RadiusControl}"
+                    Opacity="0" IsHitTestVisible="False" />
+            <ContentPresenter Margin="{TemplateBinding Control.Padding}"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center"
+                              RecognizesAccessKey="True"
+                              TextElement.Foreground="{TemplateBinding Control.Foreground}" />
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="UIElement.IsMouseOver" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionHover}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionHover}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="ButtonBase.IsPressed" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="0.94" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="0.94" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="1" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseStandard}" />
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="1" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseStandard}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="UIElement.IsEnabled" Value="False">
+              <Setter Property="UIElement.Opacity" Value="{StaticResource DisabledOpacity}" />
+              <!-- 静态 Setter 兜底初始状态；过渡用 Opacity 动画（值类型，永不冻结）。
+                   目标不写 TargetName，默认就是模板父级（控件自身）。 -->
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="{StaticResource DisabledOpacity}" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- 6.6 WindowButton：保持 42×34 外形，改为图标按钮质感（底色 MotionHover 过渡）；
+       关闭键（Foreground = DangerBrush，由 MainWindow 设置）悬停转 DangerSoftBrush 底 -->
+  <Style x:Key="WindowButton" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
+    <Setter Property="Width" Value="42" />
+    <Setter Property="Height" Value="34" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Margin" Value="3,0,0,0" />
+    <Setter Property="Background" Value="#00FFFFFF" />
+    <Setter Property="BorderBrush" Value="#00FFFFFF" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="{x:Type Button}">
+          <Grid Name="Root" RenderTransformOrigin="0.5,0.5" SnapsToDevicePixels="True">
+            <Grid.RenderTransform>
+              <ScaleTransform ScaleX="1" ScaleY="1" />
+            </Grid.RenderTransform>
+            <Border Name="Surface"
+                    Background="{TemplateBinding Control.Background}"
+                    BorderBrush="{TemplateBinding Control.BorderBrush}"
+                    BorderThickness="{TemplateBinding Control.BorderThickness}"
+                    CornerRadius="{StaticResource RadiusControl}" />
+            <Border Name="HoverFill" Background="{StaticResource HoverBrush}" CornerRadius="{StaticResource RadiusControl}"
+                    Opacity="0" IsHitTestVisible="False" />
+            <Border Name="CloseFill" Background="{StaticResource DangerSoftBrush}" CornerRadius="{StaticResource RadiusControl}"
+                    Opacity="0" IsHitTestVisible="False" />
+            <ContentPresenter Margin="{TemplateBinding Control.Padding}"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center"
+                              RecognizesAccessKey="True"
+                              TextElement.Foreground="{TemplateBinding Control.Foreground}" />
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="UIElement.IsMouseOver" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionHover}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionHover}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <!-- 关闭键：悬停且文字为 DangerBrush（同一实例，引用相等即命中） -->
+            <MultiTrigger>
+              <MultiTrigger.Conditions>
+                <Condition Property="UIElement.IsMouseOver" Value="True" />
+                <Condition Property="Control.Foreground" Value="{StaticResource DangerBrush}" />
+              </MultiTrigger.Conditions>
+              <MultiTrigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="CloseFill" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </MultiTrigger.EnterActions>
+              <MultiTrigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="CloseFill" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </MultiTrigger.ExitActions>
+            </MultiTrigger>
+            <Trigger Property="ButtonBase.IsPressed" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="0.94" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="0.94" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="1" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseStandard}" />
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="1" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseStandard}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="UIElement.IsEnabled" Value="False">
+              <Setter Property="UIElement.Opacity" Value="{StaticResource DisabledOpacity}" />
+              <!-- 静态 Setter 兜底初始状态；过渡用 Opacity 动画（值类型，永不冻结）。
+                   目标不写 TargetName，默认就是模板父级（控件自身）。 -->
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="{StaticResource DisabledOpacity}" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- =======================================================================
+       7. 输入与选择
+       ======================================================================= -->
+
+  <!-- 7.0 ProgressBar：生命/饱食度/属性条原先走原生模板（直角 + 数值变化时白色高光扫过），
+       和圆角卡片不是一套。这里改成圆角轨道 + 圆角填充。
+       颜色仍由调用处的 Foreground 决定（成功绿 / 金色 / 主色），不引入新色。
+       不自行设置 PART_Indicator 的宽度：WPF 的 ProgressBar 会按 Value/Maximum 自动算，
+       所以保留原生机制，只替换外观。 -->
+  <Style x:Key="{x:Type ProgressBar}" TargetType="{x:Type ProgressBar}">
+    <Setter Property="Background" Value="{StaticResource ProgressTrackBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="SnapsToDevicePixels" Value="True" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="{x:Type ProgressBar}">
+          <Grid Name="Root">
+            <Border Name="PART_Track"
+                    Background="{TemplateBinding Control.Background}"
+                    CornerRadius="4" />
+            <Border Name="PART_Indicator"
+                    HorizontalAlignment="Left"
+                    Background="{TemplateBinding Control.Foreground}"
+                    CornerRadius="4" />
+          </Grid>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- 7.1 TextBox：8px 圆角、白面、FieldLineBrush 边线；聚焦时边线转 AccentBrush
+       + 3px 极浅外发光（第二层 Border + Opacity 动画，不用 Effect 动画）。
+       绑定更新触发方式不变（模板不涉及 UpdateSourceTrigger）。 -->
+  <Style x:Key="{x:Type TextBox}" TargetType="{x:Type TextBox}">
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    <Setter Property="Background" Value="{StaticResource FieldBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource FieldLineBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Padding" Value="10,8" />
+    <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+    <Setter Property="FrameworkElement.Cursor" Value="IBeam" />
+    <!-- 键盘焦点环：原先只有 1px FocusLine + 3px Glow，且鼠标聚焦也会亮，
+         键盘用户分不清"焦点在哪、是不是键盘焦点"。这里补一个 2px 的 FocusVisualStyle
+         （只在键盘聚焦时出现），与悬停/鼠标聚焦的浅色提示区分开；
+         它画在 AdornerLayer 上，不参与布局、不吃命中，也不随控件 Opacity 变淡。 -->
+    <Setter Property="FrameworkElement.FocusVisualStyle" Value="{StaticResource FocusRing}" />
+    <Setter Property="TextBoxBase.SelectionBrush" Value="#BCD0D8" />
+    <Setter Property="SnapsToDevicePixels" Value="True" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="{x:Type TextBox}">
+          <Grid SnapsToDevicePixels="True">
+            <Border Name="Glow" Margin="-3" CornerRadius="{StaticResource RadiusField}"
+                    BorderBrush="{StaticResource AccentLineBrush}" BorderThickness="3"
+                    Opacity="0" IsHitTestVisible="False" />
+            <Border Name="Surface"
+                    Background="{TemplateBinding Control.Background}"
+                    BorderBrush="{TemplateBinding Control.BorderBrush}"
+                    BorderThickness="{TemplateBinding Control.BorderThickness}"
+                    CornerRadius="{StaticResource RadiusControl}"
+                    Padding="{TemplateBinding Control.Padding}">
+              <ScrollViewer x:Name="PART_ContentHost" Focusable="False"
+                            HorizontalScrollBarVisibility="Hidden"
+                            VerticalScrollBarVisibility="Hidden" />
+            </Border>
+            <Border Name="HoverLine" CornerRadius="{StaticResource RadiusControl}"
+                    BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
+                    Opacity="0" IsHitTestVisible="False" />
+            <Border Name="FocusLine" CornerRadius="{StaticResource RadiusControl}"
+                    BorderBrush="{StaticResource AccentBrush}" BorderThickness="1"
+                    Opacity="0" IsHitTestVisible="False" />
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="UIElement.IsKeyboardFocusWithin" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="FocusLine" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Glow" Storyboard.TargetProperty="Opacity"
+                                     To="0.55" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="FocusLine" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Glow" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="UIElement.IsMouseOver" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverLine" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverLine" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="UIElement.IsEnabled" Value="False">
+              <Setter Property="UIElement.Opacity" Value="{StaticResource DisabledOpacity}" />
+              <!-- 静态 Setter 兜底初始状态；过渡用 Opacity 动画（值类型，永不冻结）。
+                   目标不写 TargetName，默认就是模板父级（控件自身）。 -->
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="{StaticResource DisabledOpacity}" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- 7.2 ComboBox：与 TextBox 同族外观；完整自定义模板，保留标准行为
+       （IsEditable / PART_EditableTextBox、下拉 PART_Popup、键盘导航、ItemContainer） -->
+  <Style x:Key="{x:Type ComboBox}" TargetType="{x:Type ComboBox}">
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    <Setter Property="Background" Value="{StaticResource FieldBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource FieldLineBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Padding" Value="9,7" />
+    <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FrameworkElement.Cursor" Value="Hand" />
+    <Setter Property="FrameworkElement.FocusVisualStyle" Value="{StaticResource FocusRing}" />
+    <Setter Property="SnapsToDevicePixels" Value="True" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="{x:Type ComboBox}">
+          <Grid Name="Root" SnapsToDevicePixels="True">
+            <Border Name="Surface"
+                    Background="{TemplateBinding Control.Background}"
+                    BorderBrush="{TemplateBinding Control.BorderBrush}"
+                    BorderThickness="{TemplateBinding Control.BorderThickness}"
+                    CornerRadius="{StaticResource RadiusControl}" />
+            <Border Name="HoverFill" Background="{StaticResource HoverBrush}" CornerRadius="{StaticResource RadiusControl}"
+                    Opacity="0" IsHitTestVisible="False" />
+            <Border Name="FocusLine" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1"
+                    CornerRadius="{StaticResource RadiusControl}" Opacity="0" IsHitTestVisible="False" />
+            <Grid Margin="{TemplateBinding Control.Padding}">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+              <!-- ContentSource="Content" 与下面这几个绑定缺一不可：少了它们，ComboBox 会忽略
+                   DisplayMemberPath，直接把选中项 ToString() 画出来（记录类型会显示成
+                   "AttachmentOption { Id = …, Name = … }"）。 -->
+              <ContentPresenter x:Name="ContentSite" IsHitTestVisible="False"
+                                Content="{TemplateBinding ComboBox.SelectionBoxItem}"
+                                ContentTemplate="{TemplateBinding ComboBox.SelectionBoxItemTemplate}"
+                                ContentTemplateSelector="{TemplateBinding ComboBox.ItemTemplateSelector}"
+                                ContentStringFormat="{TemplateBinding ComboBox.SelectionBoxItemStringFormat}"
+                                ContentSource="Content"
+                                HorizontalAlignment="Left" VerticalAlignment="Center"
+                                TextElement.Foreground="{TemplateBinding Control.Foreground}" />
+              <TextBox x:Name="PART_EditableTextBox" Grid.Column="0"
+                       Style="{x:Null}" Focusable="True"
+                       Visibility="Hidden"
+                       IsReadOnly="{TemplateBinding ComboBox.IsReadOnly}"
+                       Background="Transparent" BorderThickness="0" Padding="0" Margin="0"
+                       Foreground="{TemplateBinding Control.Foreground}"
+                       VerticalContentAlignment="Center"
+                       HorizontalScrollBarVisibility="Hidden"
+                       VerticalScrollBarVisibility="Hidden">
+                <TextBox.Template>
+                  <ControlTemplate TargetType="{x:Type TextBox}">
+                    <ScrollViewer x:Name="PART_ContentHost" Focusable="False"
+                                  HorizontalScrollBarVisibility="Hidden"
+                                  VerticalScrollBarVisibility="Hidden" />
+                  </ControlTemplate>
+                </TextBox.Template>
+              </TextBox>
+              <Path x:Name="Arrow" Grid.Column="1"
+                    Data="M 0,0 L 4.5,4.5 L 9,0"
+                    Stroke="{StaticResource MutedBrush}" StrokeThickness="1.6"
+                    StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Margin="8,2,2,0" IsHitTestVisible="False"
+                    RenderTransformOrigin="0.5,0.5">
+                <Path.RenderTransform>
+                  <RotateTransform Angle="0" />
+                </Path.RenderTransform>
+              </Path>
+              <ToggleButton x:Name="DropDownToggle" Grid.ColumnSpan="2"
+                            Focusable="False" ClickMode="Press"
+                            Background="Transparent" BorderThickness="0"
+                            IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                <ToggleButton.Template>
+                  <ControlTemplate TargetType="{x:Type ToggleButton}">
+                    <Border Background="Transparent" />
+                  </ControlTemplate>
+                </ToggleButton.Template>
+              </ToggleButton>
+            </Grid>
+            <Popup x:Name="PART_Popup" Placement="Bottom" VerticalOffset="4"
+                   AllowsTransparency="True" PopupAnimation="None" Focusable="False"
+                   IsOpen="{TemplateBinding ComboBox.IsDropDownOpen}">
+              <!-- 下拉面之前是 CardBrush + LineBrush + ShadowRaised 的静态白盒：在玻璃界面里
+                   就是一块不透明白，而且完全不跟随 Solid/Tinted/Clear 材质档。
+                   这里换成 DynamicResource 的玻璃材质键（只有 DynamicResource 会被材质档整站替换）。
+                   PopupAnimation="Fade" 走的是系统动画、不受 MotionReduced 影响，
+                   改为 None + 下面这段令牌驱动的入场（Opacity + 6→0 位移，MotionPopup + EaseEnter）。
+                   入场动画挂在 Border 自己的 Style/DataTrigger 上、目标就是该 Border 本身，
+                   不写 TargetName：既避开 Popup 内元素的名字域解析风险，也不碰命中与键盘导航
+                   （只动 Opacity 与 TranslateTransform.Y，不延迟任何命令处理）。
+                   基线 Opacity=1 / Y=0，即使动画不播（减少动画时 Duration 归零）下拉也完整可见。 -->
+              <Border Name="DropDownBorder"
+                      MinWidth="{TemplateBinding FrameworkElement.ActualWidth}"
+                      MaxHeight="{TemplateBinding ComboBox.MaxDropDownHeight}"
+                      Margin="0,0,12,12" Padding="4"
+                      Background="{DynamicResource GlassCardBrush}"
+                      BorderBrush="{DynamicResource GlassEdgeHBrush}" BorderThickness="1"
+                      CornerRadius="{StaticResource RadiusField}"
+                      Effect="{DynamicResource GlassShadowRaised}"
+                      Opacity="1" RenderTransformOrigin="0.5,0">
+                <Border.RenderTransform>
+                  <TranslateTransform Y="0" />
+                </Border.RenderTransform>
+                <Border.Style>
+                  <Style TargetType="{x:Type Border}">
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                                   Value="True">
+                        <DataTrigger.EnterActions>
+                          <BeginStoryboard>
+                            <Storyboard>
+                              <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                               From="0" To="1" FillBehavior="Stop"
+                                               Duration="{StaticResource MotionPopup}" EasingFunction="{StaticResource EaseEnter}" />
+                              <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                                               From="6" To="0" FillBehavior="Stop"
+                                               Duration="{StaticResource MotionPopup}" EasingFunction="{StaticResource EaseEnter}" />
+                            </Storyboard>
+                          </BeginStoryboard>
+                        </DataTrigger.EnterActions>
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </Border.Style>
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained" />
+                </ScrollViewer>
+              </Border>
+            </Popup>
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="UIElement.IsMouseOver" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="UIElement.IsKeyboardFocusWithin" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="FocusLine" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="FocusLine" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="ComboBox.IsDropDownOpen" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Arrow"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)"
+                                     To="180" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseStandard}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Arrow"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)"
+                                     To="0" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseStandard}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="ComboBox.IsEditable" Value="True">
+              <Setter TargetName="PART_EditableTextBox" Property="UIElement.Visibility" Value="Visible" />
+              <Setter TargetName="ContentSite" Property="UIElement.Visibility" Value="Hidden" />
+            </Trigger>
+            <Trigger Property="UIElement.IsEnabled" Value="False">
+              <Setter Property="UIElement.Opacity" Value="{StaticResource DisabledOpacity}" />
+              <!-- 静态 Setter 兜底初始状态；过渡用 Opacity 动画（值类型，永不冻结）。
+                   目标不写 TargetName，默认就是模板父级（控件自身）。 -->
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="{StaticResource DisabledOpacity}" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- 7.3 ComboBoxItem：下拉项（悬停 HoverBrush，选中 AccentSoftBrush） -->
+  <Style x:Key="{x:Type ComboBoxItem}" TargetType="{x:Type ComboBoxItem}">
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    <Setter Property="Padding" Value="9,6" />
+    <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FrameworkElement.Cursor" Value="Hand" />
+    <!-- 下拉项原先没有任何焦点视觉：键盘上下选择时看不出焦点落在哪一项。
+         补 2px FocusRing（仅键盘聚焦出现），与 IsHighlighted 的 HoverFill 区分开。 -->
+    <Setter Property="FrameworkElement.FocusVisualStyle" Value="{StaticResource FocusRing}" />
+    <Setter Property="SnapsToDevicePixels" Value="True" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="{x:Type ComboBoxItem}">
+          <Grid MinHeight="30" SnapsToDevicePixels="True">
+            <Border Name="Surface" Background="Transparent" CornerRadius="{StaticResource RadiusControl}" Margin="2" />
+            <Border Name="HoverFill" Background="{StaticResource HoverBrush}" CornerRadius="{StaticResource RadiusControl}" Margin="2"
+                    Opacity="0" IsHitTestVisible="False" />
+            <Border Name="SelFill" Background="{StaticResource AccentSoftBrush}" CornerRadius="{StaticResource RadiusControl}" Margin="2"
+                    Opacity="0" IsHitTestVisible="False" />
+            <ContentPresenter Margin="{TemplateBinding Control.Padding}"
+                              HorizontalAlignment="Left" VerticalAlignment="Center"
+                              RecognizesAccessKey="True"
+                              TextElement.Foreground="{TemplateBinding Control.Foreground}" />
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="ComboBoxItem.IsHighlighted" Value="True">
+              <Setter TargetName="HoverFill" Property="UIElement.Opacity" Value="1" />
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="Selector.IsSelected" Value="True">
+              <Setter TargetName="SelFill" Property="UIElement.Opacity" Value="1" />
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="SelFill" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="SelFill" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="UIElement.IsEnabled" Value="False">
+              <Setter Property="UIElement.Opacity" Value="{StaticResource DisabledOpacity}" />
+              <!-- 静态 Setter 兜底初始状态；过渡用 Opacity 动画（值类型，永不冻结）。
+                   目标不写 TargetName，默认就是模板父级（控件自身）。 -->
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="{StaticResource DisabledOpacity}" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- 7.4 CheckBox：16×16、圆角 4、选中填充 AccentBrush + 白色对勾（150ms 过渡） -->
+  <Style x:Key="{x:Type CheckBox}" TargetType="{x:Type CheckBox}">
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    <Setter Property="FrameworkElement.Cursor" Value="Hand" />
+    <Setter Property="FrameworkElement.FocusVisualStyle" Value="{StaticResource FocusRing}" />
+    <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="SnapsToDevicePixels" Value="True" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="{x:Type CheckBox}">
+          <Grid SnapsToDevicePixels="True">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <!-- 复选框视觉核心：16x16 圆角方框 + 白勾/短横。
+                 方框与右侧文字必须使用同一个垂直对齐来源（控件的 VerticalContentAlignment），
+                 否则在高于 16px 的容器里方框居中、文字贴顶，视觉上就是"方框没贴合文字"。
+                 默认值 Center 由 WPF 的 CheckBox 提供，两种状态在 16px / 60px 容器下都对齐。 -->
+            <Grid x:Name="BoxHost" Width="16" Height="16"
+                  HorizontalAlignment="Left" VerticalAlignment="{TemplateBinding Control.VerticalContentAlignment}"
+                  RenderTransformOrigin="0.5,0.5">
+              <Grid.RenderTransform>
+                <ScaleTransform ScaleX="1" ScaleY="1" />
+              </Grid.RenderTransform>
+              <Border Name="Box" CornerRadius="4"
+                      Background="{StaticResource FieldBrush}"
+                      BorderBrush="{StaticResource FieldLineBrush}"
+                      BorderThickness="1" />
+              <Border Name="BoxHover" CornerRadius="4"
+                      BorderBrush="{StaticResource AccentLineBrush}"
+                      BorderThickness="1" Opacity="0" />
+              <Border Name="BoxFill" CornerRadius="4"
+                      Background="{StaticResource AccentBrush}" Opacity="0" />
+              <Path Name="Check" Data="M 3.4,8.2 L 6.5,11.2 L 12.6,5.1"
+                    Stroke="#FFFFFFFF" StrokeThickness="1.8"
+                    StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                    HorizontalAlignment="Left" VerticalAlignment="Top" Opacity="0" />
+              <Path Name="Dash" Data="M 4,8 L 12,8"
+                    Stroke="#FFFFFFFF" StrokeThickness="1.8"
+                    StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                    HorizontalAlignment="Left" VerticalAlignment="Top" Opacity="0" />
+            </Grid>
+            <ContentPresenter Grid.Column="1" Margin="7,0,0,0"
+                              VerticalAlignment="{TemplateBinding Control.VerticalContentAlignment}"
+                              RecognizesAccessKey="True"
+                              TextElement.Foreground="{TemplateBinding Control.Foreground}" />
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="ToggleButton.IsChecked" Value="True">
+              <Setter TargetName="BoxFill" Property="UIElement.Opacity" Value="1" />
+              <Setter TargetName="Check" Property="UIElement.Opacity" Value="1" />
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="BoxFill" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Check" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="BoxFill" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Check" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="ToggleButton.IsChecked" Value="{x:Null}">
+              <!-- 半选原先只有裸 Setter，勾选态却有动画，两态切换的观感不一致。
+                   这里补上与勾选态同构的 Opacity 过渡（静态 Setter 仍作初始兜底）。 -->
+              <Setter TargetName="BoxFill" Property="UIElement.Opacity" Value="1" />
+              <Setter TargetName="Dash" Property="UIElement.Opacity" Value="1" />
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="BoxFill" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Dash" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="BoxFill" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Dash" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="UIElement.IsMouseOver" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="BoxHover" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="BoxHover" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="ButtonBase.IsPressed" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="BoxHost"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="0.9" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="BoxHost"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="0.9" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="BoxHost"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSwitch}" />
+                    <DoubleAnimation Storyboard.TargetName="BoxHost"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSwitch}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="UIElement.IsEnabled" Value="False">
+              <Setter Property="UIElement.Opacity" Value="{StaticResource DisabledOpacity}" />
+              <!-- 静态 Setter 兜底初始状态；过渡用 Opacity 动画（值类型，永不冻结）。
+                   目标不写 TargetName，默认就是模板父级（控件自身）。 -->
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="{StaticResource DisabledOpacity}" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- 7.5 ScrollBar：宽/高 10、滑块圆角 5 #D6DEE1、悬停 AccentLineBrush、无箭头按钮；
+       同一模板同时支持 Vertical / Horizontal（Track 方向 + Page 命令随方向切换） -->
+  <Style x:Key="{x:Type ScrollBar}" TargetType="{x:Type ScrollBar}">
+    <Setter Property="Background" Value="#00FFFFFF" />
+    <Setter Property="Width" Value="10" />
+    <Setter Property="SnapsToDevicePixels" Value="True" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="{x:Type ScrollBar}">
+          <Grid Name="Root" Background="{TemplateBinding Control.Background}">
+            <Track x:Name="PART_Track" Focusable="False"
+                   Orientation="{TemplateBinding ScrollBar.Orientation}"
+                   IsDirectionReversed="True">
+              <Track.DecreaseRepeatButton>
+                <RepeatButton x:Name="PageDecrease" Command="ScrollBar.PageUpCommand"
+                              Focusable="False" IsTabStop="False" Opacity="0">
+                  <RepeatButton.Template>
+                    <ControlTemplate TargetType="{x:Type RepeatButton}">
+                      <Border Background="Transparent" />
+                    </ControlTemplate>
+                  </RepeatButton.Template>
+                </RepeatButton>
+              </Track.DecreaseRepeatButton>
+              <Track.Thumb>
+                <Thumb x:Name="Thumb">
+                  <Thumb.Template>
+                    <ControlTemplate TargetType="{x:Type Thumb}">
+                      <Grid Margin="2" Background="Transparent">
+                        <Border Name="Bar" CornerRadius="5" Background="#D6DEE1" />
+                        <Border Name="BarHover" CornerRadius="5"
+                                Background="{StaticResource AccentLineBrush}" Opacity="0" />
+                      </Grid>
+                      <ControlTemplate.Triggers>
+                        <Trigger Property="UIElement.IsMouseOver" Value="True">
+                          <Trigger.EnterActions>
+                            <BeginStoryboard>
+                              <Storyboard>
+                                <DoubleAnimation Storyboard.TargetName="BarHover" Storyboard.TargetProperty="Opacity"
+                                                 To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                              </Storyboard>
+                            </BeginStoryboard>
+                          </Trigger.EnterActions>
+                          <Trigger.ExitActions>
+                            <BeginStoryboard>
+                              <Storyboard>
+                                <DoubleAnimation Storyboard.TargetName="BarHover" Storyboard.TargetProperty="Opacity"
+                                                 To="0" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                              </Storyboard>
+                            </BeginStoryboard>
+                          </Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="Thumb.IsDragging" Value="True">
+                          <Setter TargetName="BarHover" Property="UIElement.Opacity" Value="1" />
+                        </Trigger>
+                      </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                  </Thumb.Template>
+                </Thumb>
+              </Track.Thumb>
+              <Track.IncreaseRepeatButton>
+                <RepeatButton x:Name="PageIncrease" Command="ScrollBar.PageDownCommand"
+                              Focusable="False" IsTabStop="False" Opacity="0">
+                  <RepeatButton.Template>
+                    <ControlTemplate TargetType="{x:Type RepeatButton}">
+                      <Border Background="Transparent" />
+                    </ControlTemplate>
+                  </RepeatButton.Template>
+                </RepeatButton>
+              </Track.IncreaseRepeatButton>
+            </Track>
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="ScrollBar.Orientation" Value="Vertical">
+              <Setter TargetName="Thumb" Property="FrameworkElement.MinHeight" Value="18" />
+            </Trigger>
+            <Trigger Property="ScrollBar.Orientation" Value="Horizontal">
+              <Setter TargetName="PART_Track" Property="Track.IsDirectionReversed" Value="False" />
+              <Setter TargetName="PageDecrease" Property="ButtonBase.Command" Value="ScrollBar.PageLeftCommand" />
+              <Setter TargetName="PageIncrease" Property="ButtonBase.Command" Value="ScrollBar.PageRightCommand" />
+              <Setter TargetName="Thumb" Property="FrameworkElement.MinWidth" Value="18" />
+            </Trigger>
+            <Trigger Property="UIElement.IsEnabled" Value="False">
+              <Setter Property="UIElement.Opacity" Value="{StaticResource DisabledOpacity}" />
+              <!-- 静态 Setter 兜底初始状态；过渡用 Opacity 动画（值类型，永不冻结）。
+                   目标不写 TargetName，默认就是模板父级（控件自身）。 -->
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="{StaticResource DisabledOpacity}" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+    <Style.Triggers>
+      <Trigger Property="ScrollBar.Orientation" Value="Horizontal">
+        <Setter Property="Width" Value="Auto" />
+        <Setter Property="Height" Value="10" />
+      </Trigger>
+    </Style.Triggers>
+  </Style>
+
+  <!-- =======================================================================
+       8. 列表 / 导航（切换选项动画）
+       ======================================================================= -->
+
+  <!-- 8.1 NavListItem：最小高度 44px、左侧 3px 主色指示条（EaseSwitch 展开）、
+       选中底色 180ms 过渡、文字颜色过渡到 AccentDarkBrush、悬停 HoverBrush、
+       按下轻微缩放。29×29 图标底与 13px 半粗标题由 MainWindow 的 ItemTemplate
+       提供（同一 ItemContainerStyle 不得重复渲染内容）。 -->
+  <Style x:Key="NavListItem" TargetType="{x:Type ListBoxItem}">
+    <Setter Property="Padding" Value="20,12" />
+    <Setter Property="Margin" Value="0,1" />
+    <Setter Property="MinHeight" Value="44" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="FrameworkElement.Cursor" Value="Hand" />
+    <Setter Property="FrameworkElement.FocusVisualStyle" Value="{StaticResource FocusRing}" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+    <Setter Property="SnapsToDevicePixels" Value="True" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="{x:Type ListBoxItem}">
+          <Grid Name="Root" MinHeight="44" RenderTransformOrigin="0.5,0.5" SnapsToDevicePixels="True">
+            <Grid.RenderTransform>
+              <ScaleTransform ScaleX="1" ScaleY="1" />
+            </Grid.RenderTransform>
+              <Border Name="Surface" Background="Transparent" CornerRadius="{StaticResource RadiusNav}" Margin="6,2,8,2" />
+              <Border Name="HoverFill" Background="{StaticResource HoverBrush}" CornerRadius="{StaticResource RadiusNav}" Margin="6,2,8,2"
+                    Opacity="0" IsHitTestVisible="False" />
+              <Border Name="SelFill" Background="{StaticResource AccentWashBrush}" CornerRadius="{StaticResource RadiusNav}" Margin="6,2,8,2"
+                    Opacity="0" IsHitTestVisible="False" />
+            <Border Name="Indicator" Width="3" HorizontalAlignment="Left" Margin="6,9,0,9"
+                    CornerRadius="0,2,2,0" Background="{StaticResource AccentBrush}"
+                    RenderTransformOrigin="0,0.5">
+              <Border.RenderTransform>
+                <ScaleTransform ScaleX="0" ScaleY="1" />
+              </Border.RenderTransform>
+            </Border>
+            <ContentPresenter Name="Content" Margin="{TemplateBinding Control.Padding}"
+                              HorizontalAlignment="{TemplateBinding Control.HorizontalContentAlignment}"
+                              VerticalAlignment="Center">
+              <TextElement.Foreground>
+                <SolidColorBrush Color="#251F2A" />
+              </TextElement.Foreground>
+            </ContentPresenter>
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="UIElement.IsMouseOver" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="ListBoxItem.IsSelected" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="SelFill" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Indicator"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="1" Duration="{StaticResource MotionExpand}" EasingFunction="{StaticResource EaseSwitch}" />
+                    <ColorAnimation Storyboard.TargetName="Content"
+                                    Storyboard.TargetProperty="(TextElement.Foreground).(SolidColorBrush.Color)"
+                                    To="#32525E" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="SelFill" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Indicator"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="0" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                    <ColorAnimation Storyboard.TargetName="Content"
+                                    Storyboard.TargetProperty="(TextElement.Foreground).(SolidColorBrush.Color)"
+                                    To="#251F2A" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="ButtonBase.IsPressed" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="0.98" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="0.98" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="1" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseStandard}" />
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="1" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseStandard}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="UIElement.IsEnabled" Value="False">
+              <Setter Property="UIElement.Opacity" Value="{StaticResource DisabledOpacity}" />
+              <!-- 静态 Setter 兜底初始状态；过渡用 Opacity 动画（值类型，永不冻结）。
+                   目标不写 TargetName，默认就是模板父级（控件自身）。 -->
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="{StaticResource DisabledOpacity}" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- 8.2 OptionListItem：长列表选项（实时目录 / 分类 / 传送点 / 岛屿 / 成员）。
+       选中：AccentWashBrush 底 + 左侧 3px 指示条（ScaleX 展开，EaseSwitch）+ 文字
+       AccentDarkBrush；悬停 HoverBrush；指示条与底色都是动画而非瞬间切换。 -->
+  <Style x:Key="OptionListItem" TargetType="{x:Type ListBoxItem}">
+    <Setter Property="Padding" Value="10,7" />
+    <Setter Property="Margin" Value="0,1" />
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="FrameworkElement.Cursor" Value="Hand" />
+    <Setter Property="FrameworkElement.FocusVisualStyle" Value="{StaticResource FocusRing}" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+    <Setter Property="SnapsToDevicePixels" Value="True" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="{x:Type ListBoxItem}">
+          <Grid Name="Root" MinHeight="32" RenderTransformOrigin="0.5,0.5" SnapsToDevicePixels="True">
+            <Grid.RenderTransform>
+              <ScaleTransform ScaleX="1" ScaleY="1" />
+            </Grid.RenderTransform>
+            <Border Name="Surface" Background="Transparent" CornerRadius="{StaticResource RadiusControl}" Margin="1,0,1,0" />
+            <Border Name="HoverFill" Background="{StaticResource HoverBrush}" CornerRadius="{StaticResource RadiusControl}" Margin="1,0,1,0"
+                    Opacity="0" IsHitTestVisible="False" />
+            <Border Name="SelFill" Background="{StaticResource AccentWashBrush}" CornerRadius="{StaticResource RadiusControl}" Margin="1,0,1,0"
+                    Opacity="0" IsHitTestVisible="False" />
+            <Border Name="Indicator" Width="3" HorizontalAlignment="Left" Margin="1,5,0,5"
+                    CornerRadius="0,2,2,0" Background="{StaticResource AccentBrush}"
+                    RenderTransformOrigin="0,0.5">
+              <Border.RenderTransform>
+                <ScaleTransform ScaleX="0" ScaleY="1" />
+              </Border.RenderTransform>
+            </Border>
+            <ContentPresenter Name="Content" Margin="{TemplateBinding Control.Padding}"
+                              HorizontalAlignment="{TemplateBinding Control.HorizontalContentAlignment}"
+                              VerticalAlignment="Center">
+              <TextElement.Foreground>
+                <SolidColorBrush Color="#251F2A" />
+              </TextElement.Foreground>
+            </ContentPresenter>
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="UIElement.IsMouseOver" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="ListBoxItem.IsSelected" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="SelFill" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Indicator"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="1" Duration="{StaticResource MotionExpand}" EasingFunction="{StaticResource EaseSwitch}" />
+                    <ColorAnimation Storyboard.TargetName="Content"
+                                    Storyboard.TargetProperty="(TextElement.Foreground).(SolidColorBrush.Color)"
+                                    To="#32525E" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="SelFill" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Indicator"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="0" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                    <ColorAnimation Storyboard.TargetName="Content"
+                                    Storyboard.TargetProperty="(TextElement.Foreground).(SolidColorBrush.Color)"
+                                    To="#251F2A" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="ButtonBase.IsPressed" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="0.99" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="0.99" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseStandard}" />
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseStandard}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="UIElement.IsEnabled" Value="False">
+              <Setter Property="UIElement.Opacity" Value="{StaticResource DisabledOpacity}" />
+              <!-- 静态 Setter 兜底初始状态；过渡用 Opacity 动画（值类型，永不冻结）。
+                   目标不写 TargetName，默认就是模板父级（控件自身）。 -->
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="{StaticResource DisabledOpacity}" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- 8.3 ChipListItem：紧凑药丸（分类 / 稀有度 / 轮盘选项）。
+       选中：AccentBrush 底 + 白字（底色 MotionRelease 过渡 + 轻微缩放回弹）；按下 0.98。 -->
+  <Style x:Key="ChipListItem" TargetType="{x:Type ListBoxItem}">
+    <Setter Property="Padding" Value="12,4" />
+    <Setter Property="Margin" Value="0,0,6,6" />
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="FrameworkElement.Cursor" Value="Hand" />
+    <Setter Property="FrameworkElement.FocusVisualStyle" Value="{StaticResource FocusRing}" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+    <Setter Property="SnapsToDevicePixels" Value="True" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="{x:Type ListBoxItem}">
+          <Grid Name="Root" RenderTransformOrigin="0.5,0.5" SnapsToDevicePixels="True">
+            <Grid.RenderTransform>
+              <ScaleTransform ScaleX="1" ScaleY="1" />
+            </Grid.RenderTransform>
+            <Border Name="Surface" Background="{StaticResource CardBrush}"
+                    BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
+                    CornerRadius="{StaticResource RadiusChip}" />
+            <Border Name="HoverFill" Background="{StaticResource HoverBrush}" CornerRadius="{StaticResource RadiusChip}"
+                    Opacity="0" IsHitTestVisible="False" />
+            <Border Name="SelFill" Background="{StaticResource AccentBrush}" CornerRadius="{StaticResource RadiusChip}"
+                    Opacity="0" IsHitTestVisible="False" />
+            <ContentPresenter Name="Content" Margin="{TemplateBinding Control.Padding}"
+                              HorizontalAlignment="Center" VerticalAlignment="Center">
+              <TextElement.Foreground>
+                <SolidColorBrush Color="#251F2A" />
+              </TextElement.Foreground>
+            </ContentPresenter>
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="UIElement.IsMouseOver" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="ListBoxItem.IsSelected" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="SelFill" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseSoft}" />
+                    <ColorAnimation Storyboard.TargetName="Content"
+                                    Storyboard.TargetProperty="(TextElement.Foreground).(SolidColorBrush.Color)"
+                                    To="#FFFFFF" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     From="0.96" To="1" Duration="{StaticResource MotionSwitch}" EasingFunction="{StaticResource EaseSwitch}" />
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     From="0.96" To="1" Duration="{StaticResource MotionSwitch}" EasingFunction="{StaticResource EaseSwitch}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <!-- 退出与进入用同一组时长/缓动（MotionRelease + EaseSoft），不再一快一慢。 -->
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="SelFill" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseSoft}" />
+                    <ColorAnimation Storyboard.TargetName="Content"
+                                    Storyboard.TargetProperty="(TextElement.Foreground).(SolidColorBrush.Color)"
+                                    To="#251F2A" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <!-- 按下反馈：原先 ChipListItem 只有悬停与选中，按下毫无回应。
+                 补一个与 OptionListItem 同构的按下态（0.98 + 释放回 1）。 -->
+            <Trigger Property="ButtonBase.IsPressed" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="0.98" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="0.98" Duration="{StaticResource MotionPress}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseStandard}" />
+                    <DoubleAnimation Storyboard.TargetName="Root"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseStandard}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="UIElement.IsEnabled" Value="False">
+              <Setter Property="UIElement.Opacity" Value="{StaticResource DisabledOpacity}" />
+              <!-- 静态 Setter 兜底初始状态；过渡用 Opacity 动画（值类型，永不冻结）。
+                   目标不写 TargetName，默认就是模板父级（控件自身）。 -->
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="{StaticResource DisabledOpacity}" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- 8.4 OptionListBox：透明底、无边框、隐藏横向滚动条、虚拟化 + Recycling -->
+  <Style x:Key="OptionListBox" TargetType="{x:Type ListBox}">
+    <Setter Property="Background" Value="#00FFFFFF" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+    <Setter Property="ItemContainerStyle" Value="{StaticResource OptionListItem}" />
+    <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+    <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+    <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
+    <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True" />
+    <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling" />
+  </Style>
+
+  <!-- =======================================================================
+       9. 卡片与标签
+       ======================================================================= -->
+
+  <!-- 9.1 FeatureCardStyle：玻璃磨砂卡片。
+       层级圆角 18（RadiusCard），静态渐变玻璃面 GlassCardBrush（比导航层更实，
+       保证长说明文字可读），细边缘高光 GlassEdgeBrush，阴影换成更淡更宽的 GlassShadowSoft。
+       悬停只换投影 + 1px 抬升；不动 BorderBrush，避免与 MainWindow 里基于 RiskLabel 的
+       DataTrigger（危险卡片 #E8A6AE 边线）互相覆盖。
+       MinHeight 保留 132，但要说明它并不是卡片高度的决定因素：普通功能卡的实际高度由内容
+       撑出（状态行含 32px 高的开关，内容约 129px）+ 上下内边距 + 下外边距。实测把 MinHeight
+       清零甚至设成 1，卡片高度不变，所以 MinHeight 只是兜底，不是密度旋钮。 -->
+  <Style x:Key="FeatureCardStyle" TargetType="{x:Type Border}">
+    <Setter Property="Background" Value="{DynamicResource GlassCardBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GlassEdgeHBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Border.CornerRadius" Value="{StaticResource RadiusCard}" />
+    <Setter Property="Border.Padding" Value="16,12" />
+    <Setter Property="Margin" Value="0,0,12,12" />
+    <Setter Property="MinHeight" Value="132" />
+    <Setter Property="UIElement.Effect" Value="{DynamicResource GlassShadowSoft}" />
+    <Setter Property="SnapsToDevicePixels" Value="True" />
+    <!-- 抬升用的可动画变换不再由 Style Setter 提供：Style Setter 里的 Freezable 会被 Style.Seal()
+         冻结且被所有卡片共享，对它做 (UIElement.RenderTransform).(TranslateTransform.Y) 动画会抛
+         InvalidOperationException（"该对象已密封或已冻结"）。
+         改由 CardLiftTransform.Enable 附加行为给每张卡安装一份**独享**的 TranslateTransform(0,0)，
+         主题的悬停动画因此拿到合法、可写的目标（见 App/CardLiftTransform.cs）。
+         这里删掉 RenderTransform Setter 是安全的：卡片侧没有任何一处挂本地 RenderTransform，
+         行为回调会把 RenderTransform 从 null 补上 TranslateTransform。 -->
+    <Setter Property="app:CardLiftTransform.Enable" Value="True" />
+    <!-- 说明：Border 不是 Control，没有 Template，所以做不了 rim+inset 双层模板
+         （实测 MC4005）。理论更优的写法是给每张卡再包一层内层 Border 来画连续边缘高光，
+         但那要改 MainWindow 里 12 处卡片用法并嵌套全部内容，改动面与收益不成比例。
+         复核了 6 倍放大的实际转角（verification/polish/corner-card-topleft.png）：
+         18px 圆角 + 1px 描边下上缘高光沿弧线是连续的，没有出现研究与探针里那种"脱节"。
+         因此这里保持单层 Border，改为把描边对比提上去，让边缘高光在各个方向都读得出来。 -->
+    <Style.Triggers>
+      <!-- 悬停：投影仍是静态替换（Effect 是共享 Freezable，动画它本身就会抛冻结异常）。
+           阴影变化保持瞬时是已记录的取舍 —— 平滑的位移现在承担了交互反馈。
+           抬升改为真正的动画：目标 (UIElement.RenderTransform).(TranslateTransform.Y) 由上面的
+           CardLiftTransform.Enable 附加行为为每张卡单独安装 TranslateTransform，路径因此可解析。
+           绝不能用 Setter 去替换 RenderTransform —— 那会让正在运行的动画失去目标，平滑位移退化成跳变
+           （与 FeatureSwitch 里记录的是同一条规则）。 -->
+      <Trigger Property="UIElement.IsMouseOver" Value="True">
+        <Setter Property="UIElement.Effect" Value="{DynamicResource GlassShadowRaised}" />
+        <Trigger.EnterActions>
+          <BeginStoryboard>
+            <Storyboard>
+              <!-- 默认 FillBehavior（HoldEnd）：悬停期间保持抬升。 -->
+              <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                               To="-2" Duration="{StaticResource MotionHover}" EasingFunction="{StaticResource EaseStandard}" />
+            </Storyboard>
+          </BeginStoryboard>
+        </Trigger.EnterActions>
+        <Trigger.ExitActions>
+          <BeginStoryboard>
+            <Storyboard>
+              <!-- 退出用 FillBehavior="Stop" 释放时钟，Y 回到基础值 0；基础值正是退出目标，故无视觉跳变
+                   （与 PageFadeIn 的处理一致）。 -->
+              <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                               To="0" FillBehavior="Stop" Duration="{StaticResource MotionHover}" EasingFunction="{StaticResource EaseStandard}" />
+            </Storyboard>
+          </BeginStoryboard>
+        </Trigger.ExitActions>
+      </Trigger>
+      <Trigger Property="UIElement.IsEnabled" Value="False">
+        <Setter Property="UIElement.Opacity" Value="{StaticResource DisabledOpacity}" />
+        <Trigger.EnterActions>
+          <BeginStoryboard>
+            <Storyboard>
+              <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                               To="{StaticResource DisabledOpacity}" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+            </Storyboard>
+          </BeginStoryboard>
+        </Trigger.EnterActions>
+        <Trigger.ExitActions>
+          <BeginStoryboard>
+            <Storyboard>
+              <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                               To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+            </Storyboard>
+          </BeginStoryboard>
+        </Trigger.ExitActions>
+      </Trigger>
+    </Style.Triggers>
+  </Style>
+
+  <!-- 9.2 Pill：药丸标签（圆角取 RadiusChip=16、内边距 8,3、AccentSoftBrush 底） -->
+  <Style x:Key="Pill" TargetType="{x:Type Border}">
+    <Setter Property="Background" Value="{StaticResource AccentSoftBrush}" />
+    <Setter Property="Border.CornerRadius" Value="{StaticResource RadiusChip}" />
+    <Setter Property="Border.Padding" Value="8,3" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="SnapsToDevicePixels" Value="True" />
+  </Style>
+
+  <!-- =======================================================================
+       10. FeatureSwitch（68×32，可动效开关）
+         · 轨道：椭圆（CornerRadius 16）；关 #E2E7E9、开 AccentBrush，220ms 颜色过渡
+           —— 用两层轨道叠层 + Opacity 动画实现（见文件头说明：主题画刷会被冻结，
+              对它们做 Color 动画会抛 InvalidOperationException）。
+         · 白色圆形滑块：TranslateTransform.X 0 → 36 位移动画（EaseSwitch 回弹，220ms），
+           不再用 HorizontalAlignment/Margin 触发器瞬间跳变。
+         · 开/关 文字：两个 TextBlock 交叉淡入淡出（Opacity + ScaleTransform）。
+         · 悬停：轨道轻微提亮（白色 Sheen 层 0.10）；禁用：整体 Opacity 0.42。
+       ======================================================================= -->
+  <Style x:Key="FeatureSwitch" TargetType="{x:Type ToggleButton}">
+    <Setter Property="Width" Value="68" />
+    <Setter Property="Height" Value="32" />
+    <Setter Property="Background" Value="#E2E7E9" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="FrameworkElement.Cursor" Value="Hand" />
+    <Setter Property="FrameworkElement.FocusVisualStyle" Value="{StaticResource FocusRingPill}" />
+    <Setter Property="SnapsToDevicePixels" Value="True" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="{x:Type ToggleButton}">
+          <!-- 可动画的轨道画笔：模板私有资源，避免直接动画主题画刷（冻结） -->
+          <ControlTemplate.Resources>
+            <SolidColorBrush x:Key="SwitchTrackOff" Color="#E2E7E9" />
+            <SolidColorBrush x:Key="SwitchTrackOn" Color="#466E7D" />
+          </ControlTemplate.Resources>
+          <Grid Name="Root" Width="68" Height="32" Background="Transparent">
+            <Border Name="Track" Background="{StaticResource SwitchTrackOff}" CornerRadius="{StaticResource RadiusChip}" />
+            <Border Name="TrackOn" Background="{StaticResource SwitchTrackOn}" CornerRadius="{StaticResource RadiusChip}" Opacity="0" />
+            <Border Name="Sheen" Background="#FFFFFF" CornerRadius="{StaticResource RadiusChip}" Opacity="0" IsHitTestVisible="False" />
+            <TextBlock Name="OffLabel" Text="关" Foreground="#6F787C" FontSize="10" FontWeight="SemiBold"
+                       HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0"
+                       RenderTransformOrigin="0.5,0.5">
+              <UIElement.RenderTransform>
+                <ScaleTransform ScaleX="1" ScaleY="1" />
+              </UIElement.RenderTransform>
+            </TextBlock>
+            <TextBlock Name="OnLabel" Text="开" Foreground="#FFFFFFFF" FontSize="10" FontWeight="SemiBold"
+                       HorizontalAlignment="Left" VerticalAlignment="Center" Margin="11,0,0,0"
+                       Opacity="0" RenderTransformOrigin="0.5,0.5">
+              <UIElement.RenderTransform>
+                <ScaleTransform ScaleX="0.86" ScaleY="0.86" />
+              </UIElement.RenderTransform>
+            </TextBlock>
+            <Ellipse Name="Thumb" Width="24" Height="24" Fill="#FFFFFFFF"
+                     HorizontalAlignment="Left" VerticalAlignment="Center" Margin="4,0,0,0">
+              <UIElement.RenderTransform>
+                <TranslateTransform X="0" />
+              </UIElement.RenderTransform>
+              <UIElement.Effect>
+                <DropShadowEffect Color="#1B333B" BlurRadius="6" ShadowDepth="1" Opacity="0.2" />
+              </UIElement.Effect>
+            </Ellipse>
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="ToggleButton.IsChecked" Value="True">
+              <!-- 静态兜底：初始即勾选时也正确（不依赖加载期动画）。
+                   注意：这里只对值类型属性（Opacity）做静态兜底，绝不能用 Setter 去替换
+                   RenderTransform 这类 Freezable —— 替换实例会让正在运行的动画失去目标，
+                   滑块位移动画会退化成瞬间跳变。透明度与位移的一致性由动画本身保证。 -->
+              <Setter TargetName="TrackOn" Property="UIElement.Opacity" Value="1" />
+              <Setter TargetName="OnLabel" Property="UIElement.Opacity" Value="1" />
+              <Setter TargetName="OffLabel" Property="UIElement.Opacity" Value="0" />
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="TrackOn" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionSwitch}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Thumb"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
+                                     To="36" Duration="{StaticResource MotionSwitch}" EasingFunction="{StaticResource EaseSwitch}" />
+                    <DoubleAnimation Storyboard.TargetName="OffLabel" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="OffLabel"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="0.86" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="OffLabel"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="0.86" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="OnLabel" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="OnLabel"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="1" Duration="{StaticResource MotionSwitch}" EasingFunction="{StaticResource EaseSwitch}" />
+                    <DoubleAnimation Storyboard.TargetName="OnLabel"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="1" Duration="{StaticResource MotionSwitch}" EasingFunction="{StaticResource EaseSwitch}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="TrackOn" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionSwitch}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="Thumb"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
+                                     To="0" Duration="{StaticResource MotionSwitch}" EasingFunction="{StaticResource EaseSwitch}" />
+                    <DoubleAnimation Storyboard.TargetName="OnLabel" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="OnLabel"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="0.86" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="OnLabel"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="0.86" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="OffLabel" Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionRelease}" EasingFunction="{StaticResource EaseSoft}" />
+                    <DoubleAnimation Storyboard.TargetName="OffLabel"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     To="1" Duration="{StaticResource MotionSwitch}" EasingFunction="{StaticResource EaseSwitch}" />
+                    <DoubleAnimation Storyboard.TargetName="OffLabel"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="1" Duration="{StaticResource MotionSwitch}" EasingFunction="{StaticResource EaseSwitch}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="UIElement.IsMouseOver" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Sheen" Storyboard.TargetProperty="Opacity"
+                                     To="0.10" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="Sheen" Storyboard.TargetProperty="Opacity"
+                                     To="0" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+            <Trigger Property="UIElement.IsEnabled" Value="False">
+              <Setter Property="UIElement.Opacity" Value="{StaticResource DisabledOpacity}" />
+              <!-- 静态 Setter 兜底初始状态；过渡用 Opacity 动画（值类型，永不冻结）。
+                   目标不写 TargetName，默认就是模板父级（控件自身）。 -->
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="{StaticResource DisabledOpacity}" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                     To="1" Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}" FillBehavior="Stop" />
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- =======================================================================
+       11. 页面切换动效（供 MainWindow 内容区触发）
+       注意：目标元素的 RenderTransform 必须是 TranslateTransform，
+       否则第二个动画的属性路径无法解析（建议 <TranslateTransform Y="0"/>）。
+
+       这里默认的 FillBehavior=HoldEnd 会把动画时钟长期挂在 Opacity / TranslateTransform.Y 上，
+       让内容区在动画结束后依然保持 HasAnimatedProperties=true。因为两条动画的终值 1 / 0
+       恰好等于元素的静态基线值（Opacity 默认 1、TranslateTransform Y="0"），所以可以安全地
+       把填充行为关掉，让时钟在结束帧自行释放，而不会产生任何视觉跳变。
+       FillBehavior 需要逐条设在 DoubleAnimation 上：只设在 Storyboard 上不会下沉到子时间线。
+       ======================================================================= -->
+  <Storyboard x:Key="PageFadeIn">
+    <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                     From="0.72" To="1" FillBehavior="Stop"
+                     Duration="{StaticResource MotionPage}" EasingFunction="{StaticResource EaseEnter}" />
+    <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                     From="6" To="0" FillBehavior="Stop"
+                     Duration="{StaticResource MotionPage}" EasingFunction="{StaticResource EaseEnter}" />
+  </Storyboard>
+
+</ResourceDictionary>

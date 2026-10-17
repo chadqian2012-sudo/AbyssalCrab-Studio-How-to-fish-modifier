@@ -20,9 +20,9 @@ Highlights include global search, up to 50 parameter presets, item/fish favorite
 
 ## 下载 | Download
 
-请从仓库的 **Releases** 页面下载 Windows x64 自包含程序。默认整合版适合日常使用；压缩单文件版体积较小，但会在启动时解压。EXE 应作为 Release 附件发布，不应提交到 Git 历史。
+Windows x64 自包含程序应作为仓库 **Releases** 附件发布；当前源码提交不包含 EXE。默认整合版适合日常使用；压缩单文件版体积较小，但会在启动时解压。EXE 不应提交到 Git 历史。
 
-Download the Windows x64 self-contained application from the repository's **Releases** page. The default integrated build is recommended for everyday use. The compressed single-file build is smaller but extracts its payload on startup. EXE files belong in Release assets, not in Git history.
+The Windows x64 self-contained application should be published as an asset on the repository's **Releases** page; the current source commit does not include EXE files. The default integrated build is recommended for everyday use. The compressed single-file build is smaller but extracts its payload on startup. EXE files belong in Release assets, not in Git history.
 
 ## 构建 | Build
 
@@ -44,15 +44,14 @@ User settings are stored locally under `%LOCALAPPDATA%\AbyssalCrab Studio\HowToF
 
 ## 目录 | Repository layout
 
-- `source/HowToFishTrainer/` — WPF 应用源码、XAML 主题和嵌入式运行时依赖 / WPF application source, XAML themes, and embedded runtime dependencies
+- `source/HowToFishTrainer/` — WPF 应用源码和 XAML 主题；独立授权的二进制依赖未提交 / WPF application source and XAML themes; separately licensed binary dependencies are not committed
 - `build/` — 保留的构建脚本和运行时支持代码；排除生成物 / retained build scripts and runtime support code; generated output is excluded
-- `patched/`, `references/` — 当前工程使用的二进制引用 / binary references used by the current project
+- `patched/`, `references/` — 本地构建所需的二进制引用；需从获授权来源单独准备 / binary references required for a local build; obtain them separately from an authorized source
 - `release/` — 本地发布文件；EXE 作为 Release 附件发布 / local release files; publish executables as Release assets
 - `docs/` — 中英双语使用、构建、发布及验证指南 / bilingual usage, build, release, and verification guides
 
 ## 许可证 | License
 
-仓库包含创建者添加的 MIT License。它不自动替代第三方组件各自适用的许可证；分发第三方 DLL 前请核实并遵守其授权条件。
+仓库包含创建者添加的 MIT License。它不自动替代第三方组件各自适用的许可证；获取或分发第三方 DLL 前请核实并遵守其授权条件。为避免将第三方二进制误纳入 MIT 授权范围，本次源码提交不包含 DLL、EXE、图标或 PNG 文件。
 
-This repository contains the MIT License selected by its owner. It does not replace licenses that may apply to third-party components. Verify and follow the applicable terms before redistributing third-party DLLs.
-
+This repository contains the MIT License selected by its owner. It does not replace licenses that may apply to third-party components; verify and follow those terms before obtaining or redistributing third-party DLLs. DLL, EXE, icon, and PNG binaries are excluded from this source commit to avoid implying that third-party binaries are covered by the MIT License.
