@@ -12,7 +12,8 @@ public sealed partial class FeatureItemViewModel
     private ParameterValues? _pendingCatalogParameters;
     internal double LastValidSpinSpeed => _lastValidSpinSpeed;
 
-    internal IReadOnlyDictionary<string, NumericInput> ParameterInputs => Descriptor.Control switch {
+    internal IReadOnlyDictionary<string, NumericInput> ParameterInputs => IsMagicBullet ? new Dictionary<string, NumericInput> {
+        ["angle"] = MagicAngleInput, ["distance"] = MagicDistanceInput, ["strength"] = MagicStrengthInput } : Descriptor.Control switch {
         FeatureControl.Number => new Dictionary<string, NumericInput> { ["value"] = ValueInput },
         FeatureControl.Generator => new Dictionary<string, NumericInput> {
             ["quantity"] = QuantityInput, ["distance"] = DistanceInput, ["weight"] = WeightInput },
@@ -25,7 +26,16 @@ public sealed partial class FeatureItemViewModel
         var values = _pendingCatalogParameters?.Copy() ?? new ParameterValues();
         foreach (var pair in ParameterInputs) values.Put(pair.Key, pair.Value.LastValidValue);
         values.Put("saveAfter", SaveAfter);
-        if (IsSpin) values.Put("spinSpeed", _lastValidSpinSpeed);
+        if (IsMagicBullet)
+        {
+            values.Put("magicTrigger", MagicTrigger.Value);
+            values.Put("targetTeammates", MagicTargetTeammates);
+        }
+        if (IsSpin)
+        {
+            values.Put("spinSpeed", _lastValidSpinSpeed);
+            values.Put("spinAutoJump", SpinAutoJump);
+        }
         if (Descriptor.Control == FeatureControl.Generator)
         {
             values.Put("search", SearchText); values.Put("kind", SelectedKind);
@@ -80,6 +90,11 @@ public sealed partial class FeatureItemViewModel
                 Rare = values.Boolean("rare") ?? Rare;
             }
             SaveAfter = values.Boolean("saveAfter") ?? SaveAfter;
+            if (IsMagicBullet)
+            {
+                MagicTrigger = MagicTriggerModes.FirstOrDefault(t => t.Value == values.Text("magicTrigger")) ?? MagicTriggerModes[1];
+                MagicTargetTeammates = values.Boolean("targetTeammates") ?? false;
+            }
             foreach (var pair in ParameterInputs)
             {
                 if (values.Number(pair.Key) is double number && pair.Value.IsValidValue(number)) pair.Value.Value = number;
@@ -87,6 +102,7 @@ public sealed partial class FeatureItemViewModel
             }
             if (IsSpin)
             {
+                SpinAutoJump = values.Boolean("spinAutoJump") ?? false;
                 if (values.Number("spinSpeed") is double speed && speed >= 2 && speed <= 15)
                 { _lastValidSpinSpeed = speed; SpinSpeedText = speed.ToString("G", CultureInfo.InvariantCulture); }
                 if (drafts != null && drafts.TryGetValue("spinSpeed", out var draft)) SpinSpeedText = draft;

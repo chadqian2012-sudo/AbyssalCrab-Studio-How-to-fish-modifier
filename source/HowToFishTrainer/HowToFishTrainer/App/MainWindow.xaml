@@ -149,15 +149,39 @@
           <TextBlock FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Style="{StaticResource Muted}" Text="{Binding Status}" Visibility="{Binding IsStandardToggle, Converter={StaticResource BoolToVisibility}}"/>
           <ToggleButton Grid.Column="1" Margin="14,0,0,0" Style="{StaticResource FeatureSwitch}" IsChecked="{Binding Enabled, Mode=TwoWay}" IsEnabled="{Binding CanInteract}"/>
             <Grid Visibility="{Binding IsSpin, Converter={StaticResource BoolToVisibility}}" ToolTip="{Binding Status}" AutomationProperties.HelpText="{Binding Status}">
+              <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
               <!-- 转速标签（大陀螺）：「转速（圈/秒，2–15）」在 10px 下需要约 105.3 DIP，原先只有 98 DIP，
                    被 CharacterEllipsis 截掉约 7.3 DIP（独立验收矩阵实测）。这里给它一个 MinWidth 保证
                    不被压，同时补 ToolTip 作为兜底 —— 交接文档 §14 要求「字段错误不能仅省略得看不懂」。 -->
               <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" MinWidth="108"/><ColumnDefinition Width="76"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
               <TextBlock Text="转速（圈/秒，2–15）" FontSize="10" VerticalAlignment="Center" Margin="0,0,6,0" Style="{StaticResource Muted}" ToolTip="转速（圈/秒，2–15）"/>
-              <TextBox Grid.Column="1" Height="32" Padding="8,4" AutomationProperties.Name="大陀螺转速" ToolTip="每秒 2–15 圈，默认 4；开启时采用输入值，开启后点击应用转速更新" Text="{Binding SpinSpeedText, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding CanInteract}"/>
-              <Button Grid.Column="2" Height="32" Padding="10,4" Content="应用转速" Margin="8,0,0,0" Style="{StaticResource PrimaryButton}" Command="{Binding ApplySpinSpeedCommand}" IsEnabled="{Binding CanApplySpinSpeed}"/>
+              <TextBox Grid.Column="1" Height="32" Padding="8,4" AutomationProperties.Name="大陀螺转速" ToolTip="每秒 2–15 圈，默认 4；开启时采用输入值，开启后点击应用设置更新" Text="{Binding SpinSpeedText, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding CanInteract}"/>
+              <Button Grid.Column="2" Height="32" Padding="10,4" Content="应用设置" Margin="8,0,0,0" Style="{StaticResource PrimaryButton}" Command="{Binding ApplySpinSpeedCommand}" IsEnabled="{Binding CanApplySpinSpeed}"/>
+              <CheckBox Grid.Row="1" Grid.ColumnSpan="3" Margin="0,8,0,0" Content="模型自动跳跃" AutomationProperties.Name="大陀螺模型自动跳跃" IsChecked="{Binding SpinAutoJump, Mode=TwoWay}" IsEnabled="{Binding CanInteract}" ToolTip="只改变第三人称模型外观；手动跳跃优先。开启时采用选择，运行中点击应用设置更新。"/>
             </Grid>
             <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Visibility="{Binding HasSpinSpeedError, Converter={StaticResource BoolToVisibility}}" Text="{Binding SpinSpeedValidationMessage}" Foreground="{StaticResource DangerBrush}" FontSize="10" Margin="0,3,0,0"/>
+
+        </Grid>
+      </DataTemplate>
+      <DataTemplate x:Key="MagicBulletTemplate">
+        <Grid Margin="0,6,0,0">
+          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+          <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <TextBlock Text="Boss → 动物 → 玩家 · 同类优先最近" Style="{StaticResource Muted}" FontSize="10" VerticalAlignment="Center" TextWrapping="Wrap"/>
+          <ToggleButton Grid.Column="1" Style="{StaticResource FeatureSwitch}" IsChecked="{Binding Enabled, Mode=TwoWay}" IsEnabled="{Binding CanInteract}" Margin="8,0,0,0"/>
+            <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Margin="0,8,0,0">
+              <TextBlock Text="捕获角度（°） / 距离（米） / 强度（%）" Style="{StaticResource Muted}" FontSize="10" Margin="0,0,0,5"/>
+              <UniformGrid Columns="3">
+                <app:NumericInputBox Input="{Binding MagicAngleInput}" Margin="0,0,4,0"/>
+                <app:NumericInputBox Input="{Binding MagicDistanceInput}" Margin="0,0,4,0"/>
+                <app:NumericInputBox Input="{Binding MagicStrengthInput}"/>
+              </UniformGrid>
+              <ComboBox ItemsSource="{Binding MagicTriggerModes}" DisplayMemberPath="Label" SelectedItem="{Binding MagicTrigger}" Margin="0,8,0,0" AutomationProperties.Name="魔法子弹触发方式"/>
+              <CheckBox Content="锁定队友" IsChecked="{Binding MagicTargetTeammates}" IsEnabled="{Binding CanInteract}" Margin="0,8,0,0" ToolTip="勾选后把其他存活玩家加入目标；取消后排除所有队友。友伤和伤害结算仍由游戏决定，切换后立即应用。"/>
+              <Button Content="应用追踪设置" Command="{Binding ApplyMagicCommand}" IsEnabled="{Binding CanApplyMagic}" Style="{StaticResource PrimaryButton}" Margin="0,8,0,0"/>
+              <TextBlock Text="开启后显示追踪角度示意圈；随开镜视野缩放，距离仍按上方米数筛选。" Style="{StaticResource Muted}" TextWrapping="Wrap" FontSize="10" Margin="0,6,0,0"/>
+              <TextBlock Text="{Binding Status}" Style="{StaticResource Muted}" TextWrapping="Wrap" FontSize="10" Margin="0,6,0,0"/>
+            </StackPanel>
         </Grid>
       </DataTemplate>
       <DataTemplate x:Key="NumberTemplate">
@@ -231,7 +255,7 @@
               <TextBlock FontSize="10" Style="{StaticResource Muted}" Text="{Binding Status}"/>
               <CheckBox Content="生成后原生保存" Margin="0,4,0,0" IsChecked="{Binding SaveAfter}"/>
             </StackPanel>
-            <Button Grid.Column="1" Content="生成到游戏" Style="{StaticResource PrimaryButton}" Command="{Binding ExecuteCommand}" IsEnabled="{Binding CanInteract}"/>
+            <Button Grid.Column="1" Content="生成到游戏" Style="{StaticResource PrimaryButton}" Command="{Binding ExecuteCommand}" IsEnabled="{Binding CanGenerate}"/>
           </Grid>
         </Grid>
       </DataTemplate>
@@ -591,7 +615,7 @@
                       </Grid>
                       <CheckBox Content="生成后调用游戏原生保存" IsChecked="{Binding SaveAfter}" Margin="0,12,0,0"/>
                       <TextBlock Style="{StaticResource Muted}" TextWrapping="Wrap" FontSize="10" Margin="0,12,0,8" Text="{Binding Status}"/>
-                      <Button Style="{StaticResource PrimaryButton}" Height="42" Content="{Binding ExecuteButtonText}" Command="{Binding ExecuteCommand}" IsEnabled="{Binding CanInteract}"/>
+                      <Button Style="{StaticResource PrimaryButton}" Height="42" Content="{Binding ExecuteButtonText}" Command="{Binding ExecuteCommand}" IsEnabled="{Binding CanGenerate}"/>
                       <Button Content="清理本次生成" Style="{StaticResource DangerButton}" Height="38" Margin="0,8,0,0" Command="{Binding CleanupCommand}" IsEnabled="{Binding CanInteract}"/>
                     </StackPanel>
                   </ScrollViewer>
@@ -970,6 +994,7 @@
                           <StackPanel Grid.Row="1" Margin="0,10,0,0">
                             <TextBlock TextWrapping="Wrap" Style="{StaticResource Muted}" FontSize="10" Text="{Binding Description}"/>
                             <TextBlock TextWrapping="Wrap" Foreground="{StaticResource GoldBrush}" FontSize="10" Margin="0,7,0,0" Text="{Binding Reason}"/>
+                            <Grid Margin="0,8,0,10" Visibility="{Binding HasAnimalCount,Converter={StaticResource BoolToVisibility}}"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="110"/><ColumnDefinition/></Grid.ColumnDefinitions><TextBlock Text="每波数量" Style="{StaticResource Muted}" VerticalAlignment="Center" Margin="0,0,10,0"/><app:NumericInputBox Grid.Column="1" Input="{Binding CountInput}"/><TextBlock Grid.Column="2" Text="1–50，只接受整数" Style="{StaticResource Muted}" FontSize="10" VerticalAlignment="Center" Margin="10,0,0,0"/></Grid>
                           </StackPanel>
                           <Button Grid.Row="2" Content="来一波" Style="{StaticResource PrimaryButton}" Height="38" Command="{Binding ExecuteCommand}" IsEnabled="{Binding CanExecute}"/>
                         </Grid>
@@ -1031,7 +1056,7 @@
                         <ComboBox DisplayMemberPath="Label" ToolTip="缺少目标档位时自动选择最接近的有效档位" ItemsSource="{Binding RarityOptions}" SelectedItem="{Binding SelectedRarity}"/>
                       </StackPanel>
                       <StackPanel Grid.Column="1" Margin="8,0">
-                        <TextBlock Text="实际策略" Style="{StaticResource Caption}" Margin="0,0,0,4"/>
+                        <TextBlock Text="待应用档位" Style="{StaticResource Caption}" Margin="0,0,0,4"/>
                         <TextBlock Foreground="{StaticResource AccentDarkBrush}" FontWeight="SemiBold" VerticalAlignment="Center" Text="{Binding TargetRarityLabel}"/>
                       </StackPanel>
                       <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Bottom">
@@ -1164,6 +1189,13 @@
               </FrameworkElement.Style>
               <StackPanel>
                 <app:FeelPanel Visibility="{Binding HasFeelFeatures,Converter={StaticResource BoolToVisibility}}"/>
+                <app:CombatFeedbackPanel Visibility="{Binding IsCombatPage,Converter={StaticResource BoolToVisibility}}" IsEnabled="{Binding CanEditParameters}"/>
+                <Border Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="18" Margin="0,0,8,12" Visibility="{Binding IsFishingPage,Converter={StaticResource BoolToVisibility}}">
+                  <StackPanel><TextBlock Text="钓鱼手记" Style="{StaticResource SectionTitle}"/><TextBlock Text="补记鱼获、查看存档图鉴，并保存每局回顾。" Style="{StaticResource Muted}" Margin="0,6,0,12"/><WrapPanel><Button Content="日志与图鉴" Click="OpenJournal_Click" Margin="0,0,10,0"/><Button Content="每局回顾" Click="OpenRecap_Click"/></WrapPanel></StackPanel>
+                </Border>
+                <Border Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="18" Margin="0,0,8,12" Visibility="{Binding IsSavePage,Converter={StaticResource BoolToVisibility}}">
+                  <StackPanel><TextBlock Text="存档备份与恢复" Style="{StaticResource SectionTitle}"/><TextBlock Text="备份磁盘存档，校验后手动恢复；恢复前保留当前存档副本。" Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,6,0,12"/><Button Content="管理存档备份" Click="OpenSaveBackups_Click" HorizontalAlignment="Left"/></StackPanel>
+                </Border>
                 <Border Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="18" Margin="0,0,8,12" Visibility="{Binding IsCombatPage,Converter={StaticResource BoolToVisibility}}">
                   <StackPanel><DockPanel><TextBlock Text="战斗诊断" FontSize="17" FontWeight="SemiBold"/><CheckBox DockPanel.Dock="Right" Content="仅观察诊断" IsChecked="{Binding DiagnosticOnly}" HorizontalAlignment="Right"/></DockPanel><TextBlock Text="{Binding CombatDiagnostics}" TextWrapping="Wrap" Margin="0,10,0,0" FontSize="11" Style="{StaticResource Muted}"/><TextBlock Text="观察模式暂停辅助瞄准与魔法子弹；取消后需手动开启。诊断只读取已发布的运行时状态。" TextWrapping="Wrap" Margin="0,7,0,0" FontSize="10" Style="{StaticResource Muted}"/></StackPanel>
                 </Border>
@@ -1300,12 +1332,13 @@
                             <TextBlock Text="好友房可用" Foreground="{StaticResource AccentDarkBrush}" FontSize="9" FontWeight="SemiBold"/>
                           </Border>
                         </StackPanel>
-                        <TextBlock Text="开镜锁定最近目标 · 同帧跟踪与提前量 · 松镜解除" Style="{StaticResource Muted}" FontSize="10" Margin="0,4,0,0"/>
+                        <TextBlock Text="Boss → 动物 → 玩家 · 同类优先最近 · 松镜解除" Style="{StaticResource Muted}" FontSize="10" Margin="0,4,0,0"/>
                       </StackPanel>
                       <StackPanel Grid.Column="2" VerticalAlignment="Center">
                         <CheckBox Content="启用" IsChecked="{Binding Enabled}" ToolTip="切换后立即应用；修改下方参数后点击应用原生辅助"/>
                         <CheckBox Content="自动提前量" Margin="0,5,0,0" IsChecked="{Binding LeadEnabled}" ToolTip="按当前武器弹速、重力和目标速度计算提前量；瞬时命中武器无需提前量"/>
                         <CheckBox Content="锁定头部" Margin="0,5,0,0" IsChecked="{Binding HeadLockEnabled}" ToolTip="连接后勾选即启用辅助瞄准；按触发方式锁定范围内可见生物的头部判定区，不自动开火"/>
+                        <CheckBox Content="锁定队友" Margin="0,5,0,0" IsChecked="{Binding TargetTeammates}" IsEnabled="{Binding CanConfigure}" ToolTip="勾选后把其他存活玩家加入目标；取消后排除所有队友。开启辅助时切换立即应用。"/>
                       </StackPanel>
                     </Grid>
                     <Grid Row="1" Margin="0,16,0,0">
@@ -1339,7 +1372,7 @@
                       </Grid.ColumnDefinitions>
                       <StackPanel Margin="0,0,12,0" VerticalAlignment="Center">
                         <TextBlock Style="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Text="{Binding Status}"/>
-                        <TextBlock Text="开镜后自动转向最大距离内最近的无遮挡目标，不要求目标位于准星附近；目标消失或失效后立即转向下一个，松镜解除。角度仅约束静默瞄准；不自动开火。" Style="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,5,0,0"/>
+                        <TextBlock Text="开镜后优先锁定最大距离内无遮挡的 Boss，其次可攻击动物，最后玩家；同类优先最近目标。目标消失或失效后切换，松镜解除，不自动开火。魔法子弹使用独立的捕获角度、距离与强度设置。" Style="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,5,0,0"/>
                       </StackPanel>
                       <Button Grid.Column="1" Content="应用原生辅助" Style="{StaticResource PrimaryButton}" Padding="20,9" Command="{Binding ApplyCommand}" IsEnabled="{Binding CanConfigure}"/>
                     </Grid>
@@ -1447,6 +1480,9 @@
                                   </DataTrigger>
                                   <DataTrigger Value="{x:Static core:FeatureControl.Coordinates}" Binding="{Binding Descriptor.Control}">
                                     <Setter Property="ContentTemplate" Value="{StaticResource CoordinateTemplate}"/>
+                                  </DataTrigger>
+                                  <DataTrigger Value="True" Binding="{Binding IsMagicBullet}">
+                                    <Setter Property="ContentTemplate" Value="{StaticResource MagicBulletTemplate}"/>
                                   </DataTrigger>
                                 </Style.Triggers>
                               </Style>

@@ -421,33 +421,9 @@ public partial class MainWindow : Window, IComponentConnector
 		if (message == 786 && wParam == 4740166)
 		{
 			handled = true;
-			EmergencyDisableAsync();
+			_ = _viewModel.EmergencyDisableAsync(_bridge);
 		}
 		return 0;
-	}
-
-	private async Task EmergencyDisableAsync()
-	{
-        _viewModel.StopExperienceAutomation();
-        _viewModel.AimAssist.Disconnect();
-		_viewModel.Crosshair.Enabled = false;
-		if (_bridge == null)
-		{
-			return;
-		}
-		try
-		{
-			RuntimeCommandResult runtimeCommandResult = await _bridge.ExecuteAsync(new FeatureCommand("locks.disable_all", JsonSerializer.SerializeToElement(new { }), Capability.OwnedPlayer), CancellationToken.None);
-			_viewModel.ModeStatus = (runtimeCommandResult.Succeeded ? "已紧急停用全部持续修改" : ("紧急停用失败 · " + runtimeCommandResult.Message));
-			if (runtimeCommandResult.Succeeded)
-			{
-				_viewModel.MarkAllLocksDisabled("已通过紧急快捷键停用");
-			}
-		}
-		catch (Exception ex)
-		{
-			_viewModel.ModeStatus = "紧急停用失败 · " + ex.Message;
-		}
 	}
 
 	private void PollGame(object? sender, EventArgs e)
@@ -547,10 +523,14 @@ public partial class MainWindow : Window, IComponentConnector
 
 	private async Task AttachBridgeAsync(int processId, string gameRoot)
 	{
+        if (_appearanceClosing) return;
+        RuntimeBridgeClient? connected = null;
 		_attaching = true;
 		try
 		{
-			_bridge = await RuntimeBridgeClient.ConnectAsync(processId, gameRoot, CancellationToken.None, _license.Current.IsSponsor);
+            connected = await RuntimeBridgeClient.ConnectAsync(processId, gameRoot, CancellationToken.None, _license.Current.IsSponsor);
+            if (_appearanceClosing) { await connected.DisposeAsync(); return; }
+            _bridge = connected;
 			_licensedRuntime = new LicensedRuntimeClient(_bridge, _sponsorGate);
 			RuntimeSessionSnapshot snapshot;
 			try
@@ -561,7 +541,9 @@ public partial class MainWindow : Window, IComponentConnector
 			{
 				throw new RuntimeBridgeConnectException(RuntimeBridgeConnectStage.SessionHandshake, innerException);
 			}
-			await ApplySessionModeAsync(_bridge, snapshot);
+            if (!IsCurrentBridge(connected)) return;
+			await ApplySessionModeAsync(connected, snapshot);
+            if (!IsCurrentBridge(connected)) return;
 			if (RuntimeSessionMode.From(snapshot.Host, snapshot.Client, snapshot.Lobby) != SessionMode.MainMenu)
 			{
 				ShowPrivilegeAdvice(processId, ProcessPrivilegeProbe.ForProcess(processId), accessDenied: false);
@@ -571,6 +553,8 @@ public partial class MainWindow : Window, IComponentConnector
 		}
 		catch (Exception exception)
 		{
+            if (_appearanceClosing || (connected != null && !IsCurrentBridge(connected)))
+            { if (connected != null) await connected.DisposeAsync(); return; }
 			string text = BridgeConnectionDiagnostics.Describe(exception);
 			_attachPolicy.RecordFailure(processId, text);
 			TryLogBridgeFailure(processId, exception);
@@ -601,17 +585,24 @@ public partial class MainWindow : Window, IComponentConnector
 
 	}
 
+    private bool IsCurrentBridge(RuntimeBridgeClient bridge) => !_appearanceClosing && ReferenceEquals(_bridge, bridge);
+
 	private async Task RefreshSessionModeAsync(RuntimeBridgeClient bridge)
 	{
+        if (!IsCurrentBridge(bridge)) return;
 		_refreshingMode = true;
 		try
 		{
-			await ApplySessionModeAsync(bridge, await bridge.InspectSessionAsync(CancellationToken.None));
+            var snapshot = await bridge.InspectSessionAsync(CancellationToken.None);
+            if (!IsCurrentBridge(bridge)) return;
+			await ApplySessionModeAsync(bridge, snapshot);
+            if (!IsCurrentBridge(bridge)) return;
             _viewModel.UpdateExperienceSession(bridge.LastInspection);
 			await _viewModel.RefreshRuntimeProofsAsync();
 		}
 		catch (Exception innerException)
 		{
+            if (!IsCurrentBridge(bridge)) { await bridge.DisposeAsync(); return; }
 			RuntimeBridgeConnectException exception = new RuntimeBridgeConnectException(RuntimeBridgeConnectStage.SessionRefresh, innerException);
 			string text = BridgeConnectionDiagnostics.Describe(exception);
 			int? attachedProcessId = _attachedProcessId;
@@ -667,6 +658,7 @@ public partial class MainWindow : Window, IComponentConnector
 
 	private async Task ApplySessionModeAsync(RuntimeBridgeClient bridge, RuntimeSessionSnapshot snapshot)
 	{
+        if (!IsCurrentBridge(bridge)) return;
 		SessionMode mode = RuntimeSessionMode.From(snapshot.Host, snapshot.Client, snapshot.Lobby);
 		bool accessChanged = mode != _sessionMode;
 		ulong? sceneHandle = _sceneHandle;
@@ -691,6 +683,7 @@ public partial class MainWindow : Window, IComponentConnector
 			if (sessionMode.HasValue)
 			{
 				await bridge.ExecuteAsync(new FeatureCommand("locks.disable_all", JsonSerializer.SerializeToElement(new { }), Capability.OwnedPlayer), CancellationToken.None);
+                if (!IsCurrentBridge(bridge)) return;
 			}
 		}
 		if (mode != SessionMode.JoinedFriend)
@@ -726,6 +719,7 @@ public partial class MainWindow : Window, IComponentConnector
 				try
 				{
 					RuntimeCommandResult runtimeCommandResult = await bridge.ExecuteAsync(new FeatureCommand("fun.event.reset_world", JsonSerializer.SerializeToElement(new { }), Capability.HostWorld), CancellationToken.None);
+                    if (!IsCurrentBridge(bridge)) return;
 					if (!runtimeCommandResult.Succeeded)
 					{
 						_viewModel.PositionStatus = "世界切换清理失败 · " + runtimeCommandResult.Message;
@@ -741,6 +735,7 @@ public partial class MainWindow : Window, IComponentConnector
 				}
 				catch (Exception ex)
 				{
+                    if (!IsCurrentBridge(bridge)) return;
 					_viewModel.PositionStatus = "世界切换清理失败 · " + ex.Message;
 				}
 				_viewModel.FunEventsPage.RefreshAvailabilityAsync();
@@ -770,9 +765,10 @@ public partial class MainWindow : Window, IComponentConnector
 
 	protected override void OnClosed(EventArgs e)
 	{
+        _appearanceClosing = true;
+        _fishingJournal?.Dispose();
         CloseExperienceUi();
         _viewModel.ClosePreferences();
-        _appearanceClosing = true;
 		// 释放页面切换动画留在内容区上的动画时钟。
 		// 背景（研究探针实测）：Storyboard / 子时间线上的 FillBehavior="Stop" 只让属性值回到
 		// 基值，并不保证时钟被摘掉——动画结束后 HasAnimatedProperties 仍可能为 True。

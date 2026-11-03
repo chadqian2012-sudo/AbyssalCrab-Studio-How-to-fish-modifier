@@ -16,6 +16,7 @@ public sealed class StatusWidget : Window, IDisposable
     private readonly Func<int?> _processId;
     private readonly DispatcherTimer _timer;
     private bool _disposed;
+    private readonly bool _preview;
     public StatusWidget(MainViewModel vm, Window main, Func<int?> processId)
     {
         _vm=vm;_main=main;_processId=processId;DataContext=vm;
@@ -35,7 +36,17 @@ public sealed class StatusWidget : Window, IDisposable
         var hide=new Button{Content="隐藏组件",Padding=new Thickness(10,4,10,4),Margin=new Thickness(8,0,0,0)};hide.Click+=(_,_)=>vm.WidgetVisible=false;buttons.Children.Add(hide);panel.Children.Add(buttons);
         AddText(panel,"",9,"紧急停用：Ctrl + Shift + F12");
         _timer=new DispatcherTimer(DispatcherPriority.Background){Interval=TimeSpan.FromMilliseconds(250)};_timer.Tick+=Tick;
-        if(!Array.Exists(Environment.GetCommandLineArgs(),arg=>arg.Equals("--ui-preview",StringComparison.OrdinalIgnoreCase)))_timer.Start();
+        _preview=Array.Exists(Environment.GetCommandLineArgs(),arg=>arg.Equals("--ui-preview",StringComparison.OrdinalIgnoreCase));
+        _vm.PropertyChanged+=ModelChanged;
+        SyncTimer();
+    }
+    private void ModelChanged(object? sender,PropertyChangedEventArgs args)
+    {if(args.PropertyName==nameof(MainViewModel.WidgetVisible))SyncTimer();}
+    private void SyncTimer()
+    {
+        if(_disposed)return;
+        if(!_vm.WidgetVisible){_timer.Stop();if(IsVisible)Hide();return;}
+        if(!_preview)_timer.Start();
     }
     private static void AddText(Panel panel,string path,int size,string? literal=null)
     {
@@ -55,5 +66,5 @@ public sealed class StatusWidget : Window, IDisposable
         if(!_disposed){args.Cancel=true;_vm.WidgetVisible=false;Hide();}
         base.OnClosing(args);
     }
-    public void Dispose(){if(_disposed)return;_disposed=true;_timer.Stop();_timer.Tick-=Tick;Close();}
+    public void Dispose(){if(_disposed)return;_disposed=true;_timer.Stop();_timer.Tick-=Tick;_vm.PropertyChanged-=ModelChanged;Close();}
 }

@@ -117,6 +117,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 			{
 				RefreshFeatures();
 				OnPropertyChanged("IsCombatPage");
+                OnPropertyChanged(nameof(IsFishingPage));
+                OnPropertyChanged(nameof(IsSavePage));
 				OnPropertyChanged("IsTeleportPage");
 				OnPropertyChanged("IsFunEventsPage");
 				OnPropertyChanged("IsEntertainmentPage");
@@ -224,6 +226,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 	public string PageTitle => SelectedPage.Title;
 
 	public bool IsCombatPage => SelectedPage.Category == "战斗";
+    public bool IsFishingPage => SelectedPage.Category == "钓鱼";
+    public bool IsSavePage => SelectedPage.Category == "解锁中心";
 
 	public bool IsTeleportPage => SelectedPage.Category == "世界传送";
 
@@ -332,7 +336,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 	{
 		get
 		{
-			if (!_islandLoadBusy)
+			if (!_islandLoadBusy && !PresetBusy)
 			{
 				return SelectedIsland?.Available ?? false;
 			}
@@ -348,8 +352,10 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		}
 		set
 		{
-			if (Set(ref _selectedTeleportPoint, value, "SelectedTeleportPoint") && (object)value != null && !_updatingTeleportFilter)
+			if (Set(ref _selectedTeleportPoint, value, "SelectedTeleportPoint"))
 			{
+				_positionEditorRevision++;
+				if (value == null || _updatingTeleportFilter) return;
 				CurrentX = value.X;
 				CurrentY = value.Y;
 				CurrentZ = value.Z;
@@ -488,7 +494,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		}
 		set
 		{
-			Set(ref _targetRoomMember, value && CanTargetRoomMember, "TargetRoomMember");
+			if (Set(ref _targetRoomMember, value && CanTargetRoomMember, "TargetRoomMember")) _positionEditorRevision++;
 		}
 	}
 
@@ -503,7 +509,6 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		set
 		{
 			RoomMembersPage.SelectedMember = value;
-			OnPropertyChanged("SelectedTeleportMember");
 		}
 	}
 
@@ -556,6 +561,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		AimAssist = new AimAssistViewModel();
 		_selectedPage = Pages[0];
 		Features = new ObservableCollection<FeatureItemViewModel>();
+        InitializePerformanceCaches();
 		TeleportPoints = new ObservableCollection<TrainerTeleportPoint>(_settings.Load());
 		FilteredTeleportPoints = new ObservableCollection<TrainerTeleportPoint>(TeleportPoints);
 		TeleportGroups = new ObservableCollection<string>();
@@ -585,14 +591,16 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 			RefreshCatalogAsync();
 		});
 		RefreshFeatures();
-		InitializePreferences(preferencesStore);
+		InitializePositionEditorTracking();
 		InitializeExperience(experiencePath ?? (preferencesStore is FileUserPreferencesStore && !Environment.GetCommandLineArgs().Contains("--ui-preview",StringComparer.OrdinalIgnoreCase) ? System.IO.Path.Combine(ProductIdentity.AppDataDirectory,"experience-settings.json") : null));
+		// Load legacy experience values first; the unified parameter file takes precedence
+		// for fields it contains, while older installations retain their existing fallback.
+		InitializePreferences(preferencesStore);
 	}
 
 	private void OpenRoomMemberInTeleport(RoomMemberSnapshot member)
 	{
 		RoomMembersPage.SelectedMember = member;
-		OnPropertyChanged("SelectedTeleportMember");
 		TargetRoomMember = true;
 		SelectedPage = Pages.Single((NavigationPage page) => page.Category == "世界传送");
 	}
@@ -606,6 +614,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		_runtime = runtime;
 		_capabilities = capabilities;
 		FunEventsPage.Connect(runtime, capabilities);
+		CombatFeedback.Connect(runtime,capabilities.CanExecute(Capability.HostWorld));
 		RoomMembersPage.Connect(runtime, capabilities);
 		AimAssist.Connect(runtime, capabilities);
 		Crosshair.Connect(runtime);
@@ -622,6 +631,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		}
 		OnPropertyChanged("CanLoadSelectedIsland");
 		OnPropertyChanged("CanTargetRoomMember");
+		OnPropertyChanged(nameof(CanRestoreLastSession));
 	}
 
 	public void SuspendConnection(string message = "运行时桥暂时失联，正在自动重连")
@@ -636,6 +646,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
 	private void DetachRuntime(string message, bool preserveToggleIntent)
 	{
+        if (_runtime != null) { CapturePreferences(); _preferencesDirty = true; }
         _featureActionEpoch++;
 		StopExperienceAutomation();
 		CombatDiagnostics = "运行时已断开 · 诊断读数已失效";
@@ -643,12 +654,13 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		Interlocked.Increment(ref _islandCatalogEpoch);
 		CancelCatalogRetry();
 		FunEventsPage.Disconnect();
+		CombatFeedback.Disconnect();
 		RoomMembersPage.Disconnect();
 		AimAssist.Disconnect();
 		Crosshair.Disconnect();
-		ResetWorldContext(message);
 		_runtime = null;
 		_capabilities = CapabilitySet.Empty;
+		ResetWorldContext(message);
 		_itemCatalog = Array.Empty<CatalogOption>();
 		_fishCatalog = Array.Empty<CatalogOption>();
 		if (!preserveToggleIntent)
@@ -664,20 +676,35 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		OnPropertyChanged("CanLoadSelectedIsland");
 		TargetRoomMember = false;
 		OnPropertyChanged("CanTargetRoomMember");
+		OnPropertyChanged(nameof(CanRestoreLastSession));
 	}
 
 	public void ResetWorldContext(string message = "世界已切换，请重新读取当前位置")
 	{
+		bool presetWasBusy=PresetBusy;
 		ResetExperienceWorld();
+        RoomMembersPage.ResetWorldContext();
 		_previousPosition = null;
 		_previousPositions.Clear();
 		_positionReadAt = default;
 		PositionStatus = message;
+		if(presetWasBusy)
+        {
+            if(_runtime!=null)AimAssist.Connect(_runtime,_capabilities);
+            RefreshFeatures();
+        }
 	}
 
 	public void MarkAllLocksDisabled(string message)
 	{
 		StopExperienceAutomation();
+        FunEventsPage.Roulette.Disconnect();
+        FunEventsPage.SlotMachine.Disconnect();
+        if(_runtime!=null)
+        {
+            FunEventsPage.Roulette.Connect(_runtime,_capabilities);
+            FunEventsPage.SlotMachine.Connect(_runtime,_capabilities);
+        }
         AimAssist.Disconnect();
         if(_runtime!=null)AimAssist.Connect(_runtime,_capabilities);
 		Crosshair.Enabled = false;
@@ -696,6 +723,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 	public async Task RefreshRuntimeProofsAsync()
 	{
 		IGameRuntimeClient runtime = _runtime;
+        int epoch=_connectionEpoch;
 		if (runtime == null || Interlocked.Exchange(ref _proofRefreshBusy, 1) != 0)
 		{
 			return;
@@ -703,6 +731,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		try
 		{
 			RuntimeCommandResult runtimeCommandResult = await runtime.ExecuteAsync(new FeatureCommand("features.proofs", JsonSerializer.SerializeToElement(new { }), Capability.ReadOnly), CancellationToken.None);
+            if(runtime!=_runtime||epoch!=_connectionEpoch)return;
 			if (!runtimeCommandResult.Succeeded)
 			{
 				return;
@@ -743,7 +772,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		}
 		finally
 		{
-			Volatile.Write(ref _proofRefreshBusy, 0);
+            if(runtime==_runtime&&epoch==_connectionEpoch)Volatile.Write(ref _proofRefreshBusy, 0);
 		}
 	}
 
@@ -846,7 +875,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 			FeatureToggleState featureToggleState = source.CaptureToggleState();
 			_toggleStates[source.Descriptor.Id] = featureToggleState;
 			OnPropertyChanged(nameof(ActiveFeaturesText));
-			Features.FirstOrDefault((FeatureItemViewModel item) => item.Descriptor.Id == source.Descriptor.Id && item != source)?.ApplyExternalToggleState(featureToggleState);
+            var current=Features.FirstOrDefault(item=>item.Descriptor.Id==source.Descriptor.Id&&item!=source);
+            if(current!=null&&!current.IsBusy)current.ApplyExternalToggleState(featureToggleState);
 		}
 	}
 
@@ -879,7 +909,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 			try
 			{
 				RuntimeCommandResult runtimeCommandResult = await runtime.ExecuteAsync(new FeatureCommand(featureDescriptor.Id,
-                    featureDescriptor.Id == "player.spin.lock" ? FeatureItemViewModel.SpinArguments(true, value.AppliedSpinSpeed) : JsonSerializer.SerializeToElement(new
+                    featureDescriptor.Id == "player.spin.lock" ? FeatureItemViewModel.SpinArguments(true, value.AppliedSpinSpeed, value.AppliedSpinAutoJump) : featureDescriptor.Id == "combat.silent_aim" && value.AppliedMagicArguments.HasValue ? value.AppliedMagicArguments.Value : JsonSerializer.SerializeToElement(new
 				{
 					enabled = true
 				}), featureDescriptor.RequiredCapability), CancellationToken.None);
@@ -945,10 +975,14 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
 	private void ApplyRememberedToggleState(string id, FeatureToggleState state)
 	{
+        if (id == "combat.silent_aim" && _toggleStates.TryGetValue(id, out var magicPrevious))
+            state = state with { AppliedMagicArguments = magicPrevious.AppliedMagicArguments };
         if (id == "player.spin.lock" && _toggleStates.TryGetValue(id, out var previous))
-            state = state with { SpinSpeedText = previous.SpinSpeedText, AppliedSpinSpeed = previous.AppliedSpinSpeed };
+            state = state with { SpinSpeedText = previous.SpinSpeedText, AppliedSpinSpeed = previous.AppliedSpinSpeed,
+                SpinAutoJump = previous.SpinAutoJump, AppliedSpinAutoJump = previous.AppliedSpinAutoJump };
 		_toggleStates[id] = state;
-		Features.FirstOrDefault((FeatureItemViewModel feature) => feature.Descriptor.Id == id)?.ApplyExternalToggleState(state);
+        var current=Features.FirstOrDefault(feature=>feature.Descriptor.Id==id);
+        if(current!=null&&!current.IsBusy)current.ApplyExternalToggleState(state);
 	}
 
 	public async Task RefreshCatalogAsync()
@@ -961,6 +995,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		IGameRuntimeClient runtime = _runtime;
 		int connectionEpoch = Volatile.Read(in _connectionEpoch);
 		await LoadIslandCatalogAsync(runtime, connectionEpoch);
+        if(runtime!=_runtime||connectionEpoch!=_connectionEpoch)return;
 		if (!_capabilities.CanExecute(Capability.HostWorld))
 		{
 			CatalogStatus = "岛屿目录可浏览；当前会话不允许生成物品";
@@ -1064,7 +1099,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
 	private async Task LoadSelectedIslandAsync()
 	{
-		if (_islandLoadBusy)
+		if (_islandLoadBusy || PresetBusy)
 		{
 			return;
 		}
@@ -1095,6 +1130,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 			return;
 		}
 		_islandLoadBusy = true;
+        var runtime=_runtime;var capabilities=_capabilities;int epoch=_connectionEpoch;
 		OnPropertyChanged("CanLoadSelectedIsland");
 		try
 		{
@@ -1121,16 +1157,16 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 				});
 			}
 			JsonElement arguments = jsonElement;
-			PositionStatus = (await new FeatureEngine(_runtime).ExecuteAsync(new FeatureCommand("world.island.load", arguments, Capability.HostWorld), _capabilities, CancellationToken.None)).Message;
+            var result=await new FeatureEngine(runtime).ExecuteAsync(new FeatureCommand("world.island.load", arguments, Capability.HostWorld), capabilities, CancellationToken.None);
+            if(runtime==_runtime&&epoch==_connectionEpoch)PositionStatus=result.Message;
 		}
 		catch (Exception ex)
 		{
-			PositionStatus = "岛屿载入失败 · " + ex.Message;
+            if(runtime==_runtime&&epoch==_connectionEpoch)PositionStatus = "岛屿载入失败 · " + ex.Message;
 		}
 		finally
 		{
-			_islandLoadBusy = false;
-			OnPropertyChanged("CanLoadSelectedIsland");
+            if(runtime==_runtime&&epoch==_connectionEpoch){_islandLoadBusy = false;OnPropertyChanged("CanLoadSelectedIsland");}
 		}
 	}
 
@@ -1184,6 +1220,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
 	private async Task<bool> LoadCatalogAsync(IGameRuntimeClient runtime, CancellationToken cancellationToken)
 	{
+        if(cancellationToken.IsCancellationRequested||runtime!=_runtime)return false;
 		CatalogStatus = "正在读取游戏预制体目录…";
 		try
 		{
@@ -1370,18 +1407,20 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
 	private async Task ReadPositionAsync()
 	{
-		if (_runtime == null)
+		var runtime=_runtime;int epoch=_connectionEpoch,context=_positionContextEpoch;long editorRevision=_positionEditorRevision;
+		if (runtime == null)
 		{
 			PositionStatus = "请先连接游戏";
 			return;
 		}
+        if(!TryResolveTeleportMember(out var member))return;
 		try
 		{
-			RoomMemberSnapshot member = (TargetRoomMember ? SelectedTeleportMember : null);
-			RuntimeCommandResult runtimeCommandResult = (((object)member == null || !CanTargetRoomMember) ? (await _runtime.ExecuteAsync(new FeatureCommand("world.position.read", JsonSerializer.SerializeToElement(new { }), Capability.ReadOnly), CancellationToken.None)) : (await _runtime.ExecuteAsync(new FeatureCommand("players.position.read", JsonSerializer.SerializeToElement(new
+			RuntimeCommandResult runtimeCommandResult = (member == null ? (await runtime.ExecuteAsync(new FeatureCommand("world.position.read", JsonSerializer.SerializeToElement(new { }), Capability.ReadOnly), CancellationToken.None)) : (await runtime.ExecuteAsync(new FeatureCommand("players.position.read", JsonSerializer.SerializeToElement(new
 			{
 				playerKey = member.Key
 			}), Capability.HostWorld), CancellationToken.None)));
+            if(!IsCurrentPositionContext(runtime,epoch,context))return;
 			RuntimeCommandResult runtimeCommandResult2 = runtimeCommandResult;
 			if (runtimeCommandResult2.Succeeded)
 			{
@@ -1389,9 +1428,11 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 				if (applied.HasValue)
 				{
 					JsonElement valueOrDefault = applied.GetValueOrDefault();
-					CurrentX = valueOrDefault.GetProperty("x").GetDouble();
-					CurrentY = valueOrDefault.GetProperty("y").GetDouble();
-					CurrentZ = valueOrDefault.GetProperty("z").GetDouble();
+                    var point=ParsePositionSnapshot(valueOrDefault);
+                    if (editorRevision != _positionEditorRevision) { PositionStatus = "位置已读回；输入或目标已变更，已保留当前编辑"; return; }
+					CurrentX = point.X;
+					CurrentY = point.Y;
+					CurrentZ = point.Z;
 					_positionReadAt = DateTimeOffset.UtcNow;
 					PositionStatus = (((object)member == null) ? "当前玩家位置已读取" : (member.DisplayName + " 的位置已读取"));
 					return;
@@ -1401,9 +1442,29 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		}
 		catch (Exception ex)
 		{
-			PositionStatus = ex.Message;
+            if(IsCurrentPositionContext(runtime,epoch,context))PositionStatus = ex.Message;
 		}
 	}
+
+    private bool TryResolveTeleportMember(out RoomMemberSnapshot? member)
+    {
+        member=TargetRoomMember?SelectedTeleportMember:null;
+        if(!TargetRoomMember)return true;
+        if(!CanTargetRoomMember){PositionStatus="当前会话不允许指定房间成员";return false;}
+        if(member==null){PositionStatus="请先选择房间成员";return false;}
+        return true;
+    }
+
+    private static TrainerTeleportPoint ParsePositionSnapshot(JsonElement value)
+    {
+        double Coordinate(string name)
+        {
+            if(value.ValueKind!=JsonValueKind.Object||!value.TryGetProperty(name,out var field)||field.ValueKind!=JsonValueKind.Number||!field.TryGetDouble(out double number)||!double.IsFinite(number)||Math.Abs(number)>100000)
+                throw new InvalidOperationException("运行时返回的位置无效，未更新坐标");
+            return number;
+        }
+        return new("临时","上一次位置",Coordinate("x"),Coordinate("y"),Coordinate("z"));
+    }
 
 	private async Task TeleportSelectedAsync()
 	{
@@ -1417,9 +1478,11 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 			PositionStatus = "此操作需要激活赞助版；未向游戏发送命令。";
 			return;
 		}
-		TrainerTeleportPoint selectedTeleportPoint = SelectedTeleportPoint;
+        if(!TryResolveTeleportMember(out var member))return;
         IGameRuntimeClient runtime = _runtime;
         int epoch = _connectionEpoch;
+        int context = _positionContextEpoch;
+        var capabilities=_capabilities;bool safe=SafeLanding;
         string coordinateError = NumericInput.FirstError(CurrentXInput, CurrentYInput, CurrentZInput);
         if (coordinateError.Length != 0)
         {
@@ -1429,30 +1492,30 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		double targetX = CurrentX;
 		double targetY = CurrentY;
 		double targetZ = CurrentZ;
-		RoomMemberSnapshot member = (TargetRoomMember ? SelectedTeleportMember : null);
 		string targetKey = member?.Key ?? "local";
-		RuntimeCommandResult runtimeCommandResult = (((object)member == null || !CanTargetRoomMember) ? (await _runtime.ExecuteAsync(new FeatureCommand("world.position.read", JsonSerializer.SerializeToElement(new { }), Capability.ReadOnly), CancellationToken.None)) : (await _runtime.ExecuteAsync(new FeatureCommand("players.position.read", JsonSerializer.SerializeToElement(new
+		RuntimeCommandResult runtimeCommandResult = (member == null ? (await runtime.ExecuteAsync(new FeatureCommand("world.position.read", JsonSerializer.SerializeToElement(new { }), Capability.ReadOnly), CancellationToken.None)) : (await runtime.ExecuteAsync(new FeatureCommand("players.position.read", JsonSerializer.SerializeToElement(new
 		{
 			playerKey = member.Key
 		}), Capability.HostWorld), CancellationToken.None)));
 		RuntimeCommandResult runtimeCommandResult2 = runtimeCommandResult;
-		if (runtime != _runtime || epoch != _connectionEpoch) { PositionStatus="会话已切换，本次传送已取消";return; }
+		if (!IsCurrentPositionContext(runtime,epoch,context))return;
+        _previousPositions.Remove(targetKey);
+        if(targetKey=="local")_previousPosition=null;
 		if (runtimeCommandResult2.Succeeded)
 		{
 			JsonElement? applied = runtimeCommandResult2.Applied;
 			if (applied.HasValue)
 			{
 				JsonElement valueOrDefault = applied.GetValueOrDefault();
-				_previousPosition = new TrainerTeleportPoint("临时", "上一次位置", valueOrDefault.GetProperty("x").GetDouble(), valueOrDefault.GetProperty("y").GetDouble(), valueOrDefault.GetProperty("z").GetDouble());
-				_previousPositions[targetKey] = _previousPosition;
+                var previous=ParsePositionSnapshot(valueOrDefault);
+				_previousPositions[targetKey] = previous;
+                if(targetKey=="local")_previousPosition=previous;
 			}
 		}
-		CurrentX = targetX;
-		CurrentY = targetY;
-		CurrentZ = targetZ;
-		if ((object)member != null && CanTargetRoomMember)
+        string message;
+		if (member != null)
 		{
-			PositionStatus = (await _runtime.ExecuteAsync(new FeatureCommand("players.teleport", JsonSerializer.SerializeToElement(new
+			message = (await runtime.ExecuteAsync(new FeatureCommand("players.teleport", JsonSerializer.SerializeToElement(new
 			{
 				playerKey = member.Key,
 				mode = "coordinates",
@@ -1463,22 +1526,24 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		}
 		else
 		{
-			PositionStatus = (await new FeatureEngine(_runtime).ExecuteAsync(new FeatureCommand("world.teleport", JsonSerializer.SerializeToElement(new
+			message = (await new FeatureEngine(runtime).ExecuteAsync(new FeatureCommand("world.teleport", JsonSerializer.SerializeToElement(new
 			{
 				x = targetX,
 				y = targetY,
 				z = targetZ,
-				safe = SafeLanding
-			}), Capability.OwnedPlayer), _capabilities, CancellationToken.None)).Message;
+				safe
+			}), Capability.OwnedPlayer), capabilities, CancellationToken.None)).Message;
 		}
+        if(IsCurrentPositionContext(runtime,epoch,context))PositionStatus=message;
 	}
 
 	private async Task ReturnPreviousAsync()
 	{
-		RoomMemberSnapshot roomMemberSnapshot = (TargetRoomMember ? SelectedTeleportMember : null);
+        if(!TryResolveTeleportMember(out var roomMemberSnapshot))return;
+		var runtime=_runtime;int epoch=_connectionEpoch,context=_positionContextEpoch;long editorRevision=_positionEditorRevision;var capabilities=_capabilities;
 		string targetKey = roomMemberSnapshot?.Key ?? "local";
-		TrainerTeleportPoint trainerTeleportPoint = (_previousPositions.TryGetValue(targetKey, out TrainerTeleportPoint value) ? value : _previousPosition);
-		if (_runtime == null || (object)trainerTeleportPoint == null)
+		TrainerTeleportPoint trainerTeleportPoint = (_previousPositions.TryGetValue(targetKey, out TrainerTeleportPoint value) ? value : targetKey=="local"?_previousPosition:null);
+		if (runtime == null || (object)trainerTeleportPoint == null)
 		{
 			PositionStatus = "当前目标还没有可返回的位置";
 			return;
@@ -1491,9 +1556,9 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		TrainerTeleportPoint target = trainerTeleportPoint;
 		bool flag;
 		string message;
-		if ((object)roomMemberSnapshot != null && CanTargetRoomMember)
+		if (roomMemberSnapshot != null)
 		{
-			RuntimeCommandResult runtimeCommandResult = await _runtime.ExecuteAsync(new FeatureCommand("players.teleport", JsonSerializer.SerializeToElement(new
+			RuntimeCommandResult runtimeCommandResult = await runtime.ExecuteAsync(new FeatureCommand("players.teleport", JsonSerializer.SerializeToElement(new
 			{
 				playerKey = roomMemberSnapshot.Key,
 				mode = "coordinates",
@@ -1506,23 +1571,22 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		}
 		else
 		{
-			OperationReceipt operationReceipt = await new FeatureEngine(_runtime).ExecuteAsync(new FeatureCommand("world.teleport", JsonSerializer.SerializeToElement(new
+			OperationReceipt operationReceipt = await new FeatureEngine(runtime).ExecuteAsync(new FeatureCommand("world.teleport", JsonSerializer.SerializeToElement(new
 			{
 				x = target.X,
 				y = target.Y,
 				z = target.Z,
 				safe = SafeLanding
-			}), Capability.OwnedPlayer), _capabilities, CancellationToken.None);
+			}), Capability.OwnedPlayer), capabilities, CancellationToken.None);
 			ReceiptStatus status = operationReceipt.Status;
 			bool flag2 = (uint)status <= 1u;
 			flag = flag2;
 			message = operationReceipt.Message;
 		}
+        if(!IsCurrentPositionContext(runtime,epoch,context))return;
 		if (flag)
 		{
-			CurrentX = target.X;
-			CurrentY = target.Y;
-			CurrentZ = target.Z;
+            if (editorRevision == _positionEditorRevision) { CurrentX = target.X; CurrentY = target.Y; CurrentZ = target.Z; }
 			_previousPositions.Remove(targetKey);
 			if (targetKey == "local")
 			{
@@ -1597,7 +1661,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         _updatingTeleportFilter=true;
         try{
             FilteredTeleportPoints.Clear();
-            foreach (TrainerTeleportPoint item in SortPoints(TeleportPoints.Where((TrainerTeleportPoint point) => (SelectedTeleportGroup == "全部分组" || string.Equals(point.Group, SelectedTeleportGroup, StringComparison.CurrentCultureIgnoreCase)) && PointMatches(point,query))))
+            foreach (TrainerTeleportPoint item in GetFilteredTeleportPoints(query))
                 FilteredTeleportPoints.Add(item);
             if(selected!=null && FilteredTeleportPoints.Contains(selected))SelectedTeleportPoint=selected;
         }finally{_updatingTeleportFilter=false;}

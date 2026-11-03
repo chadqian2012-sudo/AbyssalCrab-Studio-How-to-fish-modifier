@@ -28,6 +28,13 @@ The default mode creates a Windows x64 self-contained single file and does not r
 
 ## 当前限制 | Current limitations
 
-此工作区没有安装 .NET SDK。打包说明中的便携 SDK 位于仓库外的本机路径；项目依赖的 DLL、图标和品牌 PNG 也未纳入此公共源码仓库。因此尚未在干净环境验证本仓库能否直接重建。请从获授权来源准备这些依赖，并检查本机绝对路径。部分旧 UI 合并或签收脚本可能引用历史目录或历史 Runtime，不应视为通用构建入口。
+公共仓库不附带 .NET SDK。打包说明中的便携 SDK 位于仓库外的本机路径；项目依赖的 DLL、图标和品牌 PNG 也未纳入此公共源码仓库。因此尚未在干净环境验证本仓库能否直接重建。请从获授权来源准备这些依赖，并检查本机绝对路径。部分旧 UI 合并或签收脚本可能引用历史目录或历史 Runtime，不应视为通用构建入口。
 
-No .NET SDK is installed in the current workspace. The portable SDK mentioned in the packaging notes is outside the repository. The DLLs, icon, and brand PNG required by the project are also excluded from this public source repository, so a clean clone has not been verified as directly rebuildable. Obtain these dependencies only from sources you are authorized to use, and check for machine-specific absolute paths. Some older UI merge or finalization scripts may reference historical directories or runtimes and should not be treated as general build entry points.
+The public repository does not bundle the .NET SDK. The portable SDK mentioned in the packaging notes is outside the repository. The DLLs, icon, and brand PNG required by the project are also excluded from this public source repository, so a clean clone has not been verified as directly rebuildable. Obtain these dependencies only from sources you are authorized to use, and check for machine-specific absolute paths. Some older UI merge or finalization scripts may reference historical directories or runtimes and should not be treated as general build entry points.
+
+
+## r16b 与独立手记 | r16b and standalone journal
+
+独立手记项目为 `source/AnglerCompanion/AnglerCompanion.csproj`，共享修改器内的手记源码。r16b 的本地验证使用 .NET 8 Windows Desktop SDK；公共源码不包含 DLL、图标、品牌图片、程序包或游戏程序集。构建前请准备项目文件列出的获授权依赖。旧打包脚本具有版本前提，不能用它们任意组合历史 Runtime。干净克隆重建和真实游戏验收尚未完成。
+
+The standalone journal project is `source/AnglerCompanion/AnglerCompanion.csproj` and shares journal sources with the trainer. Local r16b validation used the .NET 8 Windows Desktop SDK. DLLs, icons, branding images, distributables and game assemblies are excluded from this source publication. Supply authorized dependencies required by the project files; historical packaging scripts have version-specific assumptions. A clean-clone rebuild and live-game acceptance remain pending.

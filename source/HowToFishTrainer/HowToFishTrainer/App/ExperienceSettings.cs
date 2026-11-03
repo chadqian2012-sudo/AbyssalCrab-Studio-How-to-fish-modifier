@@ -26,12 +26,15 @@ public sealed class ExperienceSettings
     public double WidgetTop { get; set; } = 120;
     public string SpinCurve { get; set; } = "固定";
     public int RefillLimit { get; set; } = 3;
+    public AnimalCountSettings AnimalCounts { get; set; } = new();
+    public CombatFeedbackOptions CombatFeedback { get; set; } = new();
 }
 
 // A dedicated file keeps collections/presets separate from per-field numeric drafts.
 // Reads never rewrite a file; unsupported future versions remain protected.
 public sealed class ExperienceSettingsStore
 {
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     private readonly string? _path;
     private bool _unsupported;
     public string? Warning { get; private set; }
@@ -51,12 +54,17 @@ public sealed class ExperienceSettingsStore
         if (!double.IsFinite(value.WidgetLeft)) value.WidgetLeft = 24;
         if (!double.IsFinite(value.WidgetTop)) value.WidgetTop = 120;
         if (value.RefillLimit < 1 || value.RefillLimit > 20) value.RefillLimit = 3;
+        value.AnimalCounts??=new();
+        foreach(string key in value.AnimalCounts.Where(p=>!FunEventDefinitions.All.Any(d=>d.Id==p.Key&&d.HasAnimalCount)||p.Value<1||p.Value>50).Select(p=>p.Key).ToArray())value.AnimalCounts.Remove(key);
+        value.CombatFeedback ??= new();
         if (value.SpinCurve is not ("固定" or "缓慢加速" or "脉冲")) value.SpinCurve = "固定";
         return value;
     }
     private static bool ValidPreset(string text) { try { TrainerUserPreferences.Parse(text); return true; } catch { return false; } }
     public ExperienceSettings Load()
     {
+        Warning = null;
+        _unsupported = false;
         if (_path == null) return new();
         foreach (string path in new[] { _path, _path + ".bak" })
         {
@@ -71,7 +79,7 @@ public sealed class ExperienceSettingsStore
     {
         if (_path == null) return;
         if (_unsupported) throw new IOException("体验设置版本较新，未覆盖原文件");
-        var text = JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true });
+        var text = JsonSerializer.Serialize(value, JsonOptions);
         Parse(text);
         AtomicLocalFile.Write(_path, text, previous => { Parse(previous); });
         Warning = null;
@@ -92,7 +100,10 @@ internal static class AtomicLocalFile
             else
             {
                 bool valid;
-                try { validate(File.ReadAllText(path)); valid = true; } catch { valid = false; }
+                try { validate(File.ReadAllText(path)); valid = true; }
+                catch (NotSupportedException e) { throw new IOException("文件版本较新，未覆盖原文件", e); }
+                catch (Exception e) when (e is JsonException or InvalidOperationException) { valid = false; }
+                // Read/permission failures must abort instead of being treated as broken JSON.
                 File.Replace(temp, path, valid ? path + ".bak" : null);
             }
         }

@@ -9,12 +9,13 @@ using Newtonsoft.Json.Linq;
 
 namespace AbyssalCrab.Runtime
 {
-    // Only presentation yaw is replaced. No camera, physics, input or position writes.
+    // Presentation pose only. Camera, physics, input and player position stay native.
     public static class SpinRuntime
     {
         public const string FeatureId = "player.spin.lock";
         public const float DefaultRotationsPerSecond = 4f;
         private static float _rotationsPerSecond = DefaultRotationsPerSecond;
+        private static bool _autoJump;
         private static TrainerBridgeHost _host;
         private static object _player;
         private static float _startedAt, _baseYaw, _nextProofAt;
@@ -31,13 +32,14 @@ namespace AbyssalCrab.Runtime
         public static void Apply(TrainerBridgeHost host, JToken value)
         {
             float speed = ReadSpeed(value);
-            if (_fault != null) throw new InvalidOperationException("大陀螺姿态钩子失败，已停止应用。", _fault);
+            if (_fault != null) throw new InvalidOperationException("大陀螺姿态钩子失败，已停止应用。" + _fault.GetType().Name + ": " + _fault.Message, _fault);
             EnsureHooks();
             object player = _localPlayerField.GetValue(null);
             if (!(player is Component component) || component == null)
                 throw new InvalidOperationException("大陀螺等待本机玩家进入世界。");
             if (_host != host || !ReferenceEquals(_player, player))
             {
+                SpinPoseRuntime.Clear();
                 _host = host;
                 _player = player;
                 _startedAt = Time.realtimeSinceStartup;
@@ -48,6 +50,7 @@ namespace AbyssalCrab.Runtime
                 _nextProofAt = 0f;
                 _networkHits = _avatarHits = 0;
             }
+            _autoJump = ReadAutoJump((JObject)value);
             if (_rotationsPerSecond != speed)
             {
                 _baseYaw = Yaw();
@@ -66,6 +69,7 @@ namespace AbyssalCrab.Runtime
         public static void RestoreAll(TrainerBridgeHost host)
         {
             if (_host != null && _host != host) return;
+            SpinPoseRuntime.Clear();
             if (_host != null && _camera != null && _avatarField != null)
             {
                 GameObject avatar = (GameObject)_avatarField.GetValue(_host);
@@ -77,6 +81,7 @@ namespace AbyssalCrab.Runtime
             _networkHits = _avatarHits = 0;
             _fault = null;
             _rotationsPerSecond = DefaultRotationsPerSecond;
+            _autoJump = false;
             // The next native packet/animation immediately uses the current real viewing angle.
         }
 
@@ -89,8 +94,11 @@ namespace AbyssalCrab.Runtime
             FieldInfo local = AccessTools.Field(playerType, "LocalPlayer");
             MethodInfo packet = AccessTools.Method(serverType, "UpdatePlayerPosRot");
             MethodInfo avatar = AccessTools.Method(typeof(TrainerBridgeHost), "AnimateThirdPersonAvatar");
+            MethodInfo nativeView = AccessTools.Method(typeof(TrainerBridgeHost), "UseNativeThirdPersonView");
+            MethodInfo restoreView = AccessTools.Method(typeof(TrainerBridgeHost), "RestoreThirdPerson");
             FieldInfo avatarField = typeof(TrainerBridgeHost).GetField("_thirdAvatar", BindingFlags.Instance | BindingFlags.NonPublic);
-            if (local == null || packet == null || avatar == null || avatarField == null) throw new NotSupportedException("玩家姿态接口不匹配。");
+            if (local == null || packet == null || avatar == null || avatarField == null || nativeView == null || restoreView == null)
+                throw new NotSupportedException("玩家姿态接口不匹配。");
             ParameterInfo[] parameters = packet.GetParameters();
             if (parameters.Length != 6 || parameters[0].ParameterType != playerType ||
                 parameters[1].ParameterType != typeof(Vector3) || parameters[2].ParameterType != typeof(Vector2) ||
@@ -102,6 +110,8 @@ namespace AbyssalCrab.Runtime
                 patches.Patch(packet, prefix: new HarmonyMethod(typeof(SpinRuntime).GetMethod("NetworkYawPrefix")));
                 patches.Patch(avatar, prefix: new HarmonyMethod(typeof(SpinRuntime).GetMethod("AvatarYawPrefix")),
                     postfix: new HarmonyMethod(typeof(SpinRuntime).GetMethod("AvatarYawPostfix")));
+                patches.Patch(nativeView, prefix: new HarmonyMethod(typeof(SpinRuntime).GetMethod("PresentationSuspended")));
+                patches.Patch(restoreView, prefix: new HarmonyMethod(typeof(SpinRuntime).GetMethod("PresentationSuspended")));
                 _localPlayerField = local;
                 _avatarField = avatarField;
                 _patches = patches;
@@ -110,6 +120,8 @@ namespace AbyssalCrab.Runtime
             {
                 patches.Unpatch(packet, HarmonyPatchType.All, patches.Id);
                 patches.Unpatch(avatar, HarmonyPatchType.All, patches.Id);
+                patches.Unpatch(nativeView, HarmonyPatchType.All, patches.Id);
+                patches.Unpatch(restoreView, HarmonyPatchType.All, patches.Id);
                 throw;
             }
         }
@@ -136,6 +148,14 @@ namespace AbyssalCrab.Runtime
             return ReadPublicSpeed(configuration);
         }
 
+        public static bool ReadAutoJump(JObject arguments)
+        {
+            JToken option = arguments["autoJump"];
+            if (option == null) return false;
+            if (option.Type != JTokenType.Boolean) throw new ArgumentException("autoJump must be boolean");
+            return option.Value<bool>();
+        }
+
         private static float ReadPublicSpeed(JObject arguments)
         {
             JToken speed = arguments["rotationsPerSecond"];
@@ -156,6 +176,7 @@ namespace AbyssalCrab.Runtime
             if (!arguments.Value<bool>("enabled")) return; // Off must always remain available.
             if (arguments["value"] != null) throw new ArgumentException("大陀螺使用 rotationsPerSecond 参数。");
             ReadPublicSpeed(arguments);
+            ReadAutoJump(arguments);
         }
 
         public static void NormalizeArguments(string id, JObject arguments)
@@ -163,6 +184,7 @@ namespace AbyssalCrab.Runtime
             if (id != FeatureId || !arguments.Value<bool>("enabled")) return;
             var configuration = new JObject();
             configuration["rotationsPerSecond"] = ReadPublicSpeed(arguments);
+            configuration["autoJump"] = ReadAutoJump(arguments);
             arguments["value"] = configuration; // Existing SetLock stores and replays this per-feature configuration.
         }
 
@@ -174,7 +196,8 @@ namespace AbyssalCrab.Runtime
             {
                 Quaternion cameraBefore = _camera.localRotation;
                 Quaternion movementBefore = (Quaternion)_movementRotation.GetValue(_player, null);
-                __2.y = Yaw(); // Pitch, position, boat/teleport flags and send frequency stay native.
+                __2.x = SpinPosePolicy.LookDownPitch;
+                __2.y = Yaw();
                 _cameraError = Quaternion.Angle(cameraBefore, _camera.localRotation);
                 _movementError = Quaternion.Angle(movementBefore, (Quaternion)_movementRotation.GetValue(_player, null));
                 _networkHits++;
@@ -193,6 +216,7 @@ namespace AbyssalCrab.Runtime
             float original = __1;
             try
             {
+                SpinPoseRuntime.RestoreFrame();
                 // Solve the native limb animation in the ordinary pose first; rotating its
                 // cosmetic root afterward makes hands/feet rotate with the whole avatar.
                 GameObject avatar = (GameObject)_avatarField.GetValue(_host);
@@ -205,6 +229,11 @@ namespace AbyssalCrab.Runtime
             }
         }
 
+        public static void PresentationSuspended(object __instance)
+        {
+            if (ReferenceEquals(__instance, _host)) SpinPoseRuntime.Clear();
+        }
+
         public static void AvatarYawPostfix(object __instance, object __0)
         {
             if (!ReferenceEquals(__instance, _host) || !Matches(__0)) return;
@@ -212,6 +241,7 @@ namespace AbyssalCrab.Runtime
             {
                 GameObject avatar = (GameObject)_avatarField.GetValue(_host);
                 if (avatar == null) return;
+                SpinPoseRuntime.Apply(avatar, __0, _autoJump);
                 float yaw = Yaw();
                 avatar.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
                 _avatarHits++;
@@ -234,6 +264,13 @@ namespace AbyssalCrab.Runtime
             data.Add("degreesPerSecond", _rotationsPerSecond * 360f);
             data.Add("nativeYaw", originalYaw);
             data.Add("visualYaw", visualYaw);
+            data.Add("visualPitch", SpinPosePolicy.LookDownPitch);
+            data.Add("autoJump", _autoJump);
+            data.Add("modelAirborne", SpinPoseRuntime.SyntheticAirborne);
+            data.Add("modelJumpHeight", SpinPoseRuntime.AppliedHeight);
+            foreach (var entry in SpinPoseRuntime.DescribeRig()) data.Add("rig_" + entry.Key, entry.Value);
+            data.Add("nativeJumpParametersPreserved", true);
+            data.Add("networkPositionWritten", false);
             data.Add("networkHookHits", _networkHits);
             data.Add("avatarHookHits", _avatarHits);
             data.Add("cameraWritten", false);

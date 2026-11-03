@@ -20,6 +20,7 @@ public sealed class RoomMembersViewModel : INotifyPropertyChanged
 	private CapabilitySet _capabilities = CapabilitySet.Empty;
 
 	private RoomMemberSnapshot? _selectedMember;
+    private long _selectionRevision;
 
 	private string _status = "等待连接房主世界";
 
@@ -69,6 +70,7 @@ public sealed class RoomMembersViewModel : INotifyPropertyChanged
 		{
 			if (Set(ref _selectedMember, value, "SelectedMember"))
 			{
+                _selectionRevision++;
 				Changed("HasSelection");
 			}
 		}
@@ -369,6 +371,7 @@ public sealed class RoomMembersViewModel : INotifyPropertyChanged
 		IsBusy = false;
 		_runtime = runtime;
 		_capabilities = capabilities;
+        ClearSessionData();
 		RoomMembersViewModel roomMembersViewModel = this;
 		string status;
 		if (_sponsorAccessGate.IsSponsor)
@@ -389,17 +392,24 @@ public sealed class RoomMembersViewModel : INotifyPropertyChanged
 		IsBusy = false;
 		_runtime = null;
 		_capabilities = CapabilitySet.Empty;
-		Members.Clear();
-		BatchResults.Clear();
-		SelectedMember = null;
-		LastRefreshLabel = "尚未读取";
-		LastVerifiedOperation = "暂无已验证操作";
-		LastVerifiedAt = "--:--:--";
-		PolicyStateLabel = "尚未设置";
+		ClearSessionData();
 		Status = "等待连接房主世界";
-		NotifyCatalogChanged();
 		Changed("CanManage");
 	}
+
+    public void ResetWorldContext()
+    {
+        if (_runtime is IGameRuntimeClient runtime) Connect(runtime, _capabilities);
+        else Disconnect();
+    }
+
+    private void ClearSessionData()
+    {
+        Members.Clear(); BatchResults.Clear(); SelectedMember = null;
+        LastRefreshLabel = "尚未读取"; LastVerifiedOperation = "暂无已验证操作";
+        LastVerifiedAt = "--:--:--"; PolicyStateLabel = "尚未设置";
+        NotifyCatalogChanged();
+    }
 
 	public async Task RefreshAsync()
 	{
@@ -414,7 +424,7 @@ public sealed class RoomMembersViewModel : INotifyPropertyChanged
 			{
 				return;
 			}
-			string selectedKey = SelectedMember?.Key;
+			long selectionRevision = _selectionRevision;
 			await Run(async (IGameRuntimeClient runtime) =>
 			{
 				RuntimeCommandResult runtimeCommandResult = await Send(runtime, "players.catalog", new { });
@@ -424,6 +434,8 @@ public sealed class RoomMembersViewModel : INotifyPropertyChanged
 					if (applied.HasValue && applied.GetValueOrDefault().TryGetProperty("players", out var value))
 					{
 						RoomMemberSnapshot[] array = value.EnumerateArray().Select(Parse).ToArray();
+                        string? currentSelectedKey = SelectedMember?.Key;
+                        bool keepEmptySelection = currentSelectedKey == null && _selectionRevision != selectionRevision;
 						int index;
 						for (index = Members.Count - 1; index >= 0; index--)
 						{
@@ -445,9 +457,10 @@ public sealed class RoomMembersViewModel : INotifyPropertyChanged
 								Members.Add(member);
 							}
 						}
-						SelectedMember = Members.FirstOrDefault((RoomMemberSnapshot roomMemberSnapshot) => roomMemberSnapshot.Key == selectedKey) ?? Members.FirstOrDefault();
+						SelectedMember = currentSelectedKey != null ? Members.FirstOrDefault(member => member.Key == currentSelectedKey) : keepEmptySelection ? null : Members.FirstOrDefault();
 						LastRefreshLabel = DateTime.Now.ToString("HH:mm:ss");
 						Status = $"已读取 {array.Length} 名房间成员 · {LastRefreshLabel}";
+                        if (currentSelectedKey != null && SelectedMember == null) Status += " · 原选成员已离开，请重新选择";
 						NotifyCatalogChanged();
 						return;
 					}
@@ -669,7 +682,7 @@ public sealed class RoomMembersViewModel : INotifyPropertyChanged
 				dictionary[item.Name] = item.Value.GetBoolean();
 			}
 			RuntimeCommandResult result = await Send(runtime, "players.vitals.set", dictionary);
-			ApplySelectedReadBack(result, operation);
+			ApplySelectedReadBack(result, operation, member.Key);
 		});
 	}
 
@@ -678,7 +691,7 @@ public sealed class RoomMembersViewModel : INotifyPropertyChanged
 		return RunSelectedPair(async (IGameRuntimeClient runtime, RoomMemberSnapshot member) =>
 		{
 			RuntimeCommandResult result = await Send(runtime, id, arguments(member));
-			ApplySelectedReadBack(result, operation);
+			ApplySelectedReadBack(result, operation, member.Key);
 		});
 	}
 
@@ -758,7 +771,7 @@ public sealed class RoomMembersViewModel : INotifyPropertyChanged
 		return result;
 	}
 
-	private void ApplySelectedReadBack(RuntimeCommandResult result, string operation)
+	private void ApplySelectedReadBack(RuntimeCommandResult result, string operation, string expectedKey)
 	{
 		if (result.Succeeded)
 		{
@@ -766,13 +779,16 @@ public sealed class RoomMembersViewModel : INotifyPropertyChanged
 			if (applied.HasValue)
 			{
 				JsonElement valueOrDefault = applied.GetValueOrDefault();
+                if (valueOrDefault.ValueKind != JsonValueKind.Object || Text(valueOrDefault, "key") != expectedKey)
+                    throw new InvalidOperationException("操作已发出，但读回成员与本次目标不匹配；请刷新确认");
 				RoomMemberSnapshot updated = Parse(valueOrDefault);
+                string? selectedKey = SelectedMember?.Key;
 				int num = Members.ToList().FindIndex((RoomMemberSnapshot member) => member.Key == updated.Key);
 				if (num >= 0)
 				{
 					Members[num] = updated;
 				}
-				SelectedMember = updated;
+				if (selectedKey == updated.Key) SelectedMember = updated;
 				NotifyCatalogChanged();
 				LastVerifiedOperation = operation + " · " + updated.DisplayName;
 				LastVerifiedAt = DateTime.Now.ToString("HH:mm:ss");

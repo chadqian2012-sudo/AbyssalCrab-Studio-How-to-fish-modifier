@@ -4,4 +4,7 @@ public sealed record FeatureToggleState(bool Enabled, string Status, string Stat
 {
     public string SpinSpeedText { get; init; } = "4";
     public double AppliedSpinSpeed { get; init; } = 4d;
+    public bool SpinAutoJump { get; init; }
+    public bool AppliedSpinAutoJump { get; init; }
+    public System.Text.Json.JsonElement? AppliedMagicArguments { get; init; }
 }

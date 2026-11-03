@@ -32,7 +32,6 @@ public sealed class FunEventsViewModel : INotifyPropertyChanged
 	private int _totalEntityCount;
 
 	private int _connectionEpoch;
-    private bool _lastWaveSucceeded;
     private int _sessionSpawnedCount;
     public int SessionSpawnedCount { get => _sessionSpawnedCount; private set => Set(ref _sessionSpawnedCount,value); }
     public event Action? CleanupRequested;
@@ -40,7 +39,7 @@ public sealed class FunEventsViewModel : INotifyPropertyChanged
     {
         var card=Events.FirstOrDefault(e=>e.Id==id);
         if(card?.CanExecute!=true || !CanExecuteWave)return false;
-        await ExecuteAsync(card);return _lastWaveSucceeded;
+        return await ExecuteAsync(card);
     }
 
 	public ObservableCollection<FunEventCardViewModel> Events { get; }
@@ -142,10 +141,11 @@ public sealed class FunEventsViewModel : INotifyPropertyChanged
 
 	public void Connect(IGameRuntimeClient runtime, CapabilitySet capabilities)
 	{
-        _busy=false; SessionSpawnedCount=0;
+        SessionSpawnedCount=0;
 		Interlocked.Increment(ref _connectionEpoch);
 		_runtime = runtime;
 		_capabilities = capabilities;
+        SetBusy(false,null);
 		Roulette.Connect(runtime, capabilities);
 		SlotMachine.Connect(runtime, capabilities);
 		int currentWaveCount = (TotalEntityCount = 0);
@@ -162,7 +162,7 @@ public sealed class FunEventsViewModel : INotifyPropertyChanged
 		_capabilities = CapabilitySet.Empty;
 		Roulette.Disconnect();
 		SlotMachine.Disconnect();
-		_busy = false;
+        SetBusy(false,null);
 		HostSyncStatus = "等待房主运行时";
 		CurrentWaveStatus = "运行时已断开";
 		int currentWaveCount = (TotalEntityCount = 0);
@@ -239,19 +239,20 @@ public sealed class FunEventsViewModel : INotifyPropertyChanged
 		}
 	}
 
-	private async Task ExecuteAsync(FunEventCardViewModel card)
+	private async Task<bool> ExecuteAsync(FunEventCardViewModel card)
 	{
-        _lastWaveSucceeded=false;
+		if(card.HasAnimalCount && card.CountInput.HasError){CurrentWaveStatus=card.CountInput.Error;return false;}
+		int requestedCount=card.RequestedCount;
 		IGameRuntimeClient runtime = _runtime;
 		int epoch = Volatile.Read(in _connectionEpoch);
 		if (runtime == null || !CanExecuteWave)
 		{
-			return;
+			return false;
 		}
 		if (!_sponsorAccessGate.TryAuthorize("fun.event.execute"))
 		{
 			CurrentWaveStatus = "此操作需要激活赞助版；未向游戏发送命令。";
-			return;
+			return false;
 		}
 		SetBusy(busy: true, card);
 		CurrentWaveStatus = $"正在生成：{card.Title} 0/{card.RequestedCount}";
@@ -259,25 +260,25 @@ public sealed class FunEventsViewModel : INotifyPropertyChanged
 		{
 			try
 			{
-				RuntimeCommandResult runtimeCommandResult = await runtime.ExecuteAsync(Command("fun.event.execute", new
-				{
-					eventId = card.Id
-				}), CancellationToken.None);
+				object arguments=card.HasAnimalCount ? new { eventId=card.Id, count=requestedCount } : (object)new { eventId=card.Id };
+				RuntimeCommandResult runtimeCommandResult = await runtime.ExecuteAsync(Command("fun.event.execute", arguments), CancellationToken.None);
 				if (epoch != Volatile.Read(in _connectionEpoch) || runtime != _runtime)
 				{
-					goto end_IL_00e2;
+					return false;
 				}
 				CurrentWaveStatus = runtimeCommandResult.Message;
-                _lastWaveSucceeded=runtimeCommandResult.Succeeded;
+				bool succeeded=runtimeCommandResult.Succeeded;
 				JsonElement? applied = runtimeCommandResult.Applied;
 				if (applied.HasValue)
 				{
 					JsonElement valueOrDefault = applied.GetValueOrDefault();
 					ApplyStatus(valueOrDefault);
-                    if(_lastWaveSucceeded)SessionSpawnedCount+=Int(valueOrDefault,"registered",0);
+                    if(succeeded)SessionSpawnedCount+=Int(valueOrDefault,"registered",0);
+					if(succeeded && card.HasAnimalCount && Int(valueOrDefault,"registered",-1)!=requestedCount)
+					{succeeded=false;CurrentWaveStatus=$"数量核验失败：请求 {requestedCount}，运行时返回 {Int(valueOrDefault,"registered",0)}；请使用配套的新运行时。";}
 				}
-				goto end_IL_00dc;
-				end_IL_00e2:;
+				else if(succeeded && card.HasAnimalCount){succeeded=false;CurrentWaveStatus="运行时未返回数量回执，无法确认本波生成结果。";}
+				return succeeded;
 			}
 			catch (Exception ex)
 			{
@@ -285,9 +286,8 @@ public sealed class FunEventsViewModel : INotifyPropertyChanged
 				{
 					CurrentWaveStatus = "执行失败 · " + ex.Message;
 				}
-				goto end_IL_00dc;
+				return false;
 			}
-			end_IL_00dc:;
 		}
 		finally
 		{

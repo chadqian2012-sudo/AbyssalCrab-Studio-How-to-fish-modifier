@@ -31,6 +31,19 @@ public sealed class AimAssistViewModel : INotifyPropertyChanged
     private bool _lastAppliedEnabled;
     private bool _leadEnabled = true;
     private bool _headLockEnabled;
+    private bool _targetTeammates;
+    private bool _teammateApplyRequested;
+    private JsonElement? _lastAppliedArguments;
+
+    public bool TargetTeammates
+    {
+        get => _targetTeammates;
+        set
+        {
+            if (Set(ref _targetTeammates, value) && _runtime != null && Enabled)
+            { _teammateApplyRequested = true; _ = ApplyAsync(); }
+        }
+    }
 
     public bool LeadEnabled
     {
@@ -76,9 +89,11 @@ public sealed class AimAssistViewModel : INotifyPropertyChanged
 		}
 		set
 		{
-			if (Set(ref _enabled, value, "Enabled") && _runtime != null) _ = ApplyAsync();
+			_ = SetEnabledAsync(value);
 		}
 	}
+
+    internal Task SetEnabledAsync(bool enabled) => Set(ref _enabled, enabled, nameof(Enabled)) && _runtime != null ? ApplyAsync() : Task.CompletedTask;
 
 	public int Strength
 	{
@@ -169,7 +184,7 @@ public sealed class AimAssistViewModel : INotifyPropertyChanged
 		CollectionsMarshal.SetCount(list, num);
 		Span<AimAssistTriggerOption> span = CollectionsMarshal.AsSpan(list);
 		int num2 = 0;
-		span[num2] = new AimAssistTriggerOption("ads", "开镜自动锁定", "开镜时选择范围内实际距离最近的可见目标，松镜解除");
+		span[num2] = new AimAssistTriggerOption("ads", "开镜自动锁定", "开镜时优先 Boss、其次可攻击动物、最后玩家；同类优先最近的可见目标，松镜解除");
 		TriggerModes = new ObservableCollection<AimAssistTriggerOption>(list);
 		_selectedTrigger = TriggerModes[0];
 		ApplyCommand = new RelayCommand(() =>
@@ -187,6 +202,8 @@ public sealed class AimAssistViewModel : INotifyPropertyChanged
         // old completions must neither keep it busy nor replay old enable intent into it.
         _applyAgain = false;
         _lastAppliedEnabled = false;
+        _lastAppliedArguments = null;
+        _teammateApplyRequested = false;
         Set(ref _enabled, false, nameof(Enabled));
         Busy = false;
 		Status = (capabilities.CanExecute(Capability.OwnedPlayer) ? "已连接 · 辅助瞄准待开启" : "当前会话无法修改本机玩家");
@@ -200,6 +217,8 @@ public sealed class AimAssistViewModel : INotifyPropertyChanged
 		_capabilities = CapabilitySet.Empty;
         _applyAgain = false;
         _lastAppliedEnabled = false;
+        _lastAppliedArguments = null;
+        _teammateApplyRequested = false;
         Set(ref _enabled, false, nameof(Enabled));
 		Busy = false;
 		Status = "运行时已断开";
@@ -216,17 +235,20 @@ public sealed class AimAssistViewModel : INotifyPropertyChanged
 		}
         if (Busy) { _applyAgain = true; return; }
         bool desiredEnabled = Enabled;
+        bool teammateOnly = desiredEnabled && _teammateApplyRequested && _lastAppliedArguments.HasValue;
+        bool desiredTeammates = TargetTeammates;
+        _teammateApplyRequested = false;
 		Busy = true;
 		try
 		{
             string error = NumericInput.FirstError(StrengthInput, AngleInput, DistanceInput);
-            if (error.Length != 0 && (desiredEnabled || !_lastAppliedEnabled))
+            if (!teammateOnly && error.Length != 0 && (desiredEnabled || !_lastAppliedEnabled))
             {
                 Status = error;
                 if (Enabled == desiredEnabled) Set(ref _enabled, _lastAppliedEnabled, nameof(Enabled));
                 return;
             }
-			RuntimeCommandResult runtimeCommandResult = await runtime.ExecuteAsync(new FeatureCommand("combat.aim_assist", JsonSerializer.SerializeToElement(new
+            JsonElement arguments = teammateOnly ? TargetingArguments.WithTeammates(_lastAppliedArguments!.Value, desiredTeammates) : JsonSerializer.SerializeToElement(new
 			{
 				enabled = desiredEnabled,
 				strength = desiredEnabled ? Strength : (int)StrengthInput.LastValidValue,
@@ -234,12 +256,16 @@ public sealed class AimAssistViewModel : INotifyPropertyChanged
 				distance = desiredEnabled ? MaximumDistance : DistanceInput.LastValidValue,
 				trigger = SelectedTrigger.Value,
                 leadEnabled = LeadEnabled,
-                headLockEnabled = HeadLockEnabled
-			}), Capability.OwnedPlayer), CancellationToken.None);
+                headLockEnabled = HeadLockEnabled,
+                targetTeammates = TargetTeammates
+            });
+            RuntimeCommandResult runtimeCommandResult = await runtime.ExecuteAsync(new FeatureCommand("combat.aim_assist", arguments, Capability.OwnedPlayer), CancellationToken.None);
 			if (epoch == Volatile.Read(in _connectionEpoch) && runtime == _runtime)
 			{
-                if (runtimeCommandResult.Succeeded) _lastAppliedEnabled = desiredEnabled;
+                if (runtimeCommandResult.Succeeded) { _lastAppliedEnabled = desiredEnabled; _lastAppliedArguments = arguments.Clone(); }
                 else if (Enabled == desiredEnabled) Set(ref _enabled, _lastAppliedEnabled, nameof(Enabled));
+                if (!runtimeCommandResult.Succeeded && teammateOnly && TargetTeammates == desiredTeammates)
+                    Set(ref _targetTeammates, TargetingArguments.Teammates(_lastAppliedArguments), nameof(TargetTeammates));
 				Status = (runtimeCommandResult.Succeeded ? runtimeCommandResult.Message : ("辅助瞄准应用失败 · " + runtimeCommandResult.Message));
 			}
 		}
@@ -248,6 +274,8 @@ public sealed class AimAssistViewModel : INotifyPropertyChanged
 			if (epoch == Volatile.Read(in _connectionEpoch) && runtime == _runtime)
 			{
                 if (Enabled == desiredEnabled) Set(ref _enabled, _lastAppliedEnabled, nameof(Enabled));
+                if (teammateOnly && TargetTeammates == desiredTeammates)
+                    Set(ref _targetTeammates, TargetingArguments.Teammates(_lastAppliedArguments), nameof(TargetTeammates));
 				Status = "辅助瞄准应用失败 · " + ex.Message;
 			}
 		}
