@@ -234,7 +234,7 @@ public sealed partial class MainViewModel
         try{
             if(!Current())return;
             var parameters=TrainerUserPreferences.Parse(json);
-            _featureActionEpoch++;
+            InvalidateFeatureActions();
             epoch=Interlocked.Increment(ref _connectionEpoch);
             ResetPendingSessionWork();
             context=_positionContextEpoch;
@@ -268,8 +268,14 @@ public sealed partial class MainViewModel
     {
         if(_closedExperience)return;
         InvalidatePresetApply();
+        CaptureSessionSwitches();
+        foreach(var descriptor in FeatureRegistry.All.Where(f=>f.Control==FeatureControl.Toggle))
+            _preferences.Session.Put("toggle:"+descriptor.Id,false);
+        foreach(string key in new[]{"aimAssist","crosshair","combatFeedback","slotMachine","roulette","autoRefill"})
+            _preferences.Session.Put(key,false);
+        _preferencesDirty=true;
         int version=Volatile.Read(ref _presetApplyVersion);
-        _featureActionEpoch++;
+        InvalidateFeatureActions();
         int epoch=Interlocked.Increment(ref _connectionEpoch);
         ResetPendingSessionWork();
         var runtime=_runtime;

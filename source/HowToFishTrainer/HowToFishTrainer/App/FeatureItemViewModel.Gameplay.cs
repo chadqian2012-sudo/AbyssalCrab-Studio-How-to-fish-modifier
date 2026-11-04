@@ -31,7 +31,7 @@ public sealed partial class FeatureItemViewModel
     public AimAssistTriggerOption MagicTrigger
     {
         get => _magicTrigger ?? MagicTriggerModes[1];
-        set { if (value == null || value != MagicTriggerModes[0] && value != MagicTriggerModes[1] || _magicTrigger == value) return; _magicTrigger = value; Changed(); NotifyStateChanged(); }
+        set { if (value == null || value != MagicTriggerModes[0] && value != MagicTriggerModes[1] || _magicTrigger == value) return; _magicTrigger = value; Changed(); }
     }
     public bool CanApplyMagic => IsMagicBullet && Enabled && CanInteract && !MagicAngleInput.HasError && !MagicDistanceInput.HasError && !MagicStrengthInput.HasError;
     public ICommand ApplyMagicCommand => new RelayCommand(() => { if (CanApplyMagic) _ = ExecuteToggleAsync(true, true); });

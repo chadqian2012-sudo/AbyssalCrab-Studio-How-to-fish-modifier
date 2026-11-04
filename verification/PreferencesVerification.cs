@@ -268,6 +268,23 @@ static class PreferencesVerification
             "Applying a normal parameter preset does not replay its captured continuous switches");CloseSession(preset);
         var copy=seed.Copy();copy.Session.Put("toggle:player.health.lock",false);
         Check(seed.Session.Boolean("toggle:player.health.lock")==true&&TrainerUserPreferences.Parse(seed.ToJson()).Session.Boolean("snapshot")==true,"Session dictionaries are copied deeply and round-trip under schema version one");
+        {
+            var closing=Connected(Saved(),out var pendingRuntime,out var closingStore);
+            AwaitSession(closing.RestoreLastSessionAsync());closing.FlushPreferences();
+            Check(TrainerUserPreferences.Parse(closingStore.Json).Session.Boolean("toggle:player.health.lock")==true,
+                "Emergency-close fixture starts with saved enabled switches");
+            pendingRuntime.HoldFeature="locks.disable_all";var stop=closing.EmergencyDisableAsync();Pump();
+            Check(!stop.IsCompleted,"Emergency-close fixture waits for the actual clear receipt");
+            CloseSession(closing);var stopped=TrainerUserPreferences.Parse(closingStore.Json);
+            Check(stopped.Session.Boolean("toggle:player.health.lock")==false&&stopped.Session.Boolean("toggle:player.fullness.lock")==false
+                &&new[]{"aimAssist","crosshair","combatFeedback","slotMachine","roulette","autoRefill"}.All(k=>stopped.Session.Boolean(k)==false),
+                "Closing during emergency clear saves revoked intents for every stopped owner");
+            Check(stopped.Session.Boolean("trackDeathPosition")==true,"Emergency stop retains unrelated saved observation preferences");
+            pendingRuntime.Complete();AwaitSession(stop);
+            var next=Connected(stopped,out var nextRuntime,out _);AwaitSession(next.RestoreLastSessionAsync());
+            Check(!Feature(next,"player.health.lock").Enabled&&!next.AimAssist.Enabled&&!next.FunEventsPage.Roulette.Active,
+                "Explicit restoration after emergency close does not re-enable revoked switches");CloseSession(next);
+        }
     }
 
     [STAThread] public static int Main(string[] args)

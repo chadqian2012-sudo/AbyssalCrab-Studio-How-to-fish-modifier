@@ -608,7 +608,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 	public void Connect(IGameRuntimeClient runtime, CapabilitySet capabilities)
 	{
         ResetExperienceWorld();
-        _featureActionEpoch++;
+        InvalidateFeatureActions();
 		int connectionEpoch = Interlocked.Increment(ref _connectionEpoch);
 		CancellationToken cancellationToken = ReplaceCatalogRetry();
 		_runtime = runtime;
@@ -647,7 +647,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 	private void DetachRuntime(string message, bool preserveToggleIntent)
 	{
         if (_runtime != null) { CapturePreferences(); _preferencesDirty = true; }
-        _featureActionEpoch++;
+        InvalidateFeatureActions();
 		StopExperienceAutomation();
 		CombatDiagnostics = "运行时已断开 · 诊断读数已失效";
 		Interlocked.Increment(ref _connectionEpoch);
@@ -690,6 +690,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		PositionStatus = message;
 		if(presetWasBusy)
         {
+            InvalidateFeatureActions();
             if(_runtime!=null)AimAssist.Connect(_runtime,_capabilities);
             RefreshFeatures();
         }
@@ -711,11 +712,11 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		string[] array = _toggleStates.Keys.ToArray();
 		foreach (string key in array)
 		{
-			_toggleStates[key] = _toggleStates[key] with { Enabled = false, Status = message, StateLabel = "已关闭", IsSuccessful = true };
+			_toggleStates[key] = _toggleStates[key] with { Enabled = false, IsBusy = false, Status = message, StateLabel = "已关闭", IsSuccessful = true };
 		}
 		foreach (FeatureItemViewModel item in Features.Where((FeatureItemViewModel item) => item.Descriptor.Control == FeatureControl.Toggle))
 		{
-			item.ApplyExternalToggleState(item.CaptureToggleState() with { Enabled = false, Status = message, StateLabel = "已关闭", IsSuccessful = true });
+			item.ApplyExternalToggleState(item.CaptureToggleState() with { Enabled = false, IsBusy = false, Status = message, StateLabel = "已关闭", IsSuccessful = true });
 		}
 		OnPropertyChanged(nameof(ActiveFeaturesText));
 	}
@@ -749,7 +750,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 			foreach (JsonElement item in valueOrDefault.EnumerateArray())
 			{
 				string text = Text(item, "featureId");
-				if (text != null && _toggleStates.TryGetValue(text, out FeatureToggleState value) && value.Enabled)
+				if (text != null && _toggleStates.TryGetValue(text, out FeatureToggleState value) && value.Enabled && !value.IsBusy)
 				{
 					string text2 = Text(item, "state") ?? "waiting";
 					string status = Text(item, "reason") ?? string.Empty;
@@ -868,15 +869,28 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		}
 	}
 
+    private void InvalidateFeatureActions()
+    {
+        _featureActionEpoch++;
+        foreach(var pair in _toggleStates.Where(p=>p.Value.IsBusy).ToArray())
+            _toggleStates[pair.Key]=pair.Value with { IsBusy=false, IsSuccessful=false, StateLabel="等待确认", Status="连接或操作已切换，请重新确认功能状态" };
+    }
 	private void RememberToggleState(FeatureItemViewModel source)
 	{
 		if (source.Descriptor.Control == FeatureControl.Toggle)
 		{
 			FeatureToggleState featureToggleState = source.CaptureToggleState();
 			_toggleStates[source.Descriptor.Id] = featureToggleState;
+            if(source.IsMagicBullet&&!_restoringPreferences&&!_refreshingFeatureParameters)
+            {
+                if(!_preferences.Features.TryGetValue(source.Descriptor.Id,out var parameters))
+                    _preferences.Features[source.Descriptor.Id]=parameters=new();
+                if(parameters.Boolean("targetTeammates")!=source.MagicTargetTeammates)
+                { parameters.Put("targetTeammates",source.MagicTargetTeammates);SchedulePreferencesSave(); }
+            }
 			OnPropertyChanged(nameof(ActiveFeaturesText));
             var current=Features.FirstOrDefault(item=>item.Descriptor.Id==source.Descriptor.Id&&item!=source);
-            if(current!=null&&!current.IsBusy)current.ApplyExternalToggleState(featureToggleState);
+            if(current!=null)current.ApplyExternalToggleState(featureToggleState);
 		}
 	}
 
@@ -891,7 +905,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 			{
 				break;
 			}
-			if (!_toggleStates.TryGetValue(pair.Key, out FeatureToggleState value) || !value.Enabled)
+			if (!_toggleStates.TryGetValue(pair.Key, out FeatureToggleState value) || !value.Enabled || value.IsBusy)
 			{
 				continue;
 			}
@@ -917,7 +931,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 				{
 					break;
 				}
-				if (!_toggleStates.TryGetValue(pair.Key, out value) || !value.Enabled)
+				if (!_toggleStates.TryGetValue(pair.Key, out value) || !value.Enabled || value.IsBusy)
 				{
 					continue;
 				}
@@ -956,7 +970,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 				{
 					break;
 				}
-				if (_toggleStates.TryGetValue(pair.Key, out value) && value.Enabled)
+				if (_toggleStates.TryGetValue(pair.Key, out value) && value.Enabled && !value.IsBusy)
 				{
 					ApplyRememberedToggleState(pair.Key, new FeatureToggleState(Enabled: false, "自动恢复失败 · " + ex.Message, "恢复失败", IsSuccessful: false));
 				}
@@ -976,7 +990,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 	private void ApplyRememberedToggleState(string id, FeatureToggleState state)
 	{
         if (id == "combat.silent_aim" && _toggleStates.TryGetValue(id, out var magicPrevious))
-            state = state with { AppliedMagicArguments = magicPrevious.AppliedMagicArguments };
+            state = state with { AppliedMagicArguments = magicPrevious.AppliedMagicArguments, MagicTargetTeammates = magicPrevious.MagicTargetTeammates };
         if (id == "player.spin.lock" && _toggleStates.TryGetValue(id, out var previous))
             state = state with { SpinSpeedText = previous.SpinSpeedText, AppliedSpinSpeed = previous.AppliedSpinSpeed,
                 SpinAutoJump = previous.SpinAutoJump, AppliedSpinAutoJump = previous.AppliedSpinAutoJump };

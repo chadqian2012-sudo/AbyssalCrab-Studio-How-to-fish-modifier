@@ -10,9 +10,9 @@ AbyssalCrab Studio is a Windows desktop assistant for *How to Fish*. It uses a W
 
 ## 当前版本 | Current release
 
-当前源码同步至 **r16b（2026-11-03）**，包含手动恢复上次会话、手记与备份、队友筛选、追踪范围圈及恢复/紧急停用边界修复。详情见 [r16b 更新与验证](docs/R16B.md) 和 [会话恢复说明](docs/SESSION_RESTORE.md)。
+当前源码为 **r17c（2026-11-04）**。修复紧急停用期间退出仍保存旧开关，以及跨分类、重连时队友选项显示与实际设置不一致。551 项离线检查全部通过，比 r16b 新增 28 项。详情见 [本次修复与会话恢复说明](docs/SESSION_RESTORE.md)；[r16b 记录](docs/R16B.md)保留为历史依据。
 
-The source is synchronized to **r16b (2026-11-03)**, including explicit session restoration, fishing journal and backup support, teammate filtering, tracking-range visualization, and restoration/emergency-stop fixes. See [r16b changes and validation](docs/R16B.md) and [session restoration](docs/SESSION_RESTORE.md).
+Current source: **r17c (2026-11-04)**. Closing during emergency stop preserves revoked switch intentions. Teammate controls remain consistent across category changes and delayed reconnect replies. All 551 offline assertions passed, including 28 added since r16b. See [current fixes and session restoration](docs/SESSION_RESTORE.md). The [r16b record](docs/R16B.md) remains historical evidence.
 
 主要体验功能包括：全局搜索、最多 50 套参数预设、物品/鱼类收藏与最近配置、可导入/导出的传送标记、角色手感参数、战斗诊断、状态组件、大陀螺速度曲线和带上限的可选海鸥自动补充。完整说明见 [功能指南 | Feature guide](docs/FEATURES.md)。
 

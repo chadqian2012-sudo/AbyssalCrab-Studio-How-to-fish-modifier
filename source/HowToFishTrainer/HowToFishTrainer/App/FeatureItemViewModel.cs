@@ -691,6 +691,8 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 			_status = toggleState.Status;
 			_stateLabel = toggleState.StateLabel;
 			_isSuccessful = toggleState.IsSuccessful;
+            _isBusy = toggleState.IsBusy;
+            _magicTargetTeammates = toggleState.MagicTargetTeammates;
             // A cached offline label must not override current session availability.
             if (IsAvailable && !_enabled && _stateLabel == "不可用")
             {
@@ -743,6 +745,8 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 	{
 		return new FeatureToggleState(Enabled, Status, StateLabel, IsSuccessful)
         {
+            IsBusy = IsBusy,
+            MagicTargetTeammates = MagicTargetTeammates,
             SpinSpeedText = SpinSpeedText,
             AppliedSpinSpeed = _appliedSpinSpeed,
             SpinAutoJump = SpinAutoJump,
@@ -760,7 +764,6 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 	public void ApplyExternalToggleState(FeatureToggleState state)
 	{
         _operationEpoch++;
-        IsBusy = false;
 		if (IsClientProtectionRestricted)
 		{
 			state = ClientProtectionNotice.DisabledState;
@@ -772,7 +775,12 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 			_status = state.Status;
 			_stateLabel = state.StateLabel;
 			_isSuccessful = state.IsSuccessful;
+            _isBusy = state.IsBusy;
+            _magicTargetTeammates = state.MagicTargetTeammates;
             _appliedMagicArguments = state.AppliedMagicArguments;
+            Changed(nameof(IsBusy));
+            Changed(nameof(CanInteract));
+            Changed(nameof(MagicTargetTeammates));
             if (IsSpin)
             {
                 _spinSpeedText = state.SpinSpeedText;
@@ -932,7 +940,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 		}
 		finally
 		{
-            if(operationEpoch==_operationEpoch)IsBusy = false;
+            if(operationEpoch==_operationEpoch){IsBusy = false;NotifyStateChanged();}
 		}
 	}
 
