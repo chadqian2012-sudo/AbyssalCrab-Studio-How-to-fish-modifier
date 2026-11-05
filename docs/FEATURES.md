@@ -1,5 +1,29 @@
 # 功能指南 | Feature Guide
 
+## r18 悬浮面板复用主界面的功能 | Shared game panel
+
+在主窗口勾选“游戏悬浮窗”，切回已连接的游戏窗口后显示 AC 按钮。拖动按钮调整位置，点击或按 `Home` 展开；“收起”或 `Esc` 返回游戏。设置中可改成 `F8`、`Ctrl+Home` 等快捷键。`Ctrl+Shift+F12` 保留为紧急停用，面板顶部也有同一操作的按钮。
+
+Enable the game panel in the main window, then return to the connected game. Drag the AC launcher to move it; click it or press `Home` to expand. Collapse or press `Esc` to return to the game. The hotkey is configurable; `Ctrl+Shift+F12` remains emergency stop and is also available as a visible button.
+
+- **快捷面板**：在设置中为面板取名、新建，再添加功能。普通功能可直接编辑和操作；复杂功能进入完整页面。使用上下箭头调整快捷项顺序。
+- **全部功能**：与主窗口共用分类、设置及执行状态。主窗口修改的数字草稿会同步显示，切换分类不会重建功能对象。较窄窗口可横向滚动完整设置。
+- **传送点**：直接传送本机角色，沿用安全落点设置。即使主窗口选中过其他成员，快捷传送也不会传送该成员。管理坐标入口可保存当前位置和编辑传送点。
+- **参数预设**：保存当前参数、载入、重命名、删除及加入快捷面板。载入先停用持续功能，再载入参数；不会自动生成、传送、加钱或下注。
+- **设置**：保存面板、快捷项顺序、热键、位置和大小。重启从收起状态开始。切换到其他应用或最小化游戏时隐藏，不强行切回游戏。
+
+Custom panels mix features, complete pages, saved local-player teleports, and named presets. Both windows share parameter drafts and execution state. Renames update references; unavailable entries are shown as unavailable. Preset loading disables continuous features and loads parameters without executing one-shot actions. Layout and shortcuts persist, while startup always begins collapsed. Windowed and borderless modes are supported; exclusive fullscreen and live focus behavior still require manual acceptance.
+
+## 高速时只取消手持物的走路摆动 | Held movement bob
+
+当前走路或冲刺的**已生效倍率超过 1 倍**时，普通持物和工具的移动摆动量归零。没有应用的输入框草稿不参与判断。回到 1 倍、停用或退出会话后，由原生逻辑计算摆动。
+
+Only the local player's held-item/tool movement bob is suppressed when the currently applied walk or sprint multiplier exceeds 1. Unapplied text drafts do not affect this decision. Native calculation resumes at 1x or after disabling/session exit. Turning sway, leaning, breathing, aiming, firing, reloading, casting, pickup/drop, camera motion, footsteps, collision and slope behavior are preserved.
+
+雷达还有持物物理追随后的归位路径，本轮没有改碰撞、固定物品坐标或放宽归位阈值。离线检查不能证明高速雷达已完全稳定；若仍闪动，需单独记录并继续定位。
+
+The radar also has a physical-follow recovery path. This change does not pin transforms, disable collision, or relax recovery thresholds. Offline checks cannot establish that all radar flicker is fixed; any remaining flicker must be recorded separately during live acceptance.
+
 本指南依据交付目录中的说明整理，概述 V1.1.37 的功能及其边界。软件界面和当前源码为准。
 
 This guide summarizes V1.1.37 features and their boundaries from the delivery documents. The application UI and current source remain authoritative.

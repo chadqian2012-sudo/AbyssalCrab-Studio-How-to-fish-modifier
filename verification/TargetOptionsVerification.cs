@@ -185,7 +185,8 @@ static class TargetOptionsVerification
         Check(ads>hip*2 && ads<hip*2.2, "ADS narrower FOV expands the projected circle");
         Check(MagicRangePolicy.Project(180,60,1920,1080,out radius,out shortForm)&&shortForm&&radius==1080*.46, "Full-sphere angle uses explicit abbreviated view");
         Check(!MagicRangePolicy.Project(double.NaN,60,1920,1080,out _,out _)&&!MagicRangePolicy.Project(8,0,1920,1080,out _,out _)&&!MagicRangePolicy.Project(8,60,0,1080,out _,out _), "Invalid camera inputs hide range drawing");
-        File.WriteAllText(Path.Combine(args[0],"results.json"),JsonSerializer.Serialize(new{passed=true,checks=Checks.Count,tests=Checks,fixtureOnly=true,gameInjected=false},new JsonSerializerOptions{WriteIndented=true}));
+        File.WriteAllText(Path.Combine(args[0],"results.json"),JsonSerializer.Serialize(new{passed=true,checks=Checks.Count,tests=Checks,fixtureOnly=true,gameInjected=false,
+            applicationSha256=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(typeof(MainViewModel).Assembly.Location))).ToLowerInvariant()},new JsonSerializerOptions{WriteIndented=true}));
         Console.WriteLine("Target options verification: "+Checks.Count+" checks passed"); return 0;
     }
 }

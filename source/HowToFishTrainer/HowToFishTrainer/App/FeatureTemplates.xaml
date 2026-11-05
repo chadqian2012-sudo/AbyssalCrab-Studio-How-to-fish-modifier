@@ -1,0 +1,253 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:app="clr-namespace:HowToFishTrainer.App" xmlns:core="clr-namespace:HowToFishTrainer.Core;assembly=HowToFishTrainer.Core">
+  <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
+      <app:PointDecorationConverter x:Key="PointDecorationConverter"/>
+      <Style x:Key="InactiveScrim" TargetType="{x:Type Border}">
+        <Setter Property="Background" Value="{StaticResource BgBrush}"/>
+        <Setter Property="IsHitTestVisible" Value="False"/>
+        <Setter Property="Opacity" Value="0"/>
+        <Style.Triggers>
+          <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType={x:Type Window}}, Path=IsActive}" Value="False">
+            <DataTrigger.EnterActions>
+              <BeginStoryboard>
+                <Storyboard>
+                  <DoubleAnimation Storyboard.TargetProperty="Opacity" To="0.5"
+                                   Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}"/>
+                </Storyboard>
+              </BeginStoryboard>
+            </DataTrigger.EnterActions>
+            <DataTrigger.ExitActions>
+              <BeginStoryboard>
+                <Storyboard>
+                  <DoubleAnimation Storyboard.TargetProperty="Opacity" To="0"
+                                   Duration="{StaticResource MotionStatus}" EasingFunction="{StaticResource EaseSoft}"/>
+                </Storyboard>
+              </BeginStoryboard>
+            </DataTrigger.ExitActions>
+          </DataTrigger>
+        </Style.Triggers>
+      </Style>
+      <DataTemplate x:Key="ToggleTemplate">
+        <Grid Margin="0,6,0,0">
+          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition/>
+            <ColumnDefinition Width="Auto"/>
+          </Grid.ColumnDefinitions>
+          <TextBlock FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Style="{StaticResource Muted}" Text="{Binding Status}" Visibility="{Binding IsStandardToggle, Converter={StaticResource BoolToVisibility}}"/>
+          <ToggleButton Grid.Column="1" Margin="14,0,0,0" Style="{StaticResource FeatureSwitch}" IsChecked="{Binding Enabled, Mode=TwoWay}" IsEnabled="{Binding CanInteract}"/>
+            <Grid Visibility="{Binding IsSpin, Converter={StaticResource BoolToVisibility}}" ToolTip="{Binding Status}" AutomationProperties.HelpText="{Binding Status}">
+              <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+              <!-- 转速标签（大陀螺）：「转速（圈/秒，2–15）」在 10px 下需要约 105.3 DIP，原先只有 98 DIP，
+                   被 CharacterEllipsis 截掉约 7.3 DIP（独立验收矩阵实测）。这里给它一个 MinWidth 保证
+                   不被压，同时补 ToolTip 作为兜底 —— 交接文档 §14 要求「字段错误不能仅省略得看不懂」。 -->
+              <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" MinWidth="108"/><ColumnDefinition Width="76"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <TextBlock Text="转速（圈/秒，2–15）" FontSize="10" VerticalAlignment="Center" Margin="0,0,6,0" Style="{StaticResource Muted}" ToolTip="转速（圈/秒，2–15）"/>
+              <TextBox Grid.Column="1" Height="32" Padding="8,4" AutomationProperties.Name="大陀螺转速" ToolTip="每秒 2–15 圈，默认 4；开启时采用输入值，开启后点击应用设置更新" Text="{Binding SpinSpeedText, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding CanInteract}"/>
+              <Button Grid.Column="2" Height="32" Padding="10,4" Content="应用设置" Margin="8,0,0,0" Style="{StaticResource PrimaryButton}" Command="{Binding ApplySpinSpeedCommand}" IsEnabled="{Binding CanApplySpinSpeed}"/>
+              <CheckBox Grid.Row="1" Grid.ColumnSpan="3" Margin="0,8,0,0" Content="模型自动跳跃" AutomationProperties.Name="大陀螺模型自动跳跃" IsChecked="{Binding SpinAutoJump, Mode=TwoWay}" IsEnabled="{Binding CanInteract}" ToolTip="只改变第三人称模型外观；手动跳跃优先。开启时采用选择，运行中点击应用设置更新。"/>
+            </Grid>
+            <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Visibility="{Binding HasSpinSpeedError, Converter={StaticResource BoolToVisibility}}" Text="{Binding SpinSpeedValidationMessage}" Foreground="{StaticResource DangerBrush}" FontSize="10" Margin="0,3,0,0"/>
+
+        </Grid>
+      </DataTemplate>
+      <DataTemplate x:Key="MagicBulletTemplate">
+        <Grid Margin="0,6,0,0">
+          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+          <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <TextBlock Text="Boss → 动物 → 玩家 · 同类优先最近" Style="{StaticResource Muted}" FontSize="10" VerticalAlignment="Center" TextWrapping="Wrap"/>
+          <ToggleButton Grid.Column="1" Style="{StaticResource FeatureSwitch}" IsChecked="{Binding Enabled, Mode=TwoWay}" IsEnabled="{Binding CanInteract}" Margin="8,0,0,0"/>
+            <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Margin="0,8,0,0">
+              <TextBlock Text="捕获角度（°） / 距离（米） / 强度（%）" Style="{StaticResource Muted}" FontSize="10" Margin="0,0,0,5"/>
+              <UniformGrid Columns="3">
+                <app:NumericInputBox Input="{Binding MagicAngleInput}" Margin="0,0,4,0"/>
+                <app:NumericInputBox Input="{Binding MagicDistanceInput}" Margin="0,0,4,0"/>
+                <app:NumericInputBox Input="{Binding MagicStrengthInput}"/>
+              </UniformGrid>
+              <ComboBox ItemsSource="{Binding MagicTriggerModes}" DisplayMemberPath="Label" SelectedItem="{Binding MagicTrigger}" Margin="0,8,0,0" AutomationProperties.Name="魔法子弹触发方式"/>
+              <CheckBox Content="锁定队友" IsChecked="{Binding MagicTargetTeammates}" IsEnabled="{Binding CanInteract}" Margin="0,8,0,0" ToolTip="勾选后把其他存活玩家加入目标；取消后排除所有队友。友伤和伤害结算仍由游戏决定，切换后立即应用。"/>
+              <Button Content="应用追踪设置" Command="{Binding ApplyMagicCommand}" IsEnabled="{Binding CanApplyMagic}" Style="{StaticResource PrimaryButton}" Margin="0,8,0,0"/>
+              <TextBlock Text="开启后显示追踪角度示意圈；随开镜视野缩放，距离仍按上方米数筛选。" Style="{StaticResource Muted}" TextWrapping="Wrap" FontSize="10" Margin="0,6,0,0"/>
+              <TextBlock Text="{Binding Status}" Style="{StaticResource Muted}" TextWrapping="Wrap" FontSize="10" Margin="0,6,0,0"/>
+            </StackPanel>
+        </Grid>
+      </DataTemplate>
+      <DataTemplate x:Key="NumberTemplate">
+        <Grid Margin="0,6,0,0">
+          <Grid.RowDefinitions>
+            <RowDefinition/>
+            <RowDefinition/>
+          </Grid.RowDefinitions>
+          <TextBlock FontSize="11" TextTrimming="CharacterEllipsis" Style="{StaticResource Muted}" Text="{Binding Status}"/>
+          <Grid Row="1" Margin="0,9,0,0">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <app:NumericInputBox Input="{Binding ValueInput}"/>
+            <Button Grid.Column="1" Margin="8,0,0,0" Content="应用数值" Style="{StaticResource PrimaryButton}" Command="{Binding ExecuteCommand}" IsEnabled="{Binding CanInteract}"/>
+          </Grid>
+        </Grid>
+      </DataTemplate>
+      <DataTemplate x:Key="ActionTemplate">
+        <Grid Margin="0,6,0,0">
+          <Grid.RowDefinitions>
+            <RowDefinition/>
+            <RowDefinition/>
+          </Grid.RowDefinitions>
+          <TextBlock FontSize="11" TextTrimming="CharacterEllipsis" Style="{StaticResource Muted}" Text="{Binding Status}"/>
+          <Grid Row="1" Margin="0,9,0,0">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <CheckBox Content="完成后调用游戏原生保存" VerticalAlignment="Center" IsChecked="{Binding SaveAfter}" Visibility="{Binding CanRequestNativeSave, Converter={StaticResource BoolToVisibility}}"/>
+            <Button Grid.Column="1" Content="立即执行" Style="{StaticResource PrimaryButton}" Command="{Binding ExecuteCommand}" IsEnabled="{Binding CanInteract}"/>
+          </Grid>
+        </Grid>
+      </DataTemplate>
+      <DataTemplate x:Key="CoordinateTemplate">
+        <Grid Margin="0,6,0,0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition/>
+            <ColumnDefinition/>
+            <ColumnDefinition/>
+            <ColumnDefinition Width="Auto"/>
+          </Grid.ColumnDefinitions>
+          <app:NumericInputBox Margin="0,0,5,0" Input="{Binding XInput}"/>
+          <app:NumericInputBox Grid.Column="1" Margin="5,0" Input="{Binding YInput}"/>
+          <app:NumericInputBox Grid.Column="2" Margin="5,0" Input="{Binding ZInput}"/>
+          <Button Grid.Column="3" Margin="7,0,0,0" Content="传送" Style="{StaticResource PrimaryButton}" Command="{Binding ExecuteCommand}" IsEnabled="{Binding CanInteract}"/>
+        </Grid>
+      </DataTemplate>
+      <DataTemplate x:Key="GeneratorTemplate">
+        <Grid Margin="0,6,0,0">
+          <Grid.RowDefinitions>
+            <RowDefinition/>
+            <RowDefinition/>
+          </Grid.RowDefinitions>
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition/>
+              <ColumnDefinition Width="72"/>
+            </Grid.ColumnDefinitions>
+            <ComboBox DisplayMemberPath="DisplayName" ItemsSource="{Binding Options}" SelectedItem="{Binding SelectedOption}"/>
+            <app:NumericInputBox Grid.Column="1" Margin="8,0,0,0" Input="{Binding QuantityInput}"/>
+          </Grid>
+          <Grid Row="1" Margin="0,8,0,0">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+              <TextBlock FontSize="10" Style="{StaticResource Muted}" Text="{Binding Status}"/>
+              <CheckBox Content="生成后原生保存" Margin="0,4,0,0" IsChecked="{Binding SaveAfter}"/>
+            </StackPanel>
+            <Button Grid.Column="1" Content="生成到游戏" Style="{StaticResource PrimaryButton}" Command="{Binding ExecuteCommand}" IsEnabled="{Binding CanGenerate}"/>
+          </Grid>
+        </Grid>
+      </DataTemplate>
+
+<Style x:Key="FeatureEditorStyle" TargetType="{x:Type ContentControl}">
+                                <Setter Property="ContentTemplate" Value="{StaticResource ActionTemplate}"/>
+                                <Style.Triggers>
+                                  <DataTrigger Value="{x:Static core:FeatureControl.Toggle}" Binding="{Binding Content.Descriptor.Control, RelativeSource={RelativeSource Self}}">
+                                    <Setter Property="ContentTemplate" Value="{StaticResource ToggleTemplate}"/>
+                                  </DataTrigger>
+                                  <DataTrigger Value="{x:Static core:FeatureControl.Number}" Binding="{Binding Content.Descriptor.Control, RelativeSource={RelativeSource Self}}">
+                                    <Setter Property="ContentTemplate" Value="{StaticResource NumberTemplate}"/>
+                                  </DataTrigger>
+                                  <DataTrigger Value="{x:Static core:FeatureControl.Generator}" Binding="{Binding Content.Descriptor.Control, RelativeSource={RelativeSource Self}}">
+                                    <Setter Property="ContentTemplate" Value="{StaticResource GeneratorTemplate}"/>
+                                  </DataTrigger>
+                                  <DataTrigger Value="{x:Static core:FeatureControl.Coordinates}" Binding="{Binding Content.Descriptor.Control, RelativeSource={RelativeSource Self}}">
+                                    <Setter Property="ContentTemplate" Value="{StaticResource CoordinateTemplate}"/>
+                                  </DataTrigger>
+                                  <DataTrigger Value="True" Binding="{Binding Content.IsMagicBullet, RelativeSource={RelativeSource Self}}">
+                                    <Setter Property="ContentTemplate" Value="{StaticResource MagicBulletTemplate}"/>
+                                  </DataTrigger>
+                                </Style.Triggers>
+                              </Style>
+<DataTemplate x:Key="FeatureCardTemplate">
+                      <Border Style="{StaticResource FeatureCardStyle}">
+                        <Grid>
+                          <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition/>
+                          </Grid.RowDefinitions>
+                          <Grid>
+                            <Grid.RowDefinitions>
+                              <RowDefinition Height="Auto"/>
+                              <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                              <ColumnDefinition/>
+                              <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                              <TextBlock FontSize="15" FontWeight="SemiBold" Text="{Binding Descriptor.Title}"/>
+                              <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
+                                <Border Background="{StaticResource AccentSoftBrush}" CornerRadius="9" Padding="8,3">
+                                  <TextBlock Foreground="{StaticResource AccentDarkBrush}" FontSize="9" FontWeight="SemiBold" Text="{Binding CapabilityLabel}"/>
+                                </Border>
+                                <TextBlock Text="内存实时" Style="{StaticResource Caption}" Margin="8,3,0,0"/>
+                              </StackPanel>
+                            </StackPanel>
+                            <Border Grid.Column="1" CornerRadius="10" Padding="9,4" VerticalAlignment="Top">
+                              <FrameworkElement.Style>
+                                <Style TargetType="{x:Type Border}">
+                                  <Setter Property="Background" Value="{StaticResource CardStateIdleBrush}"/>
+                                  <Style.Triggers>
+                                    <DataTrigger Value="busy" Binding="{Binding VisualState}">
+                                      <Setter Property="Background" Value="{StaticResource CardStateWaitBrush}"/>
+                                    </DataTrigger>
+                                    <DataTrigger Value="waiting" Binding="{Binding VisualState}">
+                                      <Setter Property="Background" Value="{StaticResource CardStateWaitBrush}"/>
+                                    </DataTrigger>
+                                    <DataTrigger Value="applied" Binding="{Binding VisualState}">
+                                      <Setter Property="Background" Value="{StaticResource CardStateAppliedBrush}"/>
+                                    </DataTrigger>
+                                    <DataTrigger Value="failed" Binding="{Binding VisualState}">
+                                      <Setter Property="Background" Value="{StaticResource DangerSoftBrush}"/>
+                                    </DataTrigger>
+                                  </Style.Triggers>
+                                </Style>
+                              </FrameworkElement.Style>
+                              <TextBlock FontSize="9" FontWeight="SemiBold" Text="{Binding StateLabel}">
+                                <FrameworkElement.Style>
+                                  <Style TargetType="{x:Type TextBlock}">
+                                    <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                                    <Style.Triggers>
+                                      <DataTrigger Value="busy" Binding="{Binding VisualState}">
+                                        <Setter Property="Foreground" Value="{StaticResource WarningBrush}"/>
+                                      </DataTrigger>
+                                      <DataTrigger Value="waiting" Binding="{Binding VisualState}">
+                                        <Setter Property="Foreground" Value="{StaticResource WarningBrush}"/>
+                                      </DataTrigger>
+                                      <DataTrigger Value="applied" Binding="{Binding VisualState}">
+                                        <Setter Property="Foreground" Value="{StaticResource SuccessBrush}"/>
+                                      </DataTrigger>
+                                      <DataTrigger Value="failed" Binding="{Binding VisualState}">
+                                        <Setter Property="Foreground" Value="{StaticResource DangerBrush}"/>
+                                      </DataTrigger>
+                                    </Style.Triggers>
+                                  </Style>
+                                </FrameworkElement.Style>
+                              </TextBlock>
+                            </Border>
+                            <Expander Grid.Row="1" Grid.ColumnSpan="2" Header="功能说明" FontSize="10" Margin="0,8,0,0"><TextBlock TextWrapping="Wrap" FontSize="10" Margin="0,4,0,0" Text="{Binding Descriptor.Description}">
+                              <FrameworkElement.Style>
+                                <Style BasedOn="{StaticResource Muted}" TargetType="{x:Type TextBlock}">
+                                  <Style.Triggers>
+                                    <DataTrigger Value="" Binding="{Binding Descriptor.Description}">
+                                      <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                  </Style.Triggers>
+                                </Style>
+                              </FrameworkElement.Style>
+                            </TextBlock></Expander>
+                          </Grid>
+                          <ContentControl Grid.Row="1" Content="{Binding}" Style="{StaticResource FeatureEditorStyle}"/>
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+</ResourceDictionary>

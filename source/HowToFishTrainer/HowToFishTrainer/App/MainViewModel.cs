@@ -104,6 +104,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 	public IReadOnlyList<NavigationPage> Pages { get; }
 
 	public ObservableCollection<FeatureItemViewModel> Features { get; }
+    public ObservableCollection<FeatureItemViewModel> AllFeatures { get; } = new();
 
 	public NavigationPage SelectedPage
 	{
@@ -590,12 +591,13 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		{
 			RefreshCatalogAsync();
 		});
-		RefreshFeatures();
+		RebuildFeatureModels();
 		InitializePositionEditorTracking();
 		InitializeExperience(experiencePath ?? (preferencesStore is FileUserPreferencesStore && !Environment.GetCommandLineArgs().Contains("--ui-preview",StringComparer.OrdinalIgnoreCase) ? System.IO.Path.Combine(ProductIdentity.AppDataDirectory,"experience-settings.json") : null));
 		// Load legacy experience values first; the unified parameter file takes precedence
 		// for fields it contains, while older installations retain their existing fallback.
 		InitializePreferences(preferencesStore);
+        InitializeOverlay();
 	}
 
 	private void OpenRoomMemberInTeleport(RoomMemberSnapshot member)
@@ -618,7 +620,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		RoomMembersPage.Connect(runtime, capabilities);
 		AimAssist.Connect(runtime, capabilities);
 		Crosshair.Connect(runtime);
-		RefreshFeatures();
+		RebuildFeatureModels();
 		ReplayEnabledTogglesAsync(runtime, capabilities, connectionEpoch);
 		if (capabilities.CanExecute(Capability.HostWorld))
 		{
@@ -672,7 +674,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		SelectedIsland = null;
 		IslandStatus = "等待连接后读取实时岛屿目录";
 		CatalogStatus = (preserveToggleIntent ? "运行时桥暂时失联，重连后自动恢复持续功能" : "等待连接后读取实时目录");
-		RefreshFeatures();
+		RebuildFeatureModels();
 		OnPropertyChanged("CanLoadSelectedIsland");
 		TargetRoomMember = false;
 		OnPropertyChanged("CanTargetRoomMember");
@@ -692,7 +694,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         {
             InvalidateFeatureActions();
             if(_runtime!=null)AimAssist.Connect(_runtime,_capabilities);
-            RefreshFeatures();
+            RebuildFeatureModels();
         }
 	}
 
@@ -714,7 +716,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		{
 			_toggleStates[key] = _toggleStates[key] with { Enabled = false, IsBusy = false, Status = message, StateLabel = "已关闭", IsSuccessful = true };
 		}
-		foreach (FeatureItemViewModel item in Features.Where((FeatureItemViewModel item) => item.Descriptor.Control == FeatureControl.Toggle))
+		foreach (FeatureItemViewModel item in AllFeatures.Where((FeatureItemViewModel item) => item.Descriptor.Control == FeatureControl.Toggle))
 		{
 			item.ApplyExternalToggleState(item.CaptureToggleState() with { Enabled = false, IsBusy = false, Status = message, StateLabel = "已关闭", IsSuccessful = true });
 		}
@@ -784,51 +786,58 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         return originalCategory;
     }
 
-	private void RefreshFeatures()
-	{
+    private void RebuildFeatureModels()
+    {
         CaptureFeatureParameters();
         DetachFeatureParameterObservers();
         _refreshingFeatureParameters = true;
-		Features.Clear();
-		foreach (FeatureDescriptor item in FeatureRegistry.All.Where((FeatureDescriptor x) => DisplayCategory(x.Id, x.Category) == SelectedPage.Category && x.Id != "fishing.skin_jackpot" && x.Id != "fun.slot_machine.rarity" && (!IsTeleportPage || !TeleportCustomFeatureIds.Contains(x.Id)) && (!IsCombatPage || !CombatCustomFeatureIds.Contains(x.Id))))
-		{
-			IReadOnlyList<CatalogOption> readOnlyList2;
-			if (!(item.Id == "generation.fish"))
-			{
-				if (!(item.Id == "generation.item"))
-				{
-					IReadOnlyList<CatalogOption> readOnlyList = Array.Empty<CatalogOption>();
-					readOnlyList2 = readOnlyList;
-				}
-				else
-				{
-					readOnlyList2 = _itemCatalog;
-				}
-			}
-			else
-			{
-				readOnlyList2 = _fishCatalog;
-			}
-			IReadOnlyList<CatalogOption> options = readOnlyList2;
-            int actionEpoch=_featureActionEpoch;
-			_toggleStates.TryGetValue(item.Id, out FeatureToggleState value);
-            var feature = new FeatureItemViewModel(item, _runtime, _capabilities, options, value, source=>{if(actionEpoch==_featureActionEpoch)RememberToggleState(source);}, PlayEnabledSound, _sponsorAccessGate, _showFeatureNotice);
-            AttachExperience(feature);
-            RestoreFeatureParameters(feature);
+        try
+        {
+            AllFeatures.Clear();
+            foreach (var item in FeatureRegistry.All.Where(x => x.Id != "fishing.skin_jackpot" && x.Id != "fun.slot_machine.rarity" && !TeleportCustomFeatureIds.Contains(x.Id) && !CombatCustomFeatureIds.Contains(x.Id)))
+            {
+                IReadOnlyList<CatalogOption> options = item.Id == "generation.item" ? _itemCatalog : item.Id == "generation.fish" ? _fishCatalog : Array.Empty<CatalogOption>();
+                int actionEpoch = _featureActionEpoch;
+                _toggleStates.TryGetValue(item.Id, out var state);
+                var feature = new FeatureItemViewModel(item, _runtime, _capabilities, options, state,
+                    source => { if (actionEpoch == _featureActionEpoch) RememberToggleState(source); }, PlayEnabledSound, _sponsorAccessGate, _showFeatureNotice);
+                AttachExperience(feature);
+                RestoreFeatureParameters(feature);
+                AllFeatures.Add(feature);
+                ObserveFeatureParameters(feature);
+            }
+        }
+        finally { _refreshingFeatureParameters = false; }
+        RefreshFeatures();
+        RefreshOverlayItems();
+    }
+
+    private void RefreshFeatures()
+    {
+        Features.Clear();
+        foreach (var feature in AllFeatures.Where(f => DisplayCategory(f.Descriptor.Id, f.Descriptor.Category) == SelectedPage.Category))
             Features.Add(feature);
-            ObserveFeatureParameters(feature);
-		}
-        _refreshingFeatureParameters = false;
-		OnPropertyChanged("PageTitle");
-		OnPropertyChanged("ActiveGenerator");
-		OnPropertyChanged(nameof(FeelFeatures));
-		OnPropertyChanged(nameof(HasFeelFeatures));
-		OnPropertyChanged(nameof(DisplayFeatures));
-	}
+        OnPropertyChanged(nameof(PageTitle));
+        OnPropertyChanged(nameof(ActiveGenerator));
+        OnPropertyChanged(nameof(FeelFeatures));
+        OnPropertyChanged(nameof(HasFeelFeatures));
+        OnPropertyChanged(nameof(DisplayFeatures));
+    }
+
+    private void RefreshGeneratorCatalogs()
+    {
+        _refreshingFeatureParameters = true;
+        try
+        {
+            foreach (var feature in AllFeatures.Where(f => f.Descriptor.Control == FeatureControl.Generator))
+                feature.UpdateCatalog(feature.Descriptor.Id == "generation.fish" ? _fishCatalog : _itemCatalog);
+        }
+        finally { _refreshingFeatureParameters = false; }
+    }
 
 	public void RefreshSponsorAccess()
 	{
-		foreach (FeatureItemViewModel feature in Features)
+		foreach (FeatureItemViewModel feature in AllFeatures)
 		{
 			feature.RefreshSponsorAccess();
 		}
@@ -889,7 +898,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
                 { parameters.Put("targetTeammates",source.MagicTargetTeammates);SchedulePreferencesSave(); }
             }
 			OnPropertyChanged(nameof(ActiveFeaturesText));
-            var current=Features.FirstOrDefault(item=>item.Descriptor.Id==source.Descriptor.Id&&item!=source);
+            var current=AllFeatures.FirstOrDefault(item=>item.Descriptor.Id==source.Descriptor.Id&&item!=source);
             if(current!=null)current.ApplyExternalToggleState(featureToggleState);
 		}
 	}
@@ -995,7 +1004,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
             state = state with { SpinSpeedText = previous.SpinSpeedText, AppliedSpinSpeed = previous.AppliedSpinSpeed,
                 SpinAutoJump = previous.SpinAutoJump, AppliedSpinAutoJump = previous.AppliedSpinAutoJump };
 		_toggleStates[id] = state;
-        var current=Features.FirstOrDefault(feature=>feature.Descriptor.Id==id);
+        var current=AllFeatures.FirstOrDefault(feature=>feature.Descriptor.Id==id);
         if(current!=null&&!current.IsBusy)current.ApplyExternalToggleState(state);
 	}
 
@@ -1316,7 +1325,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 						CatalogStatus += $" · 权威目录 {Integer(element, "authoritative")} · 来源 {Integer(element, "sources")} · 重复ID {Integer(element, "duplicateIds")}";
 					}
 				}
-				RefreshFeatures();
+				RefreshGeneratorCatalogs();
 				return array.Length != 0;
 			}
 			CatalogStatus = "目录读取失败：运行时返回格式无效";
@@ -1480,32 +1489,28 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         return new("临时","上一次位置",Coordinate("x"),Coordinate("y"),Coordinate("z"));
     }
 
-	private async Task TeleportSelectedAsync()
-	{
-		if (_runtime == null || !_capabilities.CanExecute(Capability.OwnedPlayer))
-		{
-			PositionStatus = "当前会话不允许传送";
-			return;
-		}
-		if (!_sponsorAccessGate.TryAuthorize("world.teleport"))
-		{
-			PositionStatus = "此操作需要激活赞助版；未向游戏发送命令。";
-			return;
-		}
-        if(!TryResolveTeleportMember(out var member))return;
+    private Task TeleportSelectedAsync()
+    {
+        if (!TryResolveTeleportMember(out var member)) return Task.CompletedTask;
+        string error = NumericInput.FirstError(CurrentXInput, CurrentYInput, CurrentZInput);
+        if (error.Length != 0) { PositionStatus = error; return Task.CompletedTask; }
+        return TeleportToCoordinatesAsync(CurrentX, CurrentY, CurrentZ, member);
+    }
+
+    private async Task TeleportToCoordinatesAsync(double targetX, double targetY, double targetZ, RoomMemberSnapshot? member)
+    {
+        if (_runtime == null || !_capabilities.CanExecute(Capability.OwnedPlayer))
+        { PositionStatus = "当前会话不允许传送"; return; }
+        if (!_sponsorAccessGate.TryAuthorize("world.teleport"))
+        { PositionStatus = "当前操作不可用，未向游戏发送命令"; return; }
+        if (!double.IsFinite(targetX) || !double.IsFinite(targetY) || !double.IsFinite(targetZ) ||
+            Math.Abs(targetX) > 100000 || Math.Abs(targetY) > 100000 || Math.Abs(targetZ) > 100000)
+        { PositionStatus = "坐标无效，未执行传送"; return; }
         IGameRuntimeClient runtime = _runtime;
-        int epoch = _connectionEpoch;
-        int context = _positionContextEpoch;
-        var capabilities=_capabilities;bool safe=SafeLanding;
-        string coordinateError = NumericInput.FirstError(CurrentXInput, CurrentYInput, CurrentZInput);
-        if (coordinateError.Length != 0)
-        {
-            PositionStatus = coordinateError;
-            return;
-        }
-		double targetX = CurrentX;
-		double targetY = CurrentY;
-		double targetZ = CurrentZ;
+        int epoch = _connectionEpoch, context = _positionContextEpoch;
+        var capabilities = _capabilities;
+        bool safe = SafeLanding;
+
 		string targetKey = member?.Key ?? "local";
 		RuntimeCommandResult runtimeCommandResult = (member == null ? (await runtime.ExecuteAsync(new FeatureCommand("world.position.read", JsonSerializer.SerializeToElement(new { }), Capability.ReadOnly), CancellationToken.None)) : (await runtime.ExecuteAsync(new FeatureCommand("players.position.read", JsonSerializer.SerializeToElement(new
 		{
@@ -1637,6 +1642,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 			RefreshTeleportGroups();
 			RefreshTeleportFilter();
 			SelectedTeleportPoint = point;
+            RenameOverlayTeleportReference(existing, point);
 			PositionStatus = "坐标已保存到修改器本地设置";
 		}
 		catch (Exception ex)
@@ -1656,6 +1662,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 			TrainerTeleportPoint selected = SelectedTeleportPoint;
 			_settings.Save(TeleportPoints.Where((TrainerTeleportPoint point) => (object)point != selected));
 			TeleportPoints.Remove(selected);
+            RemoveOverlayReference(new("teleport", selected.Name, selected.Group));
             _experience.Points.RemoveAll(p=>p.Group==selected.Group&&p.Name==selected.Name); ScheduleExperienceSave();PointMetadataChanged();
 			RefreshTeleportGroups();
 			RefreshTeleportFilter();

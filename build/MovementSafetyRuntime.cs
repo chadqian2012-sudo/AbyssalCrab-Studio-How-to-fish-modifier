@@ -8,12 +8,13 @@ namespace AbyssalCrab.Runtime
 {
     public static class MovementSafetyRuntime
     {
-        private static FieldInfo bridgeField, stoppedField, restoreField, rejectedField, bobField, colliderField, rigidbodyField, jumpField, swimmingField, distanceField;
+        private static FieldInfo bridgeField, stoppedField, restoreField, rejectedField, bobField, toolBobField, colliderField, rigidbodyField, jumpField, swimmingField, distanceField;
         private static float nextWarning;
         public static void Install(Harmony harmony, string target)
         {
             if (target != "Attachments:get_Damage") return;
-            MethodInfo bob = null, move = null, bobHandler = null, moveHandler = null; bool addedBob = false, addedMove = false;
+            MethodInfo bob = null, toolBob = null, move = null, bobHandler = null, toolBobHandler = null, moveHandler = null;
+            bool addedBob = false, addedToolBob = false, addedMove = false;
             try
             {
                 bridgeField = AccessTools.Field(typeof(Bootstrap), "_bridge");
@@ -21,23 +22,28 @@ namespace AbyssalCrab.Runtime
                 restoreField = AccessTools.Field(typeof(TrainerBridgeHost), "_restoreRequested");
                 rejectedField = AccessTools.Field(typeof(TrainerBridgeHost), "_channelRejected");
                 bobField = AccessTools.Field(typeof(PlayerHolding), "_bobOffset");
+                toolBobField = AccessTools.Field(typeof(PlayerToolMovement), "_bobPos");
                 colliderField = AccessTools.Field(typeof(PlayerMovement), "_col");
                 rigidbodyField = AccessTools.Field(typeof(PlayerMovement), "_rig");
                 jumpField = AccessTools.Field(typeof(PlayerMovement), "_hasJumped");
                 swimmingField = AccessTools.Field(typeof(PlayerMovement), "_isSwimming");
                 distanceField = AccessTools.Field(typeof(PlayerMovement), "_groundCheckDist");
                 bob = AccessTools.Method(typeof(PlayerHolding), "GetBobOffset");
+                toolBob = AccessTools.Method(typeof(PlayerToolMovement), "Bob");
                 move = AccessTools.Method(typeof(PlayerMovement), "Move");
-                bobHandler = AccessTools.Method(typeof(MovementSafetyRuntime), "AfterRadarBob");
+                bobHandler = AccessTools.Method(typeof(MovementSafetyRuntime), "AfterHeldItemBob");
+                toolBobHandler = AccessTools.Method(typeof(MovementSafetyRuntime), "AfterToolBob");
                 moveHandler = AccessTools.Method(typeof(MovementSafetyRuntime), "AfterMovement");
-                if (bridgeField == null || stoppedField == null || restoreField == null || rejectedField == null || bobField == null || colliderField == null || rigidbodyField == null || jumpField == null || swimmingField == null || distanceField == null || bob == null || move == null || bobHandler == null || moveHandler == null)
+                if (bridgeField == null || stoppedField == null || restoreField == null || rejectedField == null || bobField == null || toolBobField == null || colliderField == null || rigidbodyField == null || jumpField == null || swimmingField == null || distanceField == null || bob == null || toolBob == null || move == null || bobHandler == null || toolBobHandler == null || moveHandler == null)
                     throw new MissingMemberException("Movement/radar native contract unavailable");
                 if (!HasPostfix(bob, bobHandler)) { addedBob = true; harmony.Patch(bob, postfix: new HarmonyMethod(bobHandler)); }
+                if (!HasPostfix(toolBob, toolBobHandler)) { addedToolBob = true; harmony.Patch(toolBob, postfix: new HarmonyMethod(toolBobHandler)); }
                 if (!HasPostfix(move, moveHandler)) { addedMove = true; harmony.Patch(move, postfix: new HarmonyMethod(moveHandler)); }
             }
             catch (Exception e)
             {
                 if (addedBob && bob != null && bobHandler != null) try { harmony.Unpatch(bob, bobHandler); } catch { }
+                if (addedToolBob && toolBob != null && toolBobHandler != null) try { harmony.Unpatch(toolBob, toolBobHandler); } catch { }
                 if (addedMove && move != null && moveHandler != null) try { harmony.Unpatch(move, moveHandler); } catch { }
                 Debug.LogWarning("[AbyssalCrab] 雷达与坡面适配不可用: " + e.Message);
             }
@@ -61,17 +67,24 @@ namespace AbyssalCrab.Runtime
                 (bool)stoppedField.GetValue(bridge) || (bool)restoreField.GetValue(bridge) || (bool)rejectedField.GetValue(bridge)) return null;
             return bridge;
         }
-        public static void AfterRadarBob(PlayerHolding __instance)
+        private static bool EnhancedMovement(Player player)
         {
-            try
-            {
-                var p = Player.LocalPlayer;
-                if (ActiveBridge() == null || !p || p.Holding != __instance || !(__instance.HeldItem is Map) || !p.Movement) return;
-                var velocity = p.Movement.Velocity;
-                if (p.Movement.Sprinting || velocity.x * velocity.x + velocity.z * velocity.z > 64f)
-                    bobField.SetValue(__instance, Vector3.zero);
-            }
-            catch (Exception e) { Warn("雷达摆动适配失败", e); }
+            var bridge = ActiveBridge();
+            if (bridge == null || !player.Movement) return false;
+            float multiplier;
+            return bridge.TryGetLockFloat(player.Movement.Sprinting ? "player.sprint.multiplier" : "player.move.multiplier", out multiplier) && multiplier > 1f;
+        }
+        public static void AfterHeldItemBob(PlayerHolding __instance)
+        {
+            var player = Player.LocalPlayer;
+            if (player && player.Holding == __instance && __instance.HeldItem && EnhancedMovement(player))
+                bobField.SetValue(__instance, Vector3.zero);
+        }
+        public static void AfterToolBob(PlayerToolMovement __instance)
+        {
+            var player = Player.LocalPlayer;
+            if (player && player.ToolMovement == __instance && EnhancedMovement(player))
+                toolBobField.SetValue(__instance, Vector2.zero);
         }
         public static Vector3 LimitUphill(Vector3 velocity, Vector3 normal, float maximum)
         {

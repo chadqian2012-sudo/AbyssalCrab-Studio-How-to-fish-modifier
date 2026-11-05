@@ -4,7 +4,7 @@
       <Expander.Header>
         <DockPanel LastChildFill="False">
           <TextBlock Text="预设与快捷入口" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,18,0"/>
-          <TextBlock Text="展开管理参数方案、搜索功能和状态组件" Style="{StaticResource Muted}" FontSize="10" VerticalAlignment="Center"/>
+          <TextBlock Text="展开管理参数方案、搜索功能和游戏悬浮窗" Style="{StaticResource Muted}" FontSize="10" VerticalAlignment="Center"/>
         </DockPanel>
       </Expander.Header>
       <StackPanel Margin="0,10,0,0">
@@ -23,7 +23,7 @@
         <Grid Margin="0,9,0,0">
           <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <ComboBox IsEditable="True" IsTextSearchEnabled="False" StaysOpenOnEdit="True" ItemsSource="{Binding SearchResults}" SelectedItem="{Binding SelectedSearchHit}" Text="{Binding FeatureQuery,UpdateSourceTrigger=PropertyChanged}" DisplayMemberPath="Title" ToolTip="搜索功能名称、说明、分类或功能 ID；选择结果定位分类"/>
-          <CheckBox Grid.Column="1" Margin="18,0" Content="游戏状态组件" IsChecked="{Binding WidgetVisible}" VerticalAlignment="Center"/>
+          <CheckBox Grid.Column="1" Margin="18,0" Content="游戏悬浮窗" ToolTip="勾选后进入游戏，点击悬浮按钮或按 Home 展开；快捷键可在悬浮窗设置中修改" IsChecked="{Binding WidgetVisible}" VerticalAlignment="Center"/>
           <CheckBox Grid.Column="2" Content="收起分类栏" IsChecked="{Binding CompactNavigation}" VerticalAlignment="Center"/>
         </Grid>
         <TextBlock Text="{Binding ExperienceStatus}" TextWrapping="Wrap" Style="{StaticResource Muted}" FontSize="10" Margin="0,8,0,0"/>

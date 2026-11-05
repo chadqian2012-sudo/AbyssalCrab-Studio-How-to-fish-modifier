@@ -284,7 +284,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 		}
 	}
 
-	public IReadOnlyList<CatalogOption> Options { get; }
+	public IReadOnlyList<CatalogOption> Options { get; private set; }
 
 	public IReadOnlyList<string> Kinds
 	{
@@ -657,7 +657,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 
 	public ICommand CleanupCommand { get; }
 
-	public bool IsAvailable { get; }
+	public bool IsAvailable { get; private set; }
 
 	public event PropertyChangedEventHandler? PropertyChanged;
 

@@ -89,7 +89,7 @@ public sealed partial class MainViewModel
     public ParameterPreset? SelectedPreset { get => _selectedPreset; set => Set(ref _selectedPreset,value); }
     public string PresetName { get => _presetName; set => Set(ref _presetName,value ?? ""); }
     public string ExperienceStatus { get => _experienceStatus; private set => Set(ref _experienceStatus,value); }
-    public bool PresetBusy { get => _presetBusy; private set { if(Set(ref _presetBusy,value)){OnPropertyChanged(nameof(CanRestoreLastSession));OnPropertyChanged(nameof(CanEditParameters));OnPropertyChanged(nameof(CanPositionAction));OnPropertyChanged(nameof(CanLoadSelectedIsland));foreach(var f in Features)f.RefreshExperienceAvailability();} } }
+    public bool PresetBusy { get => _presetBusy; private set { if(Set(ref _presetBusy,value)){OnPropertyChanged(nameof(CanRestoreLastSession));OnPropertyChanged(nameof(CanEditParameters));OnPropertyChanged(nameof(CanPositionAction));OnPropertyChanged(nameof(CanLoadSelectedIsland));foreach(var f in AllFeatures)f.RefreshExperienceAvailability();} } }
     public bool CanEditParameters => !PresetBusy;
     private int _presetApplyVersion;
     private void InvalidatePresetApply()
@@ -123,7 +123,7 @@ public sealed partial class MainViewModel
     public bool DiagnosticOnly
     {
         get => _diagnosticOnly;
-        set { if(!Set(ref _diagnosticOnly,value))return; if(value) { AimAssist.Enabled=false; var silent=Features.FirstOrDefault(f=>f.Descriptor.Id=="combat.silent_aim"); if(silent?.Enabled==true)silent.Enabled=false; } foreach(var f in Features)f.RefreshExperienceAvailability(); }
+        set { if(!Set(ref _diagnosticOnly,value))return; if(value) { AimAssist.Enabled=false; var silent=AllFeatures.FirstOrDefault(f=>f.Descriptor.Id=="combat.silent_aim"); if(silent?.Enabled==true)silent.Enabled=false; } foreach(var f in AllFeatures)f.RefreshExperienceAvailability(); }
     }
     public string[] PointColors { get; } = { "青色","蓝色","紫色","金色","绿色" };
     public string[] PointIcons { get; } = { "⌖","★","⚑","⚓","◆" };
@@ -152,7 +152,7 @@ public sealed partial class MainViewModel
 
     public ICommand SavePresetCommand => new RelayCommand(SavePreset);
     public ICommand ApplyPresetCommand => new RelayCommand(()=>_ = ApplySelectedPresetAsync());
-    public ICommand DeletePresetCommand => new RelayCommand(()=> { if(SelectedPreset==null||PresetBusy)return; _experience.Presets.Remove(SelectedPreset); Presets.Remove(SelectedPreset); SelectedPreset=Presets.FirstOrDefault(); ScheduleExperienceSave(); });
+    public ICommand DeletePresetCommand => new RelayCommand(()=> { if(SelectedPreset==null||PresetBusy)return; RemoveOverlayReference(new("preset",SelectedPreset.Name)); _experience.Presets.Remove(SelectedPreset); Presets.Remove(SelectedPreset); SelectedPreset=Presets.FirstOrDefault(); ScheduleExperienceSave(); });
     public ICommand SavePointDetailsCommand => new RelayCommand(()=> {
         var point=SelectedTeleportPoint; if(point==null) { PositionStatus="请先选择已保存的坐标"; return; }
         if(PointNote.Length>500) { PositionStatus="备注最多 500 字";return; }
@@ -190,7 +190,7 @@ public sealed partial class MainViewModel
         AimAssist.PropertyChanged+=(_,e)=>{if(e.PropertyName==nameof(AimAssist.Enabled)){if(DiagnosticOnly&&AimAssist.Enabled)AimAssist.Enabled=false; OnPropertyChanged(nameof(ActiveFeaturesText));}};
         Crosshair.PropertyChanged+=(_,e)=>{if(e.PropertyName==nameof(Crosshair.Enabled))OnPropertyChanged(nameof(ActiveFeaturesText));};
         if(_experienceStore.Warning!=null)ExperienceStatus=_experienceStore.Warning;
-        foreach(var feature in Features)AttachExperience(feature);
+        foreach(var feature in AllFeatures)AttachExperience(feature);
     }
     private void AttachExperience(FeatureItemViewModel feature)
     {
@@ -220,8 +220,8 @@ public sealed partial class MainViewModel
         var old=_experience.Presets.FirstOrDefault(p=>string.Equals(p.Name,name,StringComparison.OrdinalIgnoreCase));
         if(old==null&&Presets.Count>=50){ExperienceStatus="最多保存 50 套预设";return;}
         var preset=new ParameterPreset(name,CapturePreferences().ToJson());
-        if(old!=null){_experience.Presets.Remove(old);Presets.Remove(old);}
-        _experience.Presets.Add(preset);Presets.Add(preset);SelectedPreset=preset;ActivePresetName=name;ScheduleExperienceSave();ExperienceStatus="预设已保存 · "+name;
+        if(old!=null){ReplaceOverlayReference(new("preset",old.Name),new("preset",name));_experience.Presets.Remove(old);Presets.Remove(old);}
+        _experience.Presets.Add(preset);Presets.Add(preset);SelectedPreset=preset;ActivePresetName=name;ScheduleExperienceSave();RefreshOverlayItems();ExperienceStatus="预设已保存 · "+name;
     }
     public Task ApplySelectedPresetAsync() => ApplySavedPreferencesAsync(SelectedPreset?.Parameters, SelectedPreset?.Name ?? "", false);
     private async Task ApplySavedPreferencesAsync(string? json, string name, bool restoreSession)
@@ -262,7 +262,7 @@ public sealed partial class MainViewModel
             else ExperienceStatus="已恢复「"+name+"」参数 · 持续功能请手动开启";
             SchedulePreferencesSave();ActivePresetName=name;
         }catch(Exception e){if(Current())ExperienceStatus="预设恢复失败 · "+e.Message;}
-        finally{if(Current()){PresetBusy=false;RefreshFeatures();OnPropertyChanged(nameof(ActiveFeaturesText));if(_runtime!=null&&IslandOptions.Count==0)_=LoadIslandCatalogAsync(_runtime,_connectionEpoch);}}
+        finally{if(Current()){PresetBusy=false;RebuildFeatureModels();OnPropertyChanged(nameof(ActiveFeaturesText));if(_runtime!=null&&IslandOptions.Count==0)_=LoadIslandCatalogAsync(_runtime,_connectionEpoch);}}
     }
     public async Task EmergencyDisableAsync(IGameRuntimeClient? commandRuntime = null)
     {
@@ -300,7 +300,7 @@ public sealed partial class MainViewModel
             if(Current())
             {
                 if(runtime!=null)AimAssist.Connect(runtime,_capabilities);
-                PresetBusy=false;RefreshFeatures();
+                PresetBusy=false;RebuildFeatureModels();
                 if(runtime!=null&&IslandOptions.Count==0)_=LoadIslandCatalogAsync(runtime,_connectionEpoch);
             }
         }
@@ -420,7 +420,7 @@ public sealed partial class MainViewModel
         if(!enabled){_spinWasEnabled=false;_curveAppliedSpeed=null;return;}
         if(!_spinWasEnabled){_spinWasEnabled=true;_spinStarted=now;}
         if(_experienceWorkBusy||_runtime==null||PresetBusy||_spinStopPending||_closedExperience)return;
-        var live=Features.FirstOrDefault(f=>f.IsSpin);if(live?.IsBusy==true)return;
+        var live=AllFeatures.FirstOrDefault(f=>f.IsSpin);if(live?.IsBusy==true)return;
         double speed=live?.LastValidSpinSpeed??(_preferences.Features.TryGetValue("player.spin.lock",out var p)?p.Number("spinSpeed")??4:4);
         double desired=SpinCurveValue(SpinCurve,speed,(now-_spinStarted).TotalSeconds);
         if(SpinCurve=="固定"&&_curveAppliedSpeed==null||_curveAppliedSpeed is double prior&&Math.Abs(prior-desired)<0.03)return;

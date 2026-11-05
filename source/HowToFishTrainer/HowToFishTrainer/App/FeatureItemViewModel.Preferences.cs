@@ -111,6 +111,19 @@ public sealed partial class FeatureItemViewModel
         finally { _restoringParameters = false; }
     }
 
+    internal void UpdateCatalog(IReadOnlyList<CatalogOption> options)
+    {
+        var parameters = CaptureParameters();
+        var drafts = CaptureParameterDrafts();
+        Options = options;
+        IsAvailable = _runtime != null && (_capabilities?.CanExecute(Descriptor.RequiredCapability) ?? false)
+            && RuntimeFeatureSupport.ImplementedIds.Contains(Descriptor.Id) && Options.Count > 0;
+        RestoreParameters(parameters, drafts);
+        Changed(nameof(Options)); Changed(nameof(Kinds)); Changed(nameof(FilteredOptions));
+        Changed(nameof(IsAvailable)); Changed(nameof(CanInteract)); Changed(nameof(CanGenerate));
+        if (!IsBusy && !HasUnresolvedCatalogChoice) { Status = IsAvailable ? "准备就绪" : "等待实时目录"; StateLabel = IsAvailable ? "待命" : "不可用"; }
+    }
+
     private void RememberAttachmentSelection(string key, string? id, string? previousId)
     {
         if (!_restoringParameters && _pendingCatalogParameters != null && (id != null || previousId != null))

@@ -1,5 +1,19 @@
 # 发布说明 | Release Notes
 
+## r18 是待实机验收候选 | r18 remains a candidate
+
+2026-11-05：扩展游戏悬浮窗，共享主窗口功能与参数；支持自定义快捷面板、传送点、预设和紧急停用。当前生效的走路/冲刺倍率超过 1 时，取消本机普通持物及工具的移动摆动；保留其他动作、碰撞和已有坡面处理。新运行时基于校验过的 r17c 增量生成。
+
+The 2026-11-05 candidate adds shared game-panel controls, custom shortcuts, local teleports, presets and emergency stop. Movement bob is suppressed for local held items and tools when the active walk/sprint multiplier exceeds 1. Other animations, collision and previous slope handling are unchanged. The Runtime is an audited incremental patch of r17c.
+
+首次使用需在主窗口开启“游戏悬浮窗”。关闭修改器并重启游戏后再验证新 Runtime。当前仅提供默认和压缩候选包及验收清单；不替换桌面 r17c，也不将离线结果当作实机通过。
+
+Enable the game panel in the main window. Restart the game before testing the new Runtime. Default and compressed candidate packages are provided for acceptance; r17c remains the desktop version. Offline checks do not establish live acceptance.
+
+体验设置升级至版本 2，以保存悬浮布局和快捷项；旧版本 1 可自动读取。回退 r17c 时它会保护新版体验文件、提示版本较新，不会覆盖文件。此时旧版不能读取新面板/体验设置；原数字参数文件的格式未改变。需要完整旧体验设置时使用升级前的独立备份，不要删除当前新版文件。
+
+Experience settings migrate from version 1 to 2. On rollback, r17c protects rather than overwrites the newer experience file, so it cannot read the new experience/layout settings. The numeric preference format is unchanged. Preserve a separate pre-upgrade experience backup when full rollback of those settings is required.
+
 ## V1.1.37 · 2026-10-17
 
 当前正式交付包含默认整合版和压缩单文件版，均面向 Windows x64。默认版适合日常使用；压缩版体积较小，启动时会先解压。完整变更记录见根目录《交付说明.md》及本目录中的专题说明。

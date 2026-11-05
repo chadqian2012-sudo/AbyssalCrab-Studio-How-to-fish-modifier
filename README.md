@@ -10,9 +10,13 @@ AbyssalCrab Studio is a Windows desktop assistant for *How to Fish*. It uses a W
 
 ## 当前版本 | Current release
 
-当前源码为 **r17c（2026-11-04）**。修复紧急停用期间退出仍保存旧开关，以及跨分类、重连时队友选项显示与实际设置不一致。551 项离线检查全部通过，比 r16b 新增 28 项。详情见 [本次修复与会话恢复说明](docs/SESSION_RESTORE.md)；[r16b 记录](docs/R16B.md)保留为历史依据。
+当前分支为 **r18 候选（2026-11-05）**：游戏悬浮控制面板共用主窗口功能、参数和执行状态；加入多套快捷面板、传送点及预设入口；高速时取消本机手持物的移动摆动。该候选只做代码与离线检查，真实游戏效果和桌面交付仍待验收。使用方法见 [功能指南](docs/FEATURES.md)，验证边界见 [验证说明](docs/VERIFICATION.md)。
 
-Current source: **r17c (2026-11-04)**. Closing during emergency stop preserves revoked switch intentions. Teammate controls remain consistent across category changes and delayed reconnect replies. All 551 offline assertions passed, including 28 added since r16b. See [current fixes and session restoration](docs/SESSION_RESTORE.md). The [r16b record](docs/R16B.md) remains historical evidence.
+Current branch: **r18 candidate (2026-11-05)**. A game panel shares main-window feature state and supports custom shortcut panels, local-player teleports and named presets. Local held-item movement bob is suppressed above the applied native speed. This is an offline-reviewed candidate; live behavior and desktop promotion remain pending. See [usage](docs/FEATURES.md) and [verification scope](docs/VERIFICATION.md).
+
+r17c 的紧急停用、队友选项和会话恢复修复继续保留，历史检查结果见 [会话恢复说明](docs/SESSION_RESTORE.md)。桌面仍使用 r17c，候选未实机验收前不替换。
+
+The r17c emergency-stop, teammate-option and session-restore fixes are retained; their historical checks are in [session restoration](docs/SESSION_RESTORE.md). The desktop remains on r17c until live acceptance of this candidate.
 
 主要体验功能包括：全局搜索、最多 50 套参数预设、物品/鱼类收藏与最近配置、可导入/导出的传送标记、角色手感参数、战斗诊断、状态组件、大陀螺速度曲线和带上限的可选海鸥自动补充。完整说明见 [功能指南 | Feature guide](docs/FEATURES.md)。
 

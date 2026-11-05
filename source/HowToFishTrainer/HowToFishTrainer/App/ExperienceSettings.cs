@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace HowToFishTrainer.App;
 
@@ -11,9 +14,19 @@ public sealed record ParameterPreset(string Name, string Parameters);
 public sealed record CatalogBookmark(string FeatureId, int Id, string Name, ParameterValues Parameters);
 public sealed record PointDecoration(string Group, string Name, string Color, string Icon, string Note, bool Favorite);
 public sealed record SearchHit(string Title, string Category, string Id, string Description);
+public sealed record OverlayShortcut(string Kind, string Key, string Group = "");
+public sealed class OverlayPanel : INotifyPropertyChanged
+{
+    private string _name = "常用";
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get => _name; set { if (_name == value) return; _name = value; PropertyChanged?.Invoke(this, new(nameof(Name))); } }
+    public List<OverlayShortcut> Shortcuts { get; set; } = new();
+    [JsonIgnore] public ObservableCollection<OverlayShortcutViewModel> Items { get; } = new();
+    public event PropertyChangedEventHandler? PropertyChanged;
+}
 public sealed class ExperienceSettings
 {
-    public int Version { get; set; } = 1;
+    public int Version { get; set; } = 2;
     public List<ParameterPreset> Presets { get; set; } = new();
     public List<CatalogBookmark> Favorites { get; set; } = new();
     public List<CatalogBookmark> Recent { get; set; } = new();
@@ -24,6 +37,11 @@ public sealed class ExperienceSettings
     public bool WidgetVisible { get; set; }
     public double WidgetLeft { get; set; } = 24;
     public double WidgetTop { get; set; } = 120;
+    public double WidgetWidth { get; set; } = 620;
+    public double WidgetHeight { get; set; } = 680;
+    public string OverlayHotkey { get; set; } = "Home";
+    public List<OverlayPanel> OverlayPanels { get; set; } = new();
+    public string? SelectedOverlayPanelId { get; set; }
     public string SpinCurve { get; set; } = "固定";
     public int RefillLimit { get; set; } = 3;
     public AnimalCountSettings AnimalCounts { get; set; } = new();
@@ -42,7 +60,8 @@ public sealed class ExperienceSettingsStore
     public static ExperienceSettings Parse(string text)
     {
         var value = JsonSerializer.Deserialize<ExperienceSettings>(text) ?? throw new JsonException("体验设置为空");
-        if (value.Version != 1) throw new NotSupportedException("体验设置版本较新");
+        if (value.Version is not (1 or 2)) throw new NotSupportedException("体验设置版本较新");
+        value.Version = 2;
         value.Presets = (value.Presets ?? new()).Where(p => p != null && !string.IsNullOrWhiteSpace(p.Name) && p.Name.Length <= 40)
             .Where(p => ValidPreset(p.Parameters)).DistinctBy(p => p.Name, StringComparer.OrdinalIgnoreCase).Take(50).ToList();
         List<CatalogBookmark> Bookmarks(List<CatalogBookmark>? entries) => (entries ?? new()).Where(e => e != null && e.Parameters != null && e.Name != null && e.Name.Length <= 256
@@ -53,6 +72,14 @@ public sealed class ExperienceSettingsStore
             .DistinctBy(p => (p.Group,p.Name)).Take(2000).ToList();
         if (!double.IsFinite(value.WidgetLeft)) value.WidgetLeft = 24;
         if (!double.IsFinite(value.WidgetTop)) value.WidgetTop = 120;
+        if (!double.IsFinite(value.WidgetWidth) || value.WidgetWidth < 360 || value.WidgetWidth > 3840) value.WidgetWidth = 620;
+        if (!double.IsFinite(value.WidgetHeight) || value.WidgetHeight < 280 || value.WidgetHeight > 2160) value.WidgetHeight = 680;
+        if (string.IsNullOrWhiteSpace(value.OverlayHotkey) || value.OverlayHotkey.Length > 60) value.OverlayHotkey = "Home";
+        value.OverlayPanels = (value.OverlayPanels ?? new()).Where(p => p != null && !string.IsNullOrWhiteSpace(p.Id) && !string.IsNullOrWhiteSpace(p.Name) && p.Name.Length <= 40)
+            .DistinctBy(p => p.Id, StringComparer.Ordinal).Take(50).ToList();
+        foreach (var panel in value.OverlayPanels)
+            panel.Shortcuts = (panel.Shortcuts ?? new()).Where(p => p != null && p.Kind is "feature" or "page" or "teleport" or "preset"
+                && !string.IsNullOrWhiteSpace(p.Key) && p.Key.Length <= 256 && p.Group != null && p.Group.Length <= 256).Distinct().Take(200).ToList();
         if (value.RefillLimit < 1 || value.RefillLimit > 20) value.RefillLimit = 3;
         value.AnimalCounts??=new();
         foreach(string key in value.AnimalCounts.Where(p=>!FunEventDefinitions.All.Any(d=>d.Id==p.Key&&d.HasAnimalCount)||p.Value<1||p.Value>50).Select(p=>p.Key).ToArray())value.AnimalCounts.Remove(key);
