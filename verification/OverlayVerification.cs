@@ -90,7 +90,7 @@ static class OverlayVerification
     {
         Root = Path.GetFullPath(args[0]); Directory.CreateDirectory(Root);
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
-        try { SharedFeatures(); SearchShortcuts(); PanelsAndPersistence(); TeleportBoundaries(); PresetAndEmergency(); SettingsMigration(); }
+        try { SharedFeatures(); SearchShortcuts(); PanelsAndPersistence(); TeleportBoundaries(); PresetAndEmergency(); SettingsSaveFailure(); SettingsMigration(); }
         catch (Exception e) { Failed.Add("Unhandled: " + e); }
         File.WriteAllText(Path.Combine(Root, "results.json"), JsonSerializer.Serialize(new {
             passed = Failed.Count == 0, checks = Passed.Count + Failed.Count, passedChecks = Passed, failedChecks = Failed,
@@ -279,6 +279,19 @@ static class OverlayVerification
         vm.ResetWorldContext(); vm.OverlayStatus = "New world";
         runtime.Pending.Dequeue().SetResult(OverlayFixtureRuntime.Result()); Await(preset);
         Check(vm.OverlayStatus == "New world", "Late preset wrapper does not overwrite current-world overlay feedback");
+        Close(vm);
+    }
+
+    static void SettingsSaveFailure()
+    {
+        var runtime = new OverlayFixtureRuntime(); var vm = Create(runtime, out _, out string path);
+        vm.FlushExperience(); File.Delete(path); Directory.CreateDirectory(path);
+        vm.OverlayPanelName = "Unsaved panel"; vm.CreateOverlayPanelCommand.Execute(null);
+        Check(!vm.FlushExperience() && vm.ExperienceStatus.Contains("保存失败") && vm.OverlayStatus == vm.ExperienceStatus,
+            "Failed experience save replaces optimistic overlay feedback with the same actionable error");
+        Directory.Delete(path);
+        Check(vm.FlushExperience() && ExperienceSettingsStore.Parse(File.ReadAllText(path)).OverlayPanels.Any(panel => panel.Name == "Unsaved panel"),
+            "Failed experience save retains dirty settings so the next flush persists the pending panel");
         Close(vm);
     }
 

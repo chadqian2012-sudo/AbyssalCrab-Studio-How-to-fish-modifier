@@ -1,5 +1,27 @@
 # 当前交付验证范围 | Current Verification Scope
 
+## r21 最终包通过离线检查，真实操作仍待验收
+
+2026-11-06：主代理使用最终默认包内的程序运行 233 项行为检查：悬浮面板 54、预设边界 42、数字绑定 7、体验功能 130，全部通过。同一包内程序通过 76 项界面检查，生成 73 张离屏图，绑定错误记录为空。短窗口检查覆盖 620×380 和 600×380：搜索与摘要同时展开后，快捷区仍可滚动；长名称、搜索提示和多行错误也已检查。
+
+The primary agent ran 233 behavior assertions against the final default-package application: overlay 54, preset boundaries 42, numeric binding 7 and experience features 130. All passed. The same packaged application passed 76 UI checks with 73 off-screen renders and no binding errors. Checks at 620×380 and 600×380 cover reachable shortcuts with search and the summary expanded, long labels, search hints and multiline errors.
+
+早期离屏检查复现了搜索、摘要和长错误提示挤占正文的问题。摘要移入原快捷项滚动区；底部状态限制为一行高度，并在原工具提示中保留全文。仅设置不自动换行仍会被错误消息自带的换行撑高，因此再限定文本高度，相关多行回归已通过。
+
+Early renders reproduced search, summary and long errors consuming the content area. The summary now uses the existing shortcut scroll area. The footer is limited to a single-line height and retains full text in its existing tooltip. Disabling automatic wrapping alone did not constrain embedded line breaks, so the text height is also bounded; the multiline regression now passes.
+
+另修正两处问题：`Home,End` 会被枚举解析误认成方向键，现由原热键解析入口拒绝逗号组合；保存失败的原提示仅在预设区域，快捷面板和设置页看不到，现由原保存方法同时通知悬浮窗底部。保存失败提示用 r20 包内代码先复现失败，修正后与恢复写入重试一起通过。保存预设时的多余刷新已删除，仍由原集合变化事件更新快捷项。
+
+Two other defects were corrected: enum parsing could turn `Home,End` into an arrow key, so the original parser rejects commas; save errors previously appeared only in the preset area, outside the shortcut/settings pages, so the save owner now also updates the overlay footer. The save-feedback regression first failed against r20 and now passes along with the retry case. Redundant preset refresh was deleted; the existing collection event still updates shortcuts.
+
+两种包的 450 个有效文件逐字节一致，品牌检查通过；所有报告的应用哈希与实际包一致。Runtime 与 Harmony 未改。编译无错误，现有源码警告保留；NuGet 漏洞数据读取失败，不能称为安全审计通过。
+
+Both package variants contain 450 byte-identical active files and pass branding checks; report hashes match the packaged application. Runtime and Harmony are unchanged. Compilation succeeded with existing source warnings; NuGet vulnerability-data retrieval failed, so this does not establish a completed security audit.
+
+桌面保持 r17c，前一候选为 r20-final。本轮没有操作游戏或发送桌面输入。不同 DPI 模式的游戏与悬浮窗之间是否存在位置偏差，仅为代码推断，未作猜测修补；与真实热键、焦点、保存提示及小窗口操作一起保留在 O-01～O-05。60 项人工/游戏验收仍未完成。
+
+The desktop remains on r17c, with r20-final retained as the previous candidate. No game or desktop input was sent. A possible placement mismatch between game and overlay DPI modes remains an unverified code-level concern and received no speculative patch. It joins real hotkey, focus, save-feedback and short-window operation in O-01 through O-05; all 60 manual/live acceptance items remain open.
+
 ## r20 两种候选包通过离线核验，真实操作仍待验收
 
 2026-11-06：主代理使用最终默认包提取的应用程序集重新执行 101 项行为检查：悬浮面板 52、预设与重连边界 42、数字绑定 7，全部通过。包内程序集另通过 64 项界面检查，生成 65 张离屏图，WPF 绑定错误文件为空。各报告中的应用哈希与最终包一致；这些是本轮实际重跑结果，没有将 r19 的旧记录计入。
@@ -105,3 +127,14 @@ Full verification logs and machine reports remain in the original delivery direc
 - 实际应用程序集 SHA-256 / Tested application SHA-256: `d9526d2b3f402c63038d4699db4937cafe0197918af475bfbe56cc4dcfbc9863`.
 
 报告和图像随本地候选交付保存，不将生成物提交到源码历史。This generated evidence is retained with the local candidate delivery, not committed to source history.
+
+## r21 证据附录 | r21 evidence appendix
+
+- 包内行为结果 / Packaged behavior results: `build/verification-r21-final/overlay/results.json`, `presets/results.json`, and the numeric/experience runner results under the same directory.
+- 包内界面检查 / Packaged UI check: `build/verification-r21-final/ui/ui-verification.json` (v8), `binding-errors.txt` and 73 rendered PNGs.
+- 文本高度约束 / Footer text bound: `StatusWidget.xaml` uses `MaxHeight="16"` for the status text and retains the original full-text tooltip.
+- 两包内容与品牌 / Payload and branding: `build/package-audit-r21/package-payload-equivalence.json` and each variant's `branding-results.json`.
+- 修复前复现 / Before-fix evidence: `build/r21-save-repro/`, `build/ui-r21-first/`, `build/ui-r21-second/`, and `build/ui-r21-multiline-repro/`.
+- 实际应用程序集 SHA-256 / Tested application SHA-256: `35cb1513fd2a8e0dcf14dc8191dda4b5cfee4bc95e8cdaa78021c91a52efe9fd`.
+
+生成的报告和图像随本地候选交付保存，不提交到源码历史。Generated reports and images are retained with the local candidate, not committed to source history.

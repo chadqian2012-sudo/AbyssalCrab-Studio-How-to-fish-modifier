@@ -10,7 +10,7 @@ internal static class NativeHotkeys
 	{
 		modifiers = virtualKey = 0;
 		string[] parts = text.Split('+', StringSplitOptions.TrimEntries);
-		if (parts.Length == 0 || Array.Exists(parts, string.IsNullOrWhiteSpace) || char.IsDigit(parts[^1][0])) return false;
+		if (parts.Length == 0 || Array.Exists(parts, string.IsNullOrWhiteSpace) || char.IsDigit(parts[^1][0]) || parts[^1].Contains(',')) return false;
 		for (int i = 0; i < parts.Length - 1; i++)
 		{
 			uint value = parts[i].ToUpperInvariant() switch { "CTRL" or "CONTROL" => 2u, "ALT" => 1u, "SHIFT" => 4u, _ => 0u };

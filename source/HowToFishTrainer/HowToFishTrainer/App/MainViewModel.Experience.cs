@@ -210,7 +210,7 @@ public sealed partial class MainViewModel
     {
         _experienceSaveTimer?.Stop(); if(!_experienceDirty)return true;
         try{_experienceStore.Save(_experience);_experienceDirty=false;return true;}
-        catch(Exception e){ExperienceStatus="体验设置保存失败 · "+e.Message;return false;}
+        catch(Exception e){OverlayStatus=ExperienceStatus="体验设置保存失败 · "+e.Message;return false;}
     }
     public void CloseExperience(){if(_closedExperience)return;if(_runtime!=null){_preferencesDirty=true;FlushPreferences();}InvalidatePresetApply();StopExperienceAutomation();FlushExperience();_closedExperience=true;OnPropertyChanged(nameof(CanRestoreLastSession)); if(_experienceSaveTimer!=null){_experienceSaveTimer.Stop();_experienceSaveTimer.Tick-=SaveExperienceTick;}}
     private void SavePreset()
@@ -221,7 +221,7 @@ public sealed partial class MainViewModel
         if(old==null&&Presets.Count>=50){ExperienceStatus="最多保存 50 套预设";return;}
         var preset=new ParameterPreset(name,CapturePreferences().ToJson());
         if(old!=null){ReplaceOverlayReference(new("preset",old.Name),new("preset",name));_experience.Presets.Remove(old);Presets.Remove(old);}
-        _experience.Presets.Add(preset);Presets.Add(preset);SelectedPreset=preset;ActivePresetName=name;ScheduleExperienceSave();RefreshOverlayItems();ExperienceStatus="预设已保存 · "+name;
+        _experience.Presets.Add(preset);Presets.Add(preset);SelectedPreset=preset;ActivePresetName=name;ScheduleExperienceSave();ExperienceStatus="预设已保存 · "+name;
     }
     public Task ApplySelectedPresetAsync() => ApplySavedPreferencesAsync(SelectedPreset?.Parameters, SelectedPreset?.Name ?? "", false);
     private async Task ApplySavedPreferencesAsync(string? json, string name, bool restoreSession)
