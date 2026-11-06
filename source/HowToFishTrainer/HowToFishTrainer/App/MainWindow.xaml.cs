@@ -90,7 +90,7 @@ public partial class MainWindow : Window, IComponentConnector
 		_sponsorGate = new SponsorAccessGate(() => _license.Current);
 		_viewModel = new MainViewModel(null, _sponsorGate, (string title, string message) =>
 		{
-			MessageBox.Show(this, message, title, MessageBoxButton.OK, MessageBoxImage.Asterisk);
+			MessageBox.Show(_statusWidget?.IsActive == true ? _statusWidget : this, message, title, MessageBoxButton.OK, MessageBoxImage.Asterisk);
 		}, preferencesStore);
 		_sponsorGate.ActivationRequested += SponsorGate_ActivationRequested;
 		_license.StatusChanged += License_StatusChanged;

@@ -1,10 +1,10 @@
 # 发布说明 | Release Notes
 
-## r18 是待实机验收候选 | r18 remains a candidate
+## r18b 是待实机验收候选 | r18b remains a candidate
 
-2026-11-05：扩展游戏悬浮窗，共享主窗口功能与参数；支持自定义快捷面板、传送点、预设和紧急停用。当前生效的走路/冲刺倍率超过 1 时，取消本机普通持物及工具的移动摆动；保留其他动作、碰撞和已有坡面处理。新运行时基于校验过的 r17c 增量生成。
+2026-11-06：扩展游戏悬浮窗，共享主窗口功能与参数；支持自定义快捷面板、传送点、预设和紧急停用。当前生效的走路/冲刺倍率超过 1 时，取消本机普通持物及工具的移动摆动；保留其他动作、碰撞和已有坡面处理。新运行时基于校验过的 r17c 增量生成。
 
-The 2026-11-05 candidate adds shared game-panel controls, custom shortcuts, local teleports, presets and emergency stop. Movement bob is suppressed for local held items and tools when the active walk/sprint multiplier exceeds 1. Other animations, collision and previous slope handling are unchanged. The Runtime is an audited incremental patch of r17c.
+The 2026-11-06 candidate adds shared game-panel controls, custom shortcuts, local teleports, presets and emergency stop. Movement bob is suppressed for local held items and tools when the active walk/sprint multiplier exceeds 1. Other animations, collision and previous slope handling are unchanged. The Runtime is an audited incremental patch of r17c.
 
 首次使用需在主窗口开启“游戏悬浮窗”。关闭修改器并重启游戏后再验证新 Runtime。当前仅提供默认和压缩候选包及验收清单；不替换桌面 r17c，也不将离线结果当作实机通过。
 

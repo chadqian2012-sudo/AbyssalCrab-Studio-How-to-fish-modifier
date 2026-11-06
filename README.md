@@ -10,9 +10,9 @@ AbyssalCrab Studio is a Windows desktop assistant for *How to Fish*. It uses a W
 
 ## 当前版本 | Current release
 
-当前分支为 **r18 候选（2026-11-05）**：游戏悬浮控制面板共用主窗口功能、参数和执行状态；加入多套快捷面板、传送点及预设入口；高速时取消本机手持物的移动摆动。该候选只做代码与离线检查，真实游戏效果和桌面交付仍待验收。使用方法见 [功能指南](docs/FEATURES.md)，验证边界见 [验证说明](docs/VERIFICATION.md)。
+当前分支为 **r18b 候选（2026-11-06）**：游戏悬浮控制面板共用主窗口功能、参数和执行状态；加入多套快捷面板、传送点及预设入口；高速时取消本机手持物的移动摆动。该候选只做代码与离线检查，真实游戏效果和桌面交付仍待验收。使用方法见 [功能指南](docs/FEATURES.md)，验证边界见 [验证说明](docs/VERIFICATION.md)。
 
-Current branch: **r18 candidate (2026-11-05)**. A game panel shares main-window feature state and supports custom shortcut panels, local-player teleports and named presets. Local held-item movement bob is suppressed above the applied native speed. This is an offline-reviewed candidate; live behavior and desktop promotion remain pending. See [usage](docs/FEATURES.md) and [verification scope](docs/VERIFICATION.md).
+Current branch: **r18b candidate (2026-11-06)**. A game panel shares main-window feature state and supports custom shortcut panels, local-player teleports and named presets. Local held-item movement bob is suppressed above the applied native speed. This is an offline-reviewed candidate; live behavior and desktop promotion remain pending. See [usage](docs/FEATURES.md) and [verification scope](docs/VERIFICATION.md).
 
 r17c 的紧急停用、队友选项和会话恢复修复继续保留，历史检查结果见 [会话恢复说明](docs/SESSION_RESTORE.md)。桌面仍使用 r17c，候选未实机验收前不替换。
 

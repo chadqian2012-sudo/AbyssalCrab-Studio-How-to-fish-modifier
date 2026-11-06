@@ -66,7 +66,7 @@ public sealed partial class MainViewModel
         _positionActionBusy=true;OnPropertyChanged(nameof(CanPositionAction));int epoch=_connectionEpoch,context=_positionContextEpoch;
         try{await action();}
         catch(Exception e){if(epoch==_connectionEpoch&&context==_positionContextEpoch)PositionStatus="位置操作失败 · "+e.Message;}
-        finally{if(epoch==_connectionEpoch&&context==_positionContextEpoch){_positionActionBusy=false;OnPropertyChanged(nameof(CanPositionAction));}}
+        finally{if(epoch==_connectionEpoch&&context==_positionContextEpoch){_positionActionBusy=false;OnPropertyChanged(nameof(CanPositionAction));OverlayStatus=PositionStatus;}}
     }
     public bool TrackDeathPosition { get=>_trackDeathPosition; set=>Set(ref _trackDeathPosition,value); }
     private string _deathPositionStatus="开启后每两秒读取本机状态，记录倒地前最后一个采样位置";

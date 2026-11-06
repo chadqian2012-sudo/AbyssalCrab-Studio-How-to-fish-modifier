@@ -1,6 +1,6 @@
 # 功能指南 | Feature Guide
 
-## r18 悬浮面板复用主界面的功能 | Shared game panel
+## r18b 悬浮面板复用主界面的功能 | Shared game panel
 
 在主窗口勾选“游戏悬浮窗”，切回已连接的游戏窗口后显示 AC 按钮。拖动按钮调整位置，点击或按 `Home` 展开；“收起”或 `Esc` 返回游戏。设置中可改成 `F8`、`Ctrl+Home` 等快捷键。`Ctrl+Shift+F12` 保留为紧急停用，面板顶部也有同一操作的按钮。
 

@@ -218,10 +218,8 @@ public sealed partial class MainViewModel
     }
     public Task TeleportSavedPointAsync(string group, string name) => RunPositionActionAsync(async () => {
         var point = TeleportPoints.FirstOrDefault(p => p.Group == group && p.Name == name);
-        if (point == null) { OverlayStatus = "传送点已删除，请重新选择"; return; }
-        var runtime = _runtime; int epoch = _connectionEpoch, context = _positionContextEpoch;
+        if (point == null) { PositionStatus = "传送点已删除，请重新选择"; return; }
         await TeleportToCoordinatesAsync(point.X, point.Y, point.Z, null);
-        if (runtime == _runtime && epoch == _connectionEpoch && context == _positionContextEpoch) OverlayStatus = PositionStatus;
     });
     public async Task LoadOverlayPresetAsync(string name)
     {

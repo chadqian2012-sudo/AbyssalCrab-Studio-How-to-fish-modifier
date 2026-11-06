@@ -193,6 +193,13 @@ static class OverlayVerification
             "Rapid double click cannot dispatch overlapping teleports");
         runtime.HeldCommand = null; runtime.Pending.Dequeue().SetResult(OverlayFixtureRuntime.Result()); Await(first);
         Check(runtime.Commands.Skip(sent).Count(c => c.FeatureId == "world.teleport") == 1 && vm.CanPositionAction, "Single pending teleport completes and releases busy state");
+        runtime.HeldCommand = "world.position.read"; sent = runtime.Commands.Count;
+        vm.OverlayStatus = "Previous success";
+        var failed = vm.TeleportSavedPointAsync(point.Group, point.Name);
+        runtime.Pending.Dequeue().SetException(new IOException("fixture-read-error")); Await(failed);
+        Check(vm.OverlayStatus == vm.PositionStatus && vm.OverlayStatus.Contains("fixture-read-error") && vm.CanPositionAction
+            && !runtime.Commands.Skip(sent).Any(c => c.FeatureId == "world.teleport"),
+            "Failed shortcut teleport replaces prior success in the overlay and releases busy state");
         runtime.HeldCommand = "world.position.read"; var stale = vm.TeleportSavedPointAsync(point.Group, point.Name);
         vm.Disconnect(); var current = new OverlayFixtureRuntime(); vm.Connect(current, CapabilityMatrix.For(SessionMode.Host, false)); Pump();
         int oldSent = runtime.Commands.Count, newSent = current.Commands.Count; vm.OverlayStatus = "Current world";
