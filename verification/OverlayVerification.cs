@@ -90,7 +90,7 @@ static class OverlayVerification
     {
         Root = Path.GetFullPath(args[0]); Directory.CreateDirectory(Root);
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
-        try { SharedFeatures(); PanelsAndPersistence(); TeleportBoundaries(); PresetAndEmergency(); SettingsMigration(); }
+        try { SharedFeatures(); SearchShortcuts(); PanelsAndPersistence(); TeleportBoundaries(); PresetAndEmergency(); SettingsMigration(); }
         catch (Exception e) { Failed.Add("Unhandled: " + e); }
         File.WriteAllText(Path.Combine(Root, "results.json"), JsonSerializer.Serialize(new {
             passed = Failed.Count == 0, checks = Passed.Count + Failed.Count, passedChecks = Passed, failedChecks = Failed,
@@ -111,7 +111,7 @@ static class OverlayVerification
         Check(ReferenceEquals(move, Feature(vm, move.Descriptor.Id)) && vm.Features.Contains(move), "Category changes reuse the existing movement object");
         Check(move.ValueInput.Text == "-" && move.ValueInput.HasError, "Incomplete numeric draft survives page changes");
         vm.AddFeatureToOverlayCommand.Execute(move);
-        Check(ReferenceEquals(vm.SelectedOverlayPanel!.Items.Single().Feature, move), "Pinned numeric feature and main page share exactly one instance");
+        Check(ReferenceEquals(vm.SelectedOverlayPanel!.Items.Single().Feature, move) && ReferenceEquals(vm.SelectedOverlayPanel.Items.Single().SourceFeature, move), "Pinned numeric editor and status share exactly the main page's feature instance");
         Select(vm, "钓鱼"); vm.FlushPreferences();
         Check(store.Value.Features[move.Descriptor.Id].Number("value") == 2.5 && store.Value.Features[spin.Descriptor.Id].Number("spinSpeed") == 7.25,
             "Persistence captures offscreen feature last-valid values");
@@ -124,6 +124,45 @@ static class OverlayVerification
         Check(!item.CanGenerate || item.QuantityInput.HasError, "Invalid generator quantity remains invalid after catalog refresh");
         int before = runtime.Commands.Count; item.ExecuteCommand.Execute(null); Pump();
         Check(!runtime.Commands.Skip(before).Any(c => c.FeatureId == "generation.item"), "Invalid generator draft cannot execute after catalog refresh");
+        var magic = Feature(vm, "combat.silent_aim");
+        vm.AddFeatureToOverlayCommand.Execute(spin); vm.AddFeatureToOverlayCommand.Execute(magic);
+        Check(new[] { spin, magic }.All(feature => vm.SelectedOverlayPanel!.Items.Any(shortcut =>
+            ReferenceEquals(shortcut.SourceFeature, feature) && shortcut.Feature == null && shortcut.Kind == "feature" && shortcut.ActionLabel == "打开设置")),
+            "Complex-feature shortcuts expose the shared status without adding a second editor or activation action");
+        Close(vm);
+    }
+
+    static void SearchShortcuts()
+    {
+        var runtime = new OverlayFixtureRuntime(); var vm = Create(runtime, out _, out _);
+        var panel = vm.SelectedOverlayPanel!; var move = Feature(vm, "player.move.multiplier");
+        vm.FeatureQuery = move.Descriptor.Id; var hit = vm.SearchResults.Single(h => h.Id == move.Descriptor.Id);
+        int sent = runtime.Commands.Count;
+        vm.AddFeatureToOverlayCommand.Execute(hit); vm.AddFeatureToOverlayCommand.Execute(hit);
+        Check(panel.Items.Count == 1 && ReferenceEquals(panel.Items.Single().Feature, move),
+            "Search pins reuse the existing feature instance and duplicate pin handling");
+        string? navigated = null; vm.OverlayNavigationRequested += category => navigated = category;
+        Select(vm, "钓鱼");
+        vm.OpenOverlaySearchCommand.Execute(hit with { Category = "世界传送" });
+        Check(navigated == "玩家" && vm.SelectedPage.Category == "玩家",
+            "Search navigation resolves the current feature category rather than trusting result text");
+        foreach (string id in new[] { "world.position.read", "world.teleport", "world.island.load", "combat.aim_assist", "fishing.skin_jackpot", "fun.slot_machine.rarity" }) {
+            vm.FeatureQuery = id;
+            vm.AddFeatureToOverlayCommand.Execute(vm.SearchResults.Single(h => h.Id == id));
+        }
+        Check(panel.Shortcuts.Count == 4 && panel.Shortcuts.Count(s => s.Kind == "page") == 3 &&
+            panel.Shortcuts.Where(s => s.Kind == "page").Select(s => s.Key).OrderBy(s => s).SequenceEqual(new[] { "世界传送", "战斗", "幸运娱乐" }.OrderBy(s => s)),
+            "Dedicated controls map to their existing settings pages and deduplicate by page");
+        vm.FeatureQuery = "world.teleport"; vm.OpenOverlaySearchCommand.Execute(vm.SearchResults.Single(h => h.Id == "world.teleport"));
+        Check(navigated == "世界传送" && vm.SelectedPage.Category == "世界传送" && runtime.Commands.Count == sent,
+            "Search pinning and opening settings never executes a gameplay action");
+        int count = panel.Shortcuts.Count; navigated = null;
+        var missing = new SearchHit("Missing", "玩家", "missing.feature", "");
+        vm.AddFeatureToOverlayCommand.Execute(missing); vm.OpenOverlaySearchCommand.Execute(missing);
+        vm.AllFeatures.Remove(move);
+        vm.AddFeatureToOverlayCommand.Execute(hit); vm.OpenOverlaySearchCommand.Execute(hit);
+        Check(panel.Shortcuts.Count == count && navigated == null && vm.OverlayStatus.Contains("已失效") && runtime.Commands.Count == sent,
+            "Missing or removed ordinary features cannot become apparently valid page shortcuts");
         Close(vm);
     }
 
@@ -137,6 +176,8 @@ static class OverlayVerification
         var point = AddPoint(vm); vm.AddTeleportToOverlayCommand.Execute(point);
         vm.PresetName = "Explore"; vm.SavePresetCommand.Execute(null); vm.AddPresetToOverlayCommand.Execute(vm.SelectedPreset);
         Check(first.Items.Count == 3 && first.Shortcuts.Select(i => i.Kind).SequenceEqual(new[] { "feature", "teleport", "preset" }), "Mixed shortcuts retain explicit feature, teleport and preset types");
+        Check(first.Items.Select(i => i.ActionLabel).SequenceEqual(new[] { "打开设置", "传送", "恢复参数" }) && first.Items.Where(i => i.Kind != "feature").All(i => i.SourceFeature == null),
+            "Shortcut action labels describe the actual operation and non-feature items do not borrow feature state");
         first.Items[2].MoveUpCommand.Execute(null);
         Check(first.Shortcuts.Select(i => i.Kind).SequenceEqual(new[] { "feature", "preset", "teleport" }), "Move-up reorders only the selected panel");
         first.Items[1].MoveDownCommand.Execute(null); first.Items[0].MoveUpCommand.Execute(null);
@@ -155,6 +196,9 @@ static class OverlayVerification
             "Restart restores chosen panel, key and expanded dimensions");
         Check(restarted.SelectedOverlayPanel!.Items.Single(i => i.KindLabel == "传送自己").IsAvailable == false,
             "A reference to an absent saved point is disabled rather than rebound to another point");
+        var offlineFeature = restarted.SelectedOverlayPanel.Items.Single(i => i.Kind == "feature");
+        Check(offlineFeature.IsAvailable && offlineFeature.SourceFeature is { CanInteract: false },
+            "An offline shortcut remains a valid reference while its shared feature reports that execution is unavailable");
         Close(restarted);
         vm.SelectedTeleportPoint = point; vm.PointName = "Harbor"; vm.SavePointCommand.Execute(null);
         Check(first.Shortcuts.Any(i => i.Kind == "teleport" && i.Key == "Harbor") && !first.Shortcuts.Any(i => i.Key == "Camp"), "Teleport rename updates every pinned reference");

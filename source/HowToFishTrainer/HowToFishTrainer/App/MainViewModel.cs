@@ -501,6 +501,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
 	public bool CanTargetRoomMember => _capabilities.CanExecute(Capability.HostWorld);
 
+    public bool CanTeleportInCurrentSession => _runtime != null && _capabilities.CanExecute(Capability.OwnedPlayer);
+
 	public RoomMemberSnapshot? SelectedTeleportMember
 	{
 		get
@@ -633,6 +635,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		}
 		OnPropertyChanged("CanLoadSelectedIsland");
 		OnPropertyChanged("CanTargetRoomMember");
+		OnPropertyChanged(nameof(CanTeleportInCurrentSession));
 		OnPropertyChanged(nameof(CanRestoreLastSession));
 	}
 
@@ -678,6 +681,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		OnPropertyChanged("CanLoadSelectedIsland");
 		TargetRoomMember = false;
 		OnPropertyChanged("CanTargetRoomMember");
+		OnPropertyChanged(nameof(CanTeleportInCurrentSession));
 		OnPropertyChanged(nameof(CanRestoreLastSession));
 	}
 
@@ -1499,7 +1503,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
     private async Task TeleportToCoordinatesAsync(double targetX, double targetY, double targetZ, RoomMemberSnapshot? member)
     {
-        if (_runtime == null || !_capabilities.CanExecute(Capability.OwnedPlayer))
+        if (!CanTeleportInCurrentSession)
         { PositionStatus = "当前会话不允许传送"; return; }
         if (!_sponsorAccessGate.TryAuthorize("world.teleport"))
         { PositionStatus = "当前操作不可用，未向游戏发送命令"; return; }

@@ -1,6 +1,6 @@
 # 功能指南 | Feature Guide
 
-## r19 悬浮面板在小窗中更易操作 | Shared game panel
+## r20 悬浮面板可搜索并收藏功能 | Shared game panel
 
 在主窗口勾选“游戏悬浮窗”，切回已连接的游戏窗口后显示 AC 按钮。拖动按钮调整位置，点击或按 `Home` 展开；“收起”或 `Esc` 返回游戏。设置中可改成 `F8`、`Ctrl+Home` 等快捷键。`Ctrl+Shift+F12` 保留为紧急停用，面板顶部也有同一操作的按钮。
 
@@ -13,6 +13,14 @@ Enable the game panel in the main window, then return to the connected game. Dra
 - **设置**：保存面板、快捷项顺序、热键、位置和大小。重启从收起状态开始。切换到其他应用或最小化游戏时隐藏，不强行切回游戏。
 
 Custom panels mix features, complete pages, saved local-player teleports, and named presets. Both windows share parameter drafts and execution state. Renames update references; unavailable entries are shown as unavailable. Preset loading disables continuous features and loads parameters without executing one-shot actions. Layout and shortcuts persist, while startup always begins collapsed. Windowed and borderless modes are supported; exclusive fullscreen and live focus behavior still require manual acceptance.
+
+悬浮窗展开后，点击顶部搜索按钮或按 `Ctrl+F`。可按名称、说明、分类或 ID 搜索，选择结果后点击“打开分类”或“加入面板”。打开分类不会自动滚动并高亮具体卡片，也不会执行该功能；复杂功能进入其完整设置分类。主窗口与悬浮窗都用独立输入框填写搜索文字，再从结果列表选择。没有匹配结果时保留文字，方便继续修改；清空搜索或没有匹配结果时，两按钮不可用。`Ctrl+F` 只在展开面板收到按键时处理，不占用全局快捷键。
+
+While the panel is expanded, use the search button or `Ctrl+F`. Search by name, description, category or ID, select a result, then open its category or add it to the selected panel. Opening a category does not execute the feature or scroll to and highlight a particular card; complex features lead to their full settings category. Both windows use a separate text field and result selector. Unmatched text stays visible for further editing; both buttons are disabled for an empty search or no matching result. `Ctrl+F` is local to the expanded panel, not a global hotkey.
+
+快捷项直接显示原功能状态。断线时传送项会提示当前会话不可传送；操作进行中或引用已被删除时，也有对应提示，不能把“没有操作进行中”误当成已经连接。暂时不可执行的复杂功能仍能打开设置。快捷页可展开“当前持续功能开关”查看摘要；该摘要只反映程序记录的开关，不证明游戏中实际生效。载入预设等待期间，主窗口和快捷面板都不能编辑参数，结束后恢复编辑。
+
+Shortcut status comes from the original feature state. Teleport entries report when the current session cannot teleport; pending operations and deleted references have separate messages. An idle operation is not treated as proof of a connection. Complex-feature settings remain accessible while execution is unavailable. Expand the continuous-feature summary on the shortcut tab to inspect the app's recorded switches; this is not proof of live-game effects. Both windows prevent parameter editing while a preset load is pending and allow it again when the operation ends.
 
 窄窗改用单列时，参数仍由同一对象保存。放大窗口会恢复原来的多列布局。展开采用短暂淡入和轻微缩放，遵循减少动态效果设置；收起和紧急停用不等待动画。
 

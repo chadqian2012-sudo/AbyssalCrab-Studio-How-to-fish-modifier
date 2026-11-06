@@ -10,9 +10,9 @@ AbyssalCrab Studio is a Windows desktop assistant for *How to Fish*. It uses a W
 
 ## 当前版本 | Current release
 
-当前分支为 **r19 候选（2026-11-06）**：改善悬浮窗的玻璃导航、快捷卡、设置布局和展开动画。窄窗中的普通功能改成单列，复杂页面在内容区滚动。继续使用 r18b 的共享参数与高速持物处理，游戏功能未改动。该候选只做代码与离线检查，真实游戏效果和桌面交付仍待验收。使用方法见 [功能指南](docs/FEATURES.md)，验证边界见 [验证说明](docs/VERIFICATION.md)。
+当前分支为 **r20 候选（2026-11-06）**：悬浮窗可搜索功能、打开对应分类和加入当前快捷面板。主窗口与悬浮窗都将搜索输入和结果选择分开，修复无匹配结果时输入被清空的问题。快捷项显示原功能状态、会话是否可传送、正在处理或引用失效；另可展开查看当前持续功能开关。载入预设期间，两处窗口同时禁止编辑参数，避免新输入被恢复结果覆盖。保留 r19 玻璃布局和动画，Runtime 未改动。默认、压缩候选包的内容核对及包内离线检查已完成，真实游戏验收仍待进行。使用方法见 [功能指南](docs/FEATURES.md)，离线结果及待验收项见 [验证说明](docs/VERIFICATION.md)。
 
-Current branch: **r19 candidate (2026-11-06)**. The panel has clearer glass navigation, shortcut cards, grouped settings and a gentle expansion animation. Narrow views use one column for ordinary controls; complex pages scroll within their content area. Shared state and held-motion behavior are inherited unchanged from r18b. This is an offline-reviewed candidate; live behavior and desktop promotion remain pending. See [usage](docs/FEATURES.md) and [verification scope](docs/VERIFICATION.md).
+Current branch: **r20 candidate (2026-11-06)**. Search inside the overlay, open the matching category, or add the result to the selected shortcut panel. Both windows separate search text from result selection, fixing text being cleared when no result matches. Shortcuts show the original feature state, teleport-session availability, pending work or missing references. An expandable summary lists continuous-feature switches. Both windows disable parameter editing while a preset is loading, preventing restored values from overwriting new input. The r19 glass layout and animation are retained; Runtime is unchanged. Both candidate packages passed payload comparison and offline checks against the packaged application; live-game acceptance remains pending. See [usage](docs/FEATURES.md) and [offline results and acceptance limits](docs/VERIFICATION.md).
 
 r17c 的紧急停用、队友选项和会话恢复修复继续保留，历史检查结果见 [会话恢复说明](docs/SESSION_RESTORE.md)。桌面仍使用 r17c，候选未实机验收前不替换。
 

@@ -1,5 +1,28 @@
 # 当前交付验证范围 | Current Verification Scope
 
+## r20 两种候选包通过离线核验，真实操作仍待验收
+
+2026-11-06：主代理使用最终默认包提取的应用程序集重新执行 101 项行为检查：悬浮面板 52、预设与重连边界 42、数字绑定 7，全部通过。包内程序集另通过 64 项界面检查，生成 65 张离屏图，WPF 绑定错误文件为空。各报告中的应用哈希与最终包一致；这些是本轮实际重跑结果，没有将 r19 的旧记录计入。
+
+The primary agent reran 101 behavioral assertions against the application extracted from the final default package: overlay 52, preset/reconnect boundaries 42, and numeric binding 7. All passed. The packaged assembly also passed 64 UI checks with 65 off-screen renders and an empty WPF binding-error file. Reported application hashes match the final package; these are current reruns, not reused r19 results.
+
+默认与压缩包的 450 个有效文件逐字节一致，两包品牌检查通过；Runtime 与 Harmony 保持 r19 的内容。编译没有错误，仍有原来的 68 项源码警告，警告内容集合与 r19 一致。NuGet 因访问被拒未能取得漏洞数据，因此不能将构建成功称为完整安全扫描通过。
+
+All 450 active payload entries are byte-identical between the default and compressed variants, and both pass branding checks. Runtime and Harmony retain their r19 contents. Compilation succeeded with the existing 68 source warnings; the warning-content set matches r19. NuGet could not retrieve vulnerability data because access was denied, so successful compilation does not establish a completed security scan.
+
+本轮复用已有搜索和功能对象。检查覆盖：搜索结果打开分类、加入当前面板、清空及无匹配结果、失效引用、离线传送禁用、复杂功能设置可访问，以及持续功能摘要。打开分类和加入面板均不发送游戏执行命令。搜索只进入对应分类，不承诺自动滚动并高亮某张卡片。另先复现了无匹配结果时搜索文字被清空的问题，再将两处窗口的输入和结果选择分开；新增检查确认两边共享的搜索文字均能保留。
+
+This change reuses the existing search and feature objects. Checks cover category navigation, adding results to the selected panel, empty/no-match searches, missing references, disabled offline teleports, accessible complex-feature settings and the continuous-feature summary. Navigation and adding a shortcut send no game execution commands. Search opens the matching category without promising automatic scrolling to and highlighting an individual card. A check first reproduced search text being cleared for unmatched input; separating input from result selection in both windows then passed checks that preserve their shared text.
+
+代码复核还发现两处问题并修正：快捷数值输入现在共用主窗口的编辑许可，载入预设等待时不能输入会被稍后覆盖的草稿；快捷传送的会话提示与实际传送使用同一个条件，不再把空闲状态当成可连接。离线检查包含预设等待、完成、取消及迟到回复；取消后新输入的草稿须保留。
+
+Review also corrected two issues: shortcut numeric editors now share the main window's edit permission while a preset is pending, and teleport availability uses the same session condition as execution instead of confusing idle with connected. Offline cases cover pending, completed and cancelled preset loads, including late replies; new drafts entered after cancellation must survive.
+
+Runtime 和 r19 相同；桌面仍为 r17c，r19 保留作前一候选。真实键盘/输入法搜索、快捷键与焦点、状态切换观感和预设等待时的双窗口操作仍记在 O-01～O-05，原有 60 项人工/游戏验收状态没有改变。本轮未操作桌面或游戏，离屏图不代表真实游戏验收。
+
+Runtime is unchanged from r19. The desktop remains on r17c, with r19 kept as the previous candidate. Real keyboard/IME search, hotkeys and focus, status presentation and preset editing across both windows remain in O-01 through O-05; the existing 60 manual/live acceptance items retain their status. No desktop or game input was sent; off-screen renders are not live-game acceptance.
+
+
 ## r19 的小窗布局与共享操作通过离线检查
 
 2026-11-06：从最终默认包提取的应用程序集通过 93 项既有行为检查：悬浮面板 44、预设与重连边界 42、数字绑定 7。更新后的界面验证通过 40 项检查，生成 47 张离屏图，未出现 WPF 绑定错误。检查包括全部十一类窄窗页面、宽窗列数、末尾分类可达、滚动时选中背景立即跟随、无效数字草稿跨尺寸保留、空面板、长名称、复杂页底部及多分类目录可达。检查读取的程序集哈希与实际包一致。
@@ -74,3 +97,11 @@ The latest review-fix delivery did not repeat in-game injection, generation, tel
 完整验证日志和机器报告保留在原始交付目录的 `verification/` 中；它们是体积较大的运行产物，不作为本源码仓库默认内容。
 
 Full verification logs and machine reports remain in the original delivery directory's `verification/` folder. They are bulky generated artifacts and are excluded from the source repository by default.
+
+## r20 证据附录 | r20 evidence appendix
+
+- 包内行为结果 / Packaged behavior results: `build/verification-r20-final/overlay/results.json`, `build/verification-r20-final/presets/results.json`, and the numeric runner's `results.json` under `build/verification-r20-final/numeric/`.
+- 界面及包一致性 / UI and payload comparison: `build/verification-r20-final/ui/ui-verification.json`, `binding-errors.txt`, `build/package-audit-r20/package-payload-equivalence.json`, and each variant's `branding-results.json`.
+- 实际应用程序集 SHA-256 / Tested application SHA-256: `d9526d2b3f402c63038d4699db4937cafe0197918af475bfbe56cc4dcfbc9863`.
+
+报告和图像随本地候选交付保存，不将生成物提交到源码历史。This generated evidence is retained with the local candidate delivery, not committed to source history.

@@ -26,9 +26,11 @@ sealed class OverlayUiPreferenceStore : IUserPreferencesStore
 sealed class OverlayUiRuntime : IGameRuntimeClient
 {
     public readonly List<string> Calls = new();
+    public TaskCompletionSource<RuntimeCommandResult>? PendingClear;
     public ValueTask<RuntimeCommandResult> ExecuteAsync(FeatureCommand command, CancellationToken token)
     {
         Calls.Add(command.FeatureId);
+        if (command.FeatureId == "locks.disable_all" && PendingClear != null) return new(PendingClear.Task);
         object result = new { applied = true };
         if (command.FeatureId == "catalog.items") result = new { items = new object[] {
             new { id = 11, name = "测试步枪", fish = false, kind = "枪械", weapon = new { damage = 9 }, attachments = new { sights = new[] { new { id = "scope", name = "瞄准镜" } }, barrels = Array.Empty<object>(), ammo = Array.Empty<object>(), extendedMag = true, laser = true }, skins = Array.Empty<object>() },
@@ -212,17 +214,133 @@ static class OverlayUiVerification
         fishRadio.IsChecked = true; Pump();
         var fishOwner = (FeatureItemViewModel)fishRadio.DataContext;
         Check(fishOwner.DeadFish && !fishOwner.AliveFish && Find<RadioButton>(secondView).First(r => Equals(r.Content, "死鱼")).IsChecked == true, "Fish selection is synchronized without cross-view radio grouping");
+        int callsBeforeSearch = runtime.Calls.Count;
+        vm.OverlayPanelName = "搜索快捷检查"; vm.CreateOverlayPanelCommand.Execute(null); tabs.SelectedIndex = 0;
+        Render(content, Path.Combine(output, "search-closed-620.png"), 620, 680);
+        var searchArea = (FrameworkElement)overlay.FindName("SearchArea");
+        var featureSearch = (TextBox)overlay.FindName("FeatureSearch");
+        var featureSearchResults = (ComboBox)overlay.FindName("FeatureSearchResults");
+        var mainExperienceBar = Find<ExperienceBar>(secondView).Single();
+        var mainFeatureSearch = (TextBox)mainExperienceBar.FindName("FeatureSearch");
+        var mainExperienceExpander = Find<Expander>(mainExperienceBar).Single();
+        var activeSummary = (Expander)overlay.FindName("ActiveSummary");
+        double closedSearchHeight = tabs.ActualHeight;
+        Check(searchArea.Visibility == Visibility.Collapsed && !activeSummary.IsExpanded, "Search and active-feature details start collapsed");
+        Find<Button>(content).Single(b => Equals(b.Content, "搜索")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        vm.SelectedOverlayFeatureChoice = vm.OverlayFeatureChoices.Single(choice => choice.Id == "player.health.lock");
+        featureSearch.Text = "移动"; Pump();
+        var searchHit = vm.SearchResults.Single(hit => hit.Id == "player.move.multiplier");
+        featureSearchResults.SelectedItem = searchHit;
+        Render(content, Path.Combine(output, "search-results-620.png"), 620, 680);
+        Check(searchArea.Visibility == Visibility.Visible && featureSearch.ActualWidth > 100 && Equals(featureSearchResults.SelectedItem, searchHit) &&
+            vm.FeatureQuery == "移动" && featureSearch.Text == "移动" && mainFeatureSearch.Text == "移动",
+            "Header search opens a usable 620-wide search field with the shared selected result");
+        var addSearch = Find<Button>(searchArea).Single(b => Equals(b.Content, "加入面板"));
+        addSearch.Command!.Execute(addSearch.CommandParameter); Pump();
+        Check(vm.SelectedOverlayPanel!.Items.Count == 1 && ReferenceEquals(vm.SelectedOverlayPanel.Items.Single().Feature, feature),
+            "Search add action reuses the existing feature owner in the selected shortcut panel");
+        var openSearch = Find<Button>(searchArea).Single(b => Equals(b.Content, "打开分类"));
+        openSearch.Command!.Execute(openSearch.CommandParameter); Pump();
+        Check(tabs.SelectedIndex == 1 && vm.SelectedPage.Category == "玩家" && ReferenceEquals(vm.AllFeatures.Single(f => f.Descriptor.Id == searchHit.Id), feature),
+            "Search open action selects the full-feature tab without replacing the shared feature");
+        mainExperienceExpander.IsExpanded = true;
+        Render(secondView, Path.Combine(output, "search-main-results.png"), 1400, 800);
+        foreach (var editor in new[] { featureSearch, mainFeatureSearch })
+        foreach (string query in new[] { "", "no-matching-feature-78364" })
+        {
+            editor.Text = "移动"; Pump(); featureSearchResults.SelectedItem = searchHit; Pump();
+            editor.Text = query; Pump();
+            string source = ReferenceEquals(editor, featureSearch) ? "overlay" : "main";
+            Render(content, Path.Combine(output, (source == "main" ? "main-input-" : "") + (query.Length == 0 ? "search-cleared-620.png" : "search-no-results-620.png")), 620, 680);
+            Check(vm.FeatureQuery == query && featureSearch.Text == query && mainFeatureSearch.Text == query,
+                "Editing " + source + " selected search preserves both inputs: expected=" + JsonSerializer.Serialize(query) +
+                ", model=" + JsonSerializer.Serialize(vm.FeatureQuery) + ", overlay=" + JsonSerializer.Serialize(featureSearch.Text) +
+                ", main=" + JsonSerializer.Serialize(mainFeatureSearch.Text));
+            Check(vm.SelectedSearchHit == null && !openSearch.IsEnabled && !addSearch.IsEnabled && vm.SelectedOverlayPanel!.Items.Count == 1 && vm.SelectedOverlayFeatureChoice?.Id == "player.health.lock",
+                (query.Length == 0 ? "Clearing " : "Unmatched ") + source + " search clears selection and disables both actions without adding the settings-page selection");
+        }
+        mainExperienceExpander.IsExpanded = false;
+        tabs.SelectedIndex = 0;
+        Find<Button>(searchArea).Single(b => Equals(b.ToolTip, "收起搜索")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Render(content, Path.Combine(output, "search-hidden-620.png"), 620, 680);
+        Check(searchArea.Visibility == Visibility.Collapsed && Math.Abs(tabs.ActualHeight - closedSearchHeight) < 1,
+            "Closing search returns its vertical space to the tab content");
+        activeSummary.IsExpanded = true;
+        Render(content, Path.Combine(output, "active-summary-620.png"), 620, 680);
+        Check(vm.ActiveFeaturesText == "持续功能均已关闭" && Find<TextBlock>(activeSummary).Any(t => t.Text == vm.ActiveFeaturesText && t.ActualHeight > 0),
+            "Expanded active-feature summary displays the shared all-disabled state");
+        Check(runtime.Calls.Count == callsBeforeSearch, "Searching, adding a shortcut, opening its page and expanding the summary dispatch no runtime commands");
+        activeSummary.IsExpanded = false; vm.SelectedOverlayPanel = populatedPanel;
         var writes = runtime.Calls.Skip(callsBeforeRender).Where(id => !new[] { "players.catalog", "players.inspect", "catalog.items", "catalog.islands", "features.proofs", "fun.event.catalog", "fun.event.availability", "casino.status" }.Contains(id)).ToArray();
         Check(writes.Length == 0, "Building and navigating overlay sends no gameplay write commands");
+        vm.SelectedPage = vm.Pages.First(p => p.Category == "玩家");
+        feature.ValueInput.Text = "2.75";
+        vm.PresetName = "输入锁定检查"; vm.SavePresetCommand.Execute(null);
+        tabs.SelectedIndex = 0;
+        Render(content, Path.Combine(output, "preset-editors-ready.png"), 620, 680);
+        Render(secondView, Path.Combine(output, "preset-main-ready.png"), 1400, 800);
+        var shortcutEditor = Find<TextBox>(Find<NumericInputBox>(content).Single(n => ReferenceEquals(n.Input, feature.ValueInput))).Single();
+        var mainEditor = Find<TextBox>(Find<NumericInputBox>(secondView).Single(n => ReferenceEquals(n.Input, feature.ValueInput))).Single();
+        Check(shortcutEditor.IsEnabled && mainEditor.IsEnabled, "Shortcut and full-page inputs are editable before preset loading");
+        var clear = new TaskCompletionSource<RuntimeCommandResult>(); runtime.PendingClear = clear;
+        var loading = vm.LoadOverlayPresetAsync("输入锁定检查"); Pump();
+        Check(vm.PresetBusy && !loading.IsCompleted && !shortcutEditor.IsEnabled && !mainEditor.IsEnabled,
+            "Pending preset clear disables both views of the shared numeric input");
+        Render(content, Path.Combine(output, "preset-busy-620.png"), 620, 680);
+        var presetActions = Find<Button>(content).Where(b => b.DataContext is OverlayShortcutViewModel { Kind: "preset" } && Equals(b.Content, "恢复参数")).ToArray();
+        Check(presetActions.Length > 0 && presetActions.All(b => !b.IsEnabled) && Find<TextBlock>(content).Any(t => t.DataContext is OverlayShortcutViewModel { Kind: "preset" } && t.Text == "正在处理参数，请稍候"),
+            "Pending preset loading disables shortcut restore actions and explains the busy state");
+        runtime.PendingClear = null;
+        var cleared = JsonSerializer.SerializeToElement(new { applied = true });
+        clear.SetResult(new RuntimeCommandResult(true, "fixture clear", cleared, cleared, false)); Pump();
+        Render(content, Path.Combine(output, "preset-editors-restored.png"), 620, 680);
+        Render(secondView, Path.Combine(output, "preset-main-restored.png"), 1400, 800);
+        feature = vm.AllFeatures.Single(f => f.Descriptor.Id == "player.move.multiplier");
+        shortcutEditor = Find<TextBox>(Find<NumericInputBox>(content).Single(n => ReferenceEquals(n.Input, feature.ValueInput))).Single();
+        mainEditor = Find<TextBox>(Find<NumericInputBox>(secondView).Single(n => ReferenceEquals(n.Input, feature.ValueInput))).Single();
+        Check(loading.IsCompletedSuccessfully && !vm.PresetBusy && shortcutEditor.IsEnabled && mainEditor.IsEnabled && feature.ValueInput.Text == "2.75",
+            "Completed preset loading restores both editors with the saved value");
+        clear = new TaskCompletionSource<RuntimeCommandResult>(); runtime.PendingClear = clear;
+        loading = vm.LoadOverlayPresetAsync("输入锁定检查"); Pump();
+        vm.ResetWorldContext();
+        Render(content, Path.Combine(output, "preset-cancelled-editors.png"), 620, 680);
+        Render(secondView, Path.Combine(output, "preset-cancelled-main.png"), 1400, 800);
+        feature = vm.AllFeatures.Single(f => f.Descriptor.Id == "player.move.multiplier");
+        shortcutEditor = Find<TextBox>(Find<NumericInputBox>(content).Single(n => ReferenceEquals(n.Input, feature.ValueInput))).Single();
+        mainEditor = Find<TextBox>(Find<NumericInputBox>(secondView).Single(n => ReferenceEquals(n.Input, feature.ValueInput))).Single();
+        Check(!loading.IsCompleted && !vm.PresetBusy && shortcutEditor.IsEnabled && mainEditor.IsEnabled,
+            "World change restores both editors before the cancelled preset reply arrives");
+        shortcutEditor.Text = "-"; Pump();
+        runtime.PendingClear = null;
+        clear.SetResult(new RuntimeCommandResult(true, "late fixture clear", cleared, cleared, false)); Pump();
+        Check(loading.IsCompletedSuccessfully && shortcutEditor.Text == "-" && mainEditor.Text == "-" && feature.ValueInput.Text == "-" && feature.ValueInput.LastValidValue == 2.75,
+            "Late cancelled preset reply preserves the new shared unfinished numeric draft");
         var nativeKeys = typeof(StatusWidget).Assembly.GetType("HowToFishTrainer.App.NativeHotkeys")!;
         var parse = nativeKeys.GetMethod("TryParse", BindingFlags.Static | BindingFlags.NonPublic)!;
         bool Parses(string key) { object[] parameters = { key, 0u, 0u }; return (bool)parse.Invoke(null, parameters)!; }
         Check(Parses("Home") && Parses("F8") && Parses("Ctrl+Home"), "Supported hotkey strings parse");
         Check(!Parses("Ctrl+Shift+F12") && !Parses("Ctrl+Ctrl+Home") && !Parses("Escape") && !Parses("Ctrl++Home") && !Parses("74"), "Reserved and invalid hotkeys are rejected");
+        vm.Disconnect(); tabs.SelectedIndex = 0;
+        content.UpdateLayout(); Pump();
+        var teleportAction = Find<Button>(content).Single(b => b.DataContext is OverlayShortcutViewModel { Kind: "teleport" } && Equals(b.Content, "传送"));
+        ((FrameworkElement)((FrameworkElement)teleportAction.Parent).Parent).BringIntoView(); Pump();
+        Render(content, Path.Combine(output, "offline-shortcuts-620.png"), 620, 680);
+        Check(!teleportAction.IsEnabled && Find<TextBlock>(content).Any(t => t.DataContext is OverlayShortcutViewModel { Kind: "teleport" } && t.Text == "当前会话不可传送"),
+            "Disconnected shortcut teleport is disabled with a current-session explanation");
+        var magicAction = Find<Button>(content).Single(b => b.DataContext is OverlayShortcutViewModel shortcut && shortcut.SourceFeature?.Descriptor.Id == "combat.silent_aim" && Equals(b.Content, "打开设置"));
+        Check(((OverlayShortcutViewModel)magicAction.DataContext).SourceFeature?.IsAvailable == false && magicAction.IsEnabled && Find<TextBlock>(content).Any(t => t.DataContext == magicAction.DataContext && t.Text == "暂不可用 · 可查看设置"),
+            "Unavailable complex feature still allows opening its settings and explains that distinction");
+        vm.TeleportPoints.Remove(point);
+        content.UpdateLayout(); Pump();
+        teleportAction = Find<Button>(content).Single(b => b.DataContext is OverlayShortcutViewModel { Kind: "teleport", IsAvailable: false } && Equals(b.Content, "传送"));
+        ((FrameworkElement)((FrameworkElement)teleportAction.Parent).Parent).BringIntoView(); Pump();
+        Render(content, Path.Combine(output, "invalid-shortcut-620.png"), 620, 680);
+        Check(!teleportAction.IsEnabled && Find<TextBlock>(content).Any(t => t.DataContext == teleportAction.DataContext && t.Text == "已失效，请重新添加"),
+            "Missing saved-point reference disables its main action and shows how to repair it");
         listener.Flush(); string bindingErrors = errors.ToString(); File.WriteAllText(Path.Combine(output, "binding-errors.txt"), bindingErrors);
         Check(string.IsNullOrWhiteSpace(bindingErrors), "No WPF binding errors during all overlay and feature-page rendering");
-        vm.Disconnect(); vm.CloseExperience(); vm.ClosePreferences(); main.Close();
-        File.WriteAllText(Path.Combine(output, "ui-verification.json"), JsonSerializer.Serialize(new { verificationVersion = "20261106-overlay-ui-v4", appAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(StatusWidget).Assembly.Location))), runnerAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(OverlayUiVerification).Assembly.Location))), checks = Checks, images = Images, realGameOpened = false, desktopInputSent = false, formalPreferencesUsed = false }, new JsonSerializerOptions { WriteIndented = true }));
+        vm.CloseExperience(); vm.ClosePreferences(); main.Close();
+        File.WriteAllText(Path.Combine(output, "ui-verification.json"), JsonSerializer.Serialize(new { verificationVersion = "20261106-overlay-ui-v6", appAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(StatusWidget).Assembly.Location))), runnerAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(OverlayUiVerification).Assembly.Location))), checks = Checks, images = Images, realGameOpened = false, desktopInputSent = false, formalPreferencesUsed = false }, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine("PASS " + Checks.Count + " UI checks; " + Images.Count + " rendered images");
         return 0;
     }

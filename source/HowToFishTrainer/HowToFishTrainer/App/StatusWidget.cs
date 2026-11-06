@@ -234,7 +234,19 @@ public sealed partial class StatusWidget : Window, IDisposable
         PlaceInsideGame();
     }
     private void Navigate(string category) { OverlayTabs.SelectedIndex = category == "@presets" ? 3 : 1; SetExpanded(true, false); }
-    private void HandleKey(object sender, KeyEventArgs e) { if (!e.Handled && e.Key == Key.Escape && _expanded) { SetExpanded(false, true); e.Handled = true; } }
+    private void HandleKey(object sender, KeyEventArgs e)
+    {
+        if (e.Handled || !_expanded) return;
+        if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control) { ShowSearch(); e.Handled = true; }
+        else if (e.Key == Key.Escape) { SetExpanded(false, true); e.Handled = true; }
+    }
+    private void ShowSearch()
+    {
+        SearchArea.Visibility = Visibility.Visible;
+        FeatureSearch.Focus(); FeatureSearch.SelectAll();
+    }
+    private void Search_Click(object sender, RoutedEventArgs e) => ShowSearch();
+    private void CloseSearch_Click(object sender, RoutedEventArgs e) { SearchArea.Visibility = Visibility.Collapsed; OverlayTabs.Focus(); }
     private void Collapse_Click(object sender, RoutedEventArgs e) => SetExpanded(false, true);
     private void Settings_Click(object sender, RoutedEventArgs e) => OverlayTabs.SelectedIndex = 4;
     private void TeleportPage_Click(object sender, RoutedEventArgs e) { _vm.SelectedPage = _vm.Pages.First(p => p.Category == "世界传送"); OverlayTabs.SelectedIndex = 1; }
