@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 
@@ -20,6 +21,7 @@ public sealed partial class StatusWidget : Window, IDisposable
     private readonly Func<int?> _processId;
     private readonly DispatcherTimer _timer;
     private readonly bool _preview;
+    private readonly ScaleTransform _expandedScale = new(1, 1);
     private nint _handle, _gameWindow;
     private int? _gameProcess;
     private int _expandAnimationVersion;
@@ -35,6 +37,8 @@ public sealed partial class StatusWidget : Window, IDisposable
         _vm = vm; _main = main; _processId = processId;
         _preview = Environment.GetCommandLineArgs().Contains("--ui-preview", StringComparer.OrdinalIgnoreCase);
         InitializeComponent();
+        ExpandedSurface.RenderTransformOrigin = new Point(0.5, 0.5);
+        ExpandedSurface.RenderTransform = _expandedScale;
         DataContext = vm;
         TrainerContent.OpenJournalRequested = tab => { SetExpanded(false, false); openJournal?.Invoke(tab); };
         Width = Height = LauncherSize;
@@ -152,20 +156,32 @@ public sealed partial class StatusWidget : Window, IDisposable
         bool wasActive = IsActive;
         _expanded = expanded;
         int animationVersion = ++_expandAnimationVersion;
-        ExpandedSurface.BeginAnimation(OpacityProperty, null);
-        ExpandedSurface.Opacity = 1;
+        StopExpansionAnimation();
         Launcher.Visibility = expanded ? Visibility.Collapsed : Visibility.Visible;
         ExpandedSurface.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
         UpdateActivationStyle(); PlaceInsideGame();
         if (expanded)
         {
             if (!IsVisible) Show(); Activate();
-            Duration duration = TryFindResource("MotionStatus") is Duration value ? value : new Duration(TimeSpan.FromMilliseconds(120));
-            var fade = new DoubleAnimation(0, 1, duration) { FillBehavior = FillBehavior.Stop, EasingFunction = TryFindResource("EaseEnter") as IEasingFunction };
-            fade.Completed += (_, _) => { if (animationVersion == _expandAnimationVersion && !_disposed) ExpandedSurface.BeginAnimation(OpacityProperty, null); };
-            ExpandedSurface.BeginAnimation(OpacityProperty, fade);
+            Duration duration = TryFindResource("MotionExpand") is Duration value ? value : UiMotion.Expand;
+            if (duration.HasTimeSpan && duration.TimeSpan > TimeSpan.Zero)
+            {
+                var easing = TryFindResource("EaseEnter") as IEasingFunction;
+                var fade = new DoubleAnimation(0, 1, duration) { FillBehavior = FillBehavior.Stop, EasingFunction = easing };
+                var scale = new DoubleAnimation(0.985, 1, duration) { FillBehavior = FillBehavior.Stop, EasingFunction = easing };
+                fade.Completed += (_, _) => { if (animationVersion == _expandAnimationVersion && !_disposed) StopExpansionAnimation(); };
+                _expandedScale.BeginAnimation(ScaleTransform.ScaleXProperty, scale);
+                _expandedScale.BeginAnimation(ScaleTransform.ScaleYProperty, scale);
+                ExpandedSurface.BeginAnimation(OpacityProperty, fade);
+            }
         }
         else if (returnFocus && wasActive && TryGameClient(out _, out _, out _)) NativeOverlay.SetForegroundWindow(_gameWindow);
+    }
+    private void StopExpansionAnimation()
+    {
+        ExpandedSurface.BeginAnimation(OpacityProperty, null);
+        _expandedScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        _expandedScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
     }
     private void SyncHotkey(bool enabled)
     {
@@ -226,7 +242,7 @@ public sealed partial class StatusWidget : Window, IDisposable
     public void Dispose()
     {
         if (_disposed) return;
-        _disposed = true; _expandAnimationVersion++; ExpandedSurface.BeginAnimation(OpacityProperty, null); _timer.Stop(); _timer.Tick -= Tick;
+        _disposed = true; _expandAnimationVersion++; StopExpansionAnimation(); _timer.Stop(); _timer.Tick -= Tick;
         SyncHotkey(false); _source?.RemoveHook(WindowMessage);
         _vm.PropertyChanged -= ModelChanged; _vm.OverlayNavigationRequested -= Navigate;
         KeyDown -= HandleKey; LostMouseCapture -= HandleLostCapture; _dragElement?.ReleaseMouseCapture(); Close();

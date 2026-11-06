@@ -12,6 +12,10 @@ namespace HowToFishTrainer.App;
 
 public partial class TrainerContentView : UserControl
 {
+    private static readonly DependencyPropertyKey IsCompactPropertyKey = DependencyProperty.RegisterReadOnly(
+        nameof(IsCompact), typeof(bool), typeof(TrainerContentView), new PropertyMetadata(false));
+    public static readonly DependencyProperty IsCompactProperty = IsCompactPropertyKey.DependencyProperty;
+    public bool IsCompact => (bool)GetValue(IsCompactProperty);
     private bool _navCapsuleMovePending;
     private bool _appearanceClosing;
     private int _navAnimationVersion;
@@ -28,12 +32,20 @@ public partial class TrainerContentView : UserControl
     private void OpenSaveBackups_Click(object sender, RoutedEventArgs e) => OpenJournalRequested?.Invoke(3);
 	private void TopCategories_SelectionChanged(object sender, SelectionChangedEventArgs e)
 	{
+		if (IsCompact) TopCategories.ScrollIntoView(TopCategories.SelectedItem);
 		ScheduleNavCapsuleMove();
+	}
+
+	private void TopCategories_ScrollChanged(object sender, ScrollChangedEventArgs e)
+	{
+		if (!_appearanceClosing) MoveNavCapsule(false);
 	}
 
 	protected override void OnRenderSizeChanged(SizeChangedInfo sizeInfo)
 	{
 		base.OnRenderSizeChanged(sizeInfo);
+		SetValue(IsCompactPropertyKey, sizeInfo.NewSize.Width < 900);
+		if (IsCompact) TopCategories.ScrollIntoView(TopCategories.SelectedItem);
 		// 换行阈值跨过时（1180–1320 区间）条目会重新排布，胶囊要跟着回到新的真实位置。
 		ScheduleNavCapsuleMove();
 	}

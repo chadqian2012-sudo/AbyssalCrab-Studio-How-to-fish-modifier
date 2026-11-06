@@ -3,10 +3,8 @@
       <Grid>
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><!-- 装饰层：材质 + 阴影，不含任何文字（与顶栏同样的拆分理由，避免 DropShadowEffect 把导航项文字降级成灰度抗锯齿）。 --><Border Background="{DynamicResource GlassNavBrush}" Effect="{DynamicResource GlassShadowChrome}" IsHitTestVisible="False"/><!-- 内容层：透明底 + 底边线 + 内边距，承载导航项与胶囊。 --><Border Background="Transparent" BorderBrush="{DynamicResource GlassEdgeChromeBrush}" BorderThickness="0,0,0,1" Padding="8,6"><Grid><!-- 失焦遮罩：位于导航项与胶囊之下，只柔化导航带材质。 --><Border Style="{StaticResource InactiveScrim}"/><Canvas x:Name="NavCapsuleLayer" IsHitTestVisible="False" ClipToBounds="True">
             <Canvas.Style><Style TargetType="Canvas"><Style.Triggers><DataTrigger Binding="{Binding CompactNavigation}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></Canvas.Style>
-            <!-- 浮动选中胶囊：装饰层，不参与命中。真正选中状态仍来自 ListBox 的 SelectedItem。
-                 位移完全由 MainWindow.xaml.cs 的 MoveNavCapsule 计算（同时含 X 与 Y），
-                 因为 TopCategories 的 ItemsPanel 是 WrapPanel，窄窗口下会换行，
-                 单个横向位移表达不了跨行跳变。 -->
+            <!-- 选中胶囊由 TrainerContentView 按分类的实际位置定位。
+                 选择时平滑移动，导航滚动时立即跟随；不参与命中。 -->
             <Border x:Name="NavCapsule" Background="{DynamicResource GlassNavCapsuleBrush}"
                     BorderBrush="{DynamicResource GlassEdgeChromeBrush}" BorderThickness="1"
                     CornerRadius="14" Height="44" VerticalAlignment="Top"
@@ -24,9 +22,19 @@
               <Border BorderBrush="{DynamicResource GlassEdgeVBrush}" BorderThickness="1"
                       CornerRadius="13" IsHitTestVisible="False"/>
             </Border>
-          </Canvas><ListBox Background="#00FFFFFF" BorderThickness="0" ItemsSource="{Binding Pages}" SelectedItem="{Binding SelectedPage}" ScrollViewer.HorizontalScrollBarVisibility="Disabled" x:Name="TopCategories" MinHeight="48" VerticalAlignment="Top" Padding="0" ScrollViewer.VerticalScrollBarVisibility="Disabled" SelectionChanged="TopCategories_SelectionChanged">
-              <ListBox.Style><Style TargetType="ListBox"><Style.Triggers><DataTrigger Binding="{Binding CompactNavigation}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></ListBox.Style>
-              <ItemsControl.ItemContainerStyle><Style TargetType="{x:Type ListBoxItem}" BasedOn="{StaticResource NavListItem}"><!-- 118px 是实测出来刚好放得下 4 个汉字的宽度，但在 1.5x DPI 的亚像素布局下余量为 0，11 个分类名会被 CharacterEllipsis 各截掉几个 DIP（独立验收矩阵实测最严重差 3.33 DIP）。这里加 6px 宽并以 AccentWashBrush 加粗 1px、外边距由 1 收成 0 把占位补回来，净增 2px 每项，11 项总宽仅 +22px，仍在一行阈值之内。 --><Setter Property="Padding" Value="13,10"/><Setter Property="Margin" Value="0,1"/><Setter Property="Width" Value="120"/></Style></ItemsControl.ItemContainerStyle><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate>
+          </Canvas><ListBox Background="#00FFFFFF" BorderThickness="0" ItemsSource="{Binding Pages}" SelectedItem="{Binding SelectedPage}" x:Name="TopCategories" MinHeight="48" VerticalAlignment="Top" Padding="0" ScrollViewer.VerticalScrollBarVisibility="Disabled" SelectionChanged="TopCategories_SelectionChanged" ScrollViewer.ScrollChanged="TopCategories_ScrollChanged">
+              <ListBox.Style><Style TargetType="ListBox">
+                <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
+                <Setter Property="ItemsPanel"><Setter.Value><ItemsPanelTemplate><WrapPanel Orientation="Horizontal"/></ItemsPanelTemplate></Setter.Value></Setter>
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding IsCompact, RelativeSource={RelativeSource AncestorType={x:Type app:TrainerContentView}}}" Value="True">
+                    <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto"/>
+                    <Setter Property="ItemsPanel"><Setter.Value><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></Setter.Value></Setter>
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding CompactNavigation}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+                </Style.Triggers>
+              </Style></ListBox.Style>
+              <ItemsControl.ItemContainerStyle><Style TargetType="{x:Type ListBoxItem}" BasedOn="{StaticResource NavListItem}"><!-- 118px 是实测出来刚好放得下 4 个汉字的宽度，但在 1.5x DPI 的亚像素布局下余量为 0，11 个分类名会被 CharacterEllipsis 各截掉几个 DIP（独立验收矩阵实测最严重差 3.33 DIP）。这里加 6px 宽并以 AccentWashBrush 加粗 1px、外边距由 1 收成 0 把占位补回来，净增 2px 每项，11 项总宽仅 +22px，仍在一行阈值之内。 --><Setter Property="Padding" Value="13,10"/><Setter Property="Margin" Value="0,1"/><Setter Property="Width" Value="120"/></Style></ItemsControl.ItemContainerStyle><ItemsControl.ItemTemplate>
                 <DataTemplate>
                   <Grid>
                     <Grid.ColumnDefinitions>
@@ -46,7 +54,11 @@
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ListBox>
-          </Grid></Border><Grid Margin="24,18,18,16" Grid.Row="1">
+          </Grid></Border><Grid Grid.Row="1">
+          <Grid.Style><Style TargetType="Grid">
+            <Setter Property="Margin" Value="24,18,18,16"/>
+            <Style.Triggers><DataTrigger Binding="{Binding IsCompact, RelativeSource={RelativeSource AncestorType={x:Type app:TrainerContentView}}}" Value="True"><Setter Property="Margin" Value="12,12,6,10"/></DataTrigger></Style.Triggers>
+          </Style></Grid.Style>
           <!-- PageFadeIn 的第二个动画作用在 (UIElement.RenderTransform).(TranslateTransform.Y)，
                所以这里必须显式挂一个 TranslateTransform，否则位移会静默失效（淡入仍生效）。
                注意：不能把它换成 TransformGroup —— 那会让 theme.xaml 里那条 Y 路径失效；
@@ -107,7 +119,16 @@
                        TextTrimming="CharacterEllipsis" ToolTip="即时写入内存 · 持续功能关闭时恢复原始状态"/>
           </Grid>
           <app:ExperienceBar Grid.Row="1"/>
-          <Grid Row="2" IsEnabled="{Binding CanEditParameters}">
+          <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+          <Grid Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" IsEnabled="{Binding CanEditParameters}">
+            <Grid.Style><Style TargetType="Grid"><Style.Triggers>
+              <DataTrigger Binding="{Binding IsCatalogPage}" Value="True"><Setter Property="MinWidth" Value="1040"/><Setter Property="MinHeight" Value="520"/></DataTrigger>
+              <DataTrigger Binding="{Binding IsRoomMembersPage}" Value="True"><Setter Property="MinWidth" Value="1040"/><Setter Property="MinHeight" Value="520"/></DataTrigger>
+              <DataTrigger Binding="{Binding IsFunEventsPage}" Value="True"><Setter Property="MinWidth" Value="1040"/><Setter Property="MinHeight" Value="520"/></DataTrigger>
+              <DataTrigger Binding="{Binding IsEntertainmentPage}" Value="True"><Setter Property="MinWidth" Value="1040"/><Setter Property="MinHeight" Value="520"/></DataTrigger>
+              <DataTrigger Binding="{Binding IsCombatPage}" Value="True"><Setter Property="MinWidth" Value="1040"/><Setter Property="MinHeight" Value="520"/></DataTrigger>
+              <DataTrigger Binding="{Binding IsTeleportPage}" Value="True"><Setter Property="MinWidth" Value="1040"/><Setter Property="MinHeight" Value="520"/></DataTrigger>
+            </Style.Triggers></Style></Grid.Style>
             <Grid.RowDefinitions>
               <RowDefinition Height="Auto"/>
               <RowDefinition/>
@@ -130,10 +151,11 @@
                   <ColumnDefinition Width="1*"/>
                 </Grid.ColumnDefinitions>
                 <Border Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="18" Margin="0,0,10,0">
-                  <StackPanel>
+                  <Grid>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                     <TextBlock Text="分类浏览" FontSize="17" FontWeight="SemiBold"/>
-                    <TextBlock Text="目录已按游戏实时类型整理" Style="{StaticResource Muted}" FontSize="10" Margin="0,5,0,15"/>
-                    <ListBox Style="{StaticResource OptionListBox}" Margin="0,0,0,0" ItemsSource="{Binding Kinds}" SelectedItem="{Binding SelectedKind}">
+                    <TextBlock Grid.Row="1" Text="目录已按游戏实时类型整理" Style="{StaticResource Muted}" FontSize="10" Margin="0,5,0,15"/>
+                    <ListBox Grid.Row="2" Style="{StaticResource OptionListBox}" Margin="0,0,0,0" ItemsSource="{Binding Kinds}" SelectedItem="{Binding SelectedKind}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate>
                           <Border Background="{StaticResource AccentSoftBrush}" CornerRadius="8" Padding="12,10" Margin="0,0,0,7">
@@ -142,8 +164,8 @@
                         </DataTemplate>
                       </ItemsControl.ItemTemplate>
                     </ListBox>
-                    <TextBlock Text="物品页已排除全部鱼类；鱼类页只显示可生成鱼种。" TextWrapping="Wrap" Style="{StaticResource Muted}" FontSize="10" Margin="2,10,2,0"/>
-                  </StackPanel>
+                    <TextBlock Grid.Row="3" Text="物品页已排除全部鱼类；鱼类页只显示可生成鱼种。" TextWrapping="Wrap" Style="{StaticResource Muted}" FontSize="10" Margin="2,10,2,0"/>
+                  </Grid>
                 </Border>
                 <Border Grid.Column="1" Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="18" Margin="0,0,10,0">
                   <Grid>
@@ -1023,7 +1045,16 @@
                 <ItemsControl ItemsSource="{Binding DisplayFeatures}" ItemTemplate="{StaticResource FeatureCardTemplate}">
                   <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
-                      <UniformGrid Columns="2"/>
+                      <UniformGrid>
+                        <UniformGrid.Style><Style TargetType="UniformGrid">
+                          <Setter Property="Columns" Value="2"/>
+                          <Style.Triggers><MultiDataTrigger><MultiDataTrigger.Conditions>
+                            <Condition Binding="{Binding IsCompact, RelativeSource={RelativeSource AncestorType={x:Type app:TrainerContentView}}}" Value="True"/>
+                            <Condition Binding="{Binding IsCombatPage}" Value="False"/>
+                            <Condition Binding="{Binding IsTeleportPage}" Value="False"/>
+                          </MultiDataTrigger.Conditions><Setter Property="Columns" Value="1"/></MultiDataTrigger></Style.Triggers>
+                        </Style></UniformGrid.Style>
+                      </UniformGrid>
                     </ItemsPanelTemplate>
                   </ItemsControl.ItemsPanel>
 
@@ -1031,6 +1062,7 @@
               </StackPanel>
             </ScrollViewer>
           </Grid>
+          </ScrollViewer>
           </Grid>
       </Grid>
       </Grid>

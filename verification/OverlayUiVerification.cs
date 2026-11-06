@@ -32,7 +32,7 @@ sealed class OverlayUiRuntime : IGameRuntimeClient
         object result = new { applied = true };
         if (command.FeatureId == "catalog.items") result = new { items = new object[] {
             new { id = 11, name = "测试步枪", fish = false, kind = "枪械", weapon = new { damage = 9 }, attachments = new { sights = new[] { new { id = "scope", name = "瞄准镜" } }, barrels = Array.Empty<object>(), ammo = Array.Empty<object>(), extendedMag = true, laser = true }, skins = Array.Empty<object>() },
-            new { id = 21, name = "测试鱼", fish = true, kind = "鱼类" } } };
+            new { id = 21, name = "测试鱼", fish = true, kind = "鱼类" } }.Concat(Enumerable.Range(0, 20).Select(i => (object)new { id = 100 + i, name = "排版目录" + i, fish = false, kind = "种类" + i })).ToArray() };
         if (command.FeatureId == "catalog.islands") result = new { islands = new[] { new { index = 1, key = "island:test", name = "测试岛", rawName = "Test", available = true, runtimeIndex = 1, sceneBuildIndex = 2 } } };
         if (command.FeatureId == "players.catalog") result = new { players = Array.Empty<object>() };
         if (command.FeatureId == "features.proofs") result = Array.Empty<object>();
@@ -116,11 +116,98 @@ static class OverlayUiVerification
         Check(Find<NumericInputBox>(overlayView).Any(n => ReferenceEquals(n.Input, feature.ValueInput)), "Overlay uses the shared numeric input owner");
         Check(Find<NumericInputBox>(secondView).Any(n => ReferenceEquals(n.Input, feature.ValueInput)), "Main page uses the same numeric input owner");
         Check(feature.ValueInput.Text == "2.75", "Rendering both hosts preserves numeric draft");
+        var mainCards = Find<ItemsControl>(secondView).Single(c => ReferenceEquals(c.ItemsSource, vm.DisplayFeatures));
+        var mainFirst = (FrameworkElement)mainCards.ItemContainerGenerator.ContainerFromIndex(0);
+        var mainNext = (FrameworkElement)mainCards.ItemContainerGenerator.ContainerFromIndex(1);
+        Point mainFirstPosition = mainFirst.TranslatePoint(new Point(), secondView), mainNextPosition = mainNext.TranslatePoint(new Point(), secondView);
+        Check(Math.Abs(mainFirstPosition.Y - mainNextPosition.Y) < 1 && mainNextPosition.X >= mainFirstPosition.X + mainFirst.ActualWidth - 1, "1400 main view keeps feature cards side by side");
+        var mainFeel = vm.FeelFeatures.Take(3).Select(f => Find<NumericInputBox>(secondView).Single(n => ReferenceEquals(n.Input, f.ValueInput))).ToArray();
+        var mainFeelPositions = mainFeel.Select(n => n.TranslatePoint(new Point(), secondView)).ToArray();
+        Check(mainFeelPositions.Length == 3 && mainFeelPositions.All(p => Math.Abs(p.Y - mainFeelPositions[0].Y) < 1) && mainFeelPositions[2].X > mainFeelPositions[1].X && mainFeelPositions[1].X > mainFeelPositions[0].X, "1400 main view keeps three feel editors on one row");
         foreach (int tab in new[] { 0, 1, 4 }) { tabs.SelectedIndex = tab; Render(content, Path.Combine(output, "default-620-tab-" + tab + ".png"), 620, 680); }
         tabs.SelectedIndex = 1;
+        var pageViewport = ((Grid)overlayView.FindName("PageScaleHost")).Children.OfType<ScrollViewer>().Single();
+        foreach (var page in vm.Pages)
+        {
+            vm.SelectedPage = page;
+            pageViewport.ScrollToTop(); pageViewport.ScrollToLeftEnd();
+            Render(content, Path.Combine(output, "narrow-page-" + page.Category + ".png"), 620, 680);
+            bool ordinary = new[] { "玩家", "钓鱼", "金钱背包", "解锁中心" }.Contains(page.Category);
+            Check(overlayView.ActualWidth > 400 && overlayView.ActualWidth <= 620 && pageViewport.ViewportWidth > 400 && pageViewport.ViewportWidth <= 620 && (ordinary ? pageViewport.ScrollableWidth < 1 && pageViewport.ScrollableHeight < 1 : pageViewport.ScrollableWidth > 100),
+                "620 " + page.Title + (ordinary ? " fits without an extra page scrollbar" : " keeps horizontal scrolling inside the page, not the shared view"));
+            if (!ordinary)
+            {
+                pageViewport.ScrollToBottom(); overlayView.UpdateLayout(); Pump();
+                var pageBody = (FrameworkElement)pageViewport.Content;
+                var visiblePage = Find<ScrollContentPresenter>(pageViewport).First();
+                double bodyBottom = pageBody.TranslatePoint(new Point(0, pageBody.ActualHeight), visiblePage).Y;
+                Check(pageViewport.ScrollableHeight > 1 && Math.Abs(pageViewport.VerticalOffset - pageViewport.ScrollableHeight) < 1 && bodyBottom > 0 && bodyBottom <= visiblePage.ActualHeight + 1, "620 " + page.Title + " can scroll to the bottom of its finite page content");
+                if (vm.IsCatalogPage)
+                {
+                    var catalogList = Find<ListBox>(overlayView).Single(l => l.Items.OfType<CatalogOption>().Any());
+                    var firstOption = (FrameworkElement)catalogList.ItemContainerGenerator.ContainerFromIndex(0);
+                    var visibleList = Find<ScrollContentPresenter>(catalogList).Single();
+                    Point optionInList = firstOption.TranslatePoint(new Point(), visibleList), optionInPage = firstOption.TranslatePoint(new Point(), visiblePage);
+                    Check(firstOption.ActualHeight > 0 && visibleList.ActualHeight >= firstOption.ActualHeight && visibleList.ActualHeight < overlayView.ActualHeight && optionInList.Y >= -1 && optionInList.Y + firstOption.ActualHeight <= visibleList.ActualHeight + 1 && optionInPage.Y >= -1 && optionInPage.Y + firstOption.ActualHeight <= visiblePage.ActualHeight + 1,
+                        "620 " + page.Title + " shows a complete catalog row in a finite list viewport after scrolling");
+                    if (vm.IsItemGeneratorPage)
+                    {
+                        var kindsList = Find<ListBox>((FrameworkElement)overlayView.FindName("GeneratorWorkspace")).Single(l => l.Items.Count > 0 && l.Items.OfType<string>().Count() == l.Items.Count);
+                        var kindsScroll = Find<ScrollViewer>(kindsList).Single();
+                        kindsScroll.ScrollToEnd();
+                        Render(content, Path.Combine(output, "narrow-catalog-last-kind.png"), 620, 680);
+                        Console.WriteLine($"Catalog kinds: {kindsList.Items.Count}, offset {kindsScroll.VerticalOffset}/{kindsScroll.ScrollableHeight}, viewport {kindsScroll.ViewportHeight}, extent {kindsScroll.ExtentHeight}, generated {string.Join(",", Enumerable.Range(0, kindsList.Items.Count).Where(i => kindsList.ItemContainerGenerator.ContainerFromIndex(i) != null))}");
+                        var lastKind = (FrameworkElement)kindsList.ItemContainerGenerator.ContainerFromIndex(kindsList.Items.Count - 1);
+                        var kindsViewport = Find<ScrollContentPresenter>(kindsList).Single();
+                        Point lastKindPosition = lastKind.TranslatePoint(new Point(), kindsViewport);
+                        Check(kindsList.Items.Count > 10 && kindsScroll.ScrollableHeight > 0 && kindsViewport.ActualHeight < overlayView.ActualHeight && lastKind.ActualHeight > 0 && lastKindPosition.Y >= -1 && lastKindPosition.Y + lastKind.ActualHeight <= kindsViewport.ActualHeight + 1,
+                            "620 catalog kind list scrolls to a complete last row with more kinds than the viewport can hold");
+                    }
+                }
+                Render(content, Path.Combine(output, "narrow-bottom-" + page.Category + ".png"), 620, 680);
+            }
+        }
+        var navigation = (ListBox)overlayView.FindName("TopCategories");
+        var navigationScroll = Find<ScrollViewer>(navigation).Single();
+        var navigationViewport = Find<ScrollContentPresenter>(navigation).Single();
+        var lastCategory = (FrameworkElement)navigation.ItemContainerGenerator.ContainerFromItem(vm.Pages.Last());
+        Point lastPosition = lastCategory.TranslatePoint(new Point(), navigationViewport);
+        Check(navigation.Items.Count == 11 && navigationScroll.HorizontalOffset > 0 && lastPosition.X >= -1 && lastPosition.X + lastCategory.ActualWidth <= navigationViewport.ActualWidth + 1, "620 last category scrolls fully into the navigation viewport");
+        double lastOffset = navigationScroll.HorizontalOffset;
+        navigationScroll.ScrollToHorizontalOffset(navigationScroll.ScrollableWidth / 2); overlayView.UpdateLayout();
+        var capsule = (FrameworkElement)overlayView.FindName("NavCapsule");
+        var capsuleLayer = (FrameworkElement)overlayView.FindName("NavCapsuleLayer");
+        Point itemPosition = lastCategory.TranslatePoint(new Point(), capsuleLayer), capsulePosition = capsule.TranslatePoint(new Point(), capsuleLayer);
+        Check(navigationScroll.HorizontalOffset < lastOffset && Math.Abs(itemPosition.X - capsulePosition.X) < 1 && Math.Abs(itemPosition.Y - capsulePosition.Y) < 1, "Navigation capsule follows a manual middle scroll before any dispatcher wait or animation");
+        vm.SelectedPage = vm.Pages.First(p => p.Category == "玩家");
+        Render(content, Path.Combine(output, "narrow-player-before-resize.png"), 620, 680);
+        var narrowCards = Find<ItemsControl>(overlayView).Single(c => ReferenceEquals(c.ItemsSource, vm.DisplayFeatures));
+        var narrowFirst = (FrameworkElement)narrowCards.ItemContainerGenerator.ContainerFromIndex(0);
+        var narrowNext = (FrameworkElement)narrowCards.ItemContainerGenerator.ContainerFromIndex(1);
+        Point narrowFirstPosition = narrowFirst.TranslatePoint(new Point(), overlayView), narrowNextPosition = narrowNext.TranslatePoint(new Point(), overlayView);
+        var narrowFeel = vm.FeelFeatures.Take(2).Select(f => Find<NumericInputBox>(overlayView).Single(n => ReferenceEquals(n.Input, f.ValueInput))).ToArray();
+        Check(Math.Abs(narrowFirstPosition.X - narrowNextPosition.X) < 1 && narrowNextPosition.Y >= narrowFirstPosition.Y + narrowFirst.ActualHeight - 1 && narrowFeel[1].TranslatePoint(new Point(), overlayView).Y > narrowFeel[0].TranslatePoint(new Point(), overlayView).Y + narrowFeel[0].ActualHeight, "620 player feature cards and feel editors stack vertically");
+        var draftOwner = Find<NumericInputBox>(overlayView).Single(n => ReferenceEquals(n.Input, feature.ValueInput));
+        var draftEditor = Find<TextBox>(draftOwner).Single(); draftEditor.Text = "-";
+        Render(content, Path.Combine(output, "draft-wide.png"), 1400, 800);
+        Render(content, Path.Combine(output, "draft-narrow.png"), 620, 680);
+        Check(ReferenceEquals(draftOwner, Find<NumericInputBox>(overlayView).Single(n => ReferenceEquals(n.Input, feature.ValueInput))) && draftEditor.Text == "-" && feature.ValueInput.Text == "-" && feature.ValueInput.LastValidValue == 2.75, "Narrow-wide-narrow resize preserves the same editor and unfinished numeric draft");
+        feature.ValueInput.Text = "2.75";
+        var populatedPanel = vm.SelectedOverlayPanel;
+        vm.OverlayPanelName = "排版检查 · " + new string('长', 30); vm.CreateOverlayPanelCommand.Execute(null); tabs.SelectedIndex = 0;
+        Render(content, Path.Combine(output, "empty-panel-620.png"), 620, 680);
+        Check(Find<TextBlock>(content).Any(t => t.Text == "把常用操作放在这里" && t.ActualHeight > 0) && Find<Button>(content).Any(b => Equals(b.Content, "添加快捷项") && b.ActualHeight > 0), "Empty shortcut panel shows its explanation and add action at 620");
+        var longPoint = new TrainerTeleportPoint("排版检查", "海岸营地 · " + new string('长', 40), 1, 2, 3);
+        vm.TeleportPoints.Add(longPoint); vm.AddTeleportToOverlayCommand.Execute(longPoint);
+        Render(content, Path.Combine(output, "long-shortcut-620.png"), 620, 680);
+        var longTitle = Find<TextBlock>(content).Single(t => t.Text == longPoint.Name);
+        Check(longTitle.ActualHeight >= longTitle.FontSize * 2 && longTitle.ActualWidth < 620, "Long shortcut title wraps inside the 620 panel");
+        vm.SelectedOverlayPanel = populatedPanel; tabs.SelectedIndex = 1;
         vm.SelectedPage = vm.Pages.First(p => p.Category == "鱼类生成");
         Render(content, Path.Combine(output, "fish-overlay.png"));
         Render(secondView, Path.Combine(output, "fish-main.png"), 1400, 800);
+        var mainPageViewport = ((Grid)secondView.FindName("PageScaleHost")).Children.OfType<ScrollViewer>().Single();
+        Check(mainPageViewport.ScrollableWidth < 1 && mainPageViewport.ScrollableHeight < 1, "1400 catalog page fits without an extra page scrollbar");
         var fishRadio = Find<RadioButton>(overlayView).First(r => Equals(r.Content, "死鱼"));
         fishRadio.IsChecked = true; Pump();
         var fishOwner = (FeatureItemViewModel)fishRadio.DataContext;
@@ -135,7 +222,7 @@ static class OverlayUiVerification
         listener.Flush(); string bindingErrors = errors.ToString(); File.WriteAllText(Path.Combine(output, "binding-errors.txt"), bindingErrors);
         Check(string.IsNullOrWhiteSpace(bindingErrors), "No WPF binding errors during all overlay and feature-page rendering");
         vm.Disconnect(); vm.CloseExperience(); vm.ClosePreferences(); main.Close();
-        File.WriteAllText(Path.Combine(output, "ui-verification.json"), JsonSerializer.Serialize(new { verificationVersion = "20261105-overlay-ui-v2", appAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(StatusWidget).Assembly.Location))), runnerAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(OverlayUiVerification).Assembly.Location))), checks = Checks, images = Images, realGameOpened = false, desktopInputSent = false, formalPreferencesUsed = false }, new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(Path.Combine(output, "ui-verification.json"), JsonSerializer.Serialize(new { verificationVersion = "20261106-overlay-ui-v4", appAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(StatusWidget).Assembly.Location))), runnerAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(OverlayUiVerification).Assembly.Location))), checks = Checks, images = Images, realGameOpened = false, desktopInputSent = false, formalPreferencesUsed = false }, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine("PASS " + Checks.Count + " UI checks; " + Images.Count + " rendered images");
         return 0;
     }

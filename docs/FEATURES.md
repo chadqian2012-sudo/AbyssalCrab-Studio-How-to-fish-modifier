@@ -1,18 +1,22 @@
 # 功能指南 | Feature Guide
 
-## r18b 悬浮面板复用主界面的功能 | Shared game panel
+## r19 悬浮面板在小窗中更易操作 | Shared game panel
 
 在主窗口勾选“游戏悬浮窗”，切回已连接的游戏窗口后显示 AC 按钮。拖动按钮调整位置，点击或按 `Home` 展开；“收起”或 `Esc` 返回游戏。设置中可改成 `F8`、`Ctrl+Home` 等快捷键。`Ctrl+Shift+F12` 保留为紧急停用，面板顶部也有同一操作的按钮。
 
 Enable the game panel in the main window, then return to the connected game. Drag the AC launcher to move it; click it or press `Home` to expand. Collapse or press `Esc` to return to the game. The hotkey is configurable; `Ctrl+Shift+F12` remains emergency stop and is also available as a visible button.
 
 - **快捷面板**：在设置中为面板取名、新建，再添加功能。普通功能可直接编辑和操作；复杂功能进入完整页面。使用上下箭头调整快捷项顺序。
-- **全部功能**：与主窗口共用分类、设置及执行状态。主窗口修改的数字草稿会同步显示，切换分类不会重建功能对象。较窄窗口可横向滚动完整设置。
+- **全部功能**：与主窗口共用分类、设置及执行状态。主窗口修改的数字草稿会同步显示，切换分类不会重建功能对象。窄窗分类横向滚动，选中项自动进入视口；普通功能和角色手感纵向单列。物品、鱼类、战斗、传送等复杂设置保留完整布局，在内容区域滚动。复杂设置保留足够高度，底部操作和目录末尾都可滚动到达。
 - **传送点**：直接传送本机角色，沿用安全落点设置。即使主窗口选中过其他成员，快捷传送也不会传送该成员。管理坐标入口可保存当前位置和编辑传送点。
 - **参数预设**：保存当前参数、载入、重命名、删除及加入快捷面板。载入先停用持续功能，再载入参数；不会自动生成、传送、加钱或下注。
 - **设置**：保存面板、快捷项顺序、热键、位置和大小。重启从收起状态开始。切换到其他应用或最小化游戏时隐藏，不强行切回游戏。
 
 Custom panels mix features, complete pages, saved local-player teleports, and named presets. Both windows share parameter drafts and execution state. Renames update references; unavailable entries are shown as unavailable. Preset loading disables continuous features and loads parameters without executing one-shot actions. Layout and shortcuts persist, while startup always begins collapsed. Windowed and borderless modes are supported; exclusive fullscreen and live focus behavior still require manual acceptance.
+
+窄窗改用单列时，参数仍由同一对象保存。放大窗口会恢复原来的多列布局。展开采用短暂淡入和轻微缩放，遵循减少动态效果设置；收起和紧急停用不等待动画。
+
+In narrow views, category navigation scrolls horizontally and ordinary controls use a single column without replacing their parameter objects. Complex pages keep their complete layout within a scrollable content area, with enough height for catalog rows. The category list scrolls independently when it is long. Wider windows retain the multi-column layout. Expansion fades and gently scales in, respecting reduced motion; collapse and emergency stop do not wait for animation.
 
 ## 高速时只取消手持物的走路摆动 | Held movement bob
 
