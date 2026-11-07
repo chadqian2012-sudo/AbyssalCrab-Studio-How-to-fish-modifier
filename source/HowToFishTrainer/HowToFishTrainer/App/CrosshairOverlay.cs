@@ -111,12 +111,16 @@ internal sealed class CrosshairOverlay : IDisposable
 		_model = model;
 		_processId = processId;
 		_model.PropertyChanged += Changed;
-		_timer = new DispatcherTimer(TimeSpan.FromMilliseconds(33.0), DispatcherPriority.Background, Tick, dispatcher);
-		_timer.Start();
+		_timer = new DispatcherTimer(DispatcherPriority.Background,dispatcher){Interval=TimeSpan.FromMilliseconds(33.0)};
+		_timer.Tick += Tick;
+		if(_model.Enabled)_timer.Start();
 	}
 
 	private void Changed(object? sender, PropertyChangedEventArgs e)
 	{
+		if(_disposed)return;
+		if(e.PropertyName==nameof(CrosshairViewModel.Enabled))
+		{if(_model.Enabled)_timer.Start();else _timer.Stop();}
 		if (!_model.Enabled)
 		{
 			_window?.Hide();
@@ -230,6 +234,7 @@ internal sealed class CrosshairOverlay : IDisposable
 	{
 		_disposed = true;
 		_timer.Stop();
+		_timer.Tick -= Tick;
 		_model.PropertyChanged -= Changed;
 		_window?.Close();
 		_window = null;

@@ -44,6 +44,8 @@ public sealed class RouletteControlViewModel : INotifyPropertyChanged
 
 	private int _connectionEpoch;
 
+    public bool Active { get; private set; }
+
 	public ObservableCollection<RouletteOutcomeOption> OutcomeModes { get; }
 
 	public ObservableCollection<RouletteRoundOption> RoundModes { get; }
@@ -258,9 +260,11 @@ public sealed class RouletteControlViewModel : INotifyPropertyChanged
 
 	public void Connect(IGameRuntimeClient runtime, CapabilitySet capabilities)
 	{
+        Active = false;
 		Interlocked.Increment(ref _connectionEpoch);
 		_runtime = runtime;
 		_capabilities = capabilities;
+		Busy = false;
 		RouletteControlViewModel rouletteControlViewModel = this;
 		string status;
 		if (capabilities.CanExecute(Capability.HostWorld))
@@ -277,6 +281,7 @@ public sealed class RouletteControlViewModel : INotifyPropertyChanged
 
 	public void Disconnect()
 	{
+        Active = false;
 		Interlocked.Increment(ref _connectionEpoch);
 		_runtime = null;
 		_capabilities = CapabilitySet.Empty;
@@ -291,6 +296,7 @@ public sealed class RouletteControlViewModel : INotifyPropertyChanged
 
 	public async Task RefreshAsync()
 	{
+		if (Busy) return;
 		IGameRuntimeClient runtime = _runtime;
 		int epoch = Volatile.Read(in _connectionEpoch);
 		if (runtime != null && _capabilities.CanExecute(Capability.HostWorld))
@@ -306,7 +312,7 @@ public sealed class RouletteControlViewModel : INotifyPropertyChanged
 		}
 	}
 
-	private async Task ApplyAsync()
+	internal async Task ApplyAsync()
 	{
 		IGameRuntimeClient runtime = _runtime;
 		int epoch = Volatile.Read(in _connectionEpoch);
@@ -402,6 +408,7 @@ public sealed class RouletteControlViewModel : INotifyPropertyChanged
 
 	private void ApplyStatus(JsonElement value, string replyMessage)
 	{
+        Active = Text(value, "outcomeMode") is string outcome && outcome != "Disabled" && Int(value, "remainingRounds", 0) != 0;
 		CurrentBetLabel = (Text(value, "betColor") ?? "unknown").ToLowerInvariant() switch
 		{
 			"black" => "黑色", 

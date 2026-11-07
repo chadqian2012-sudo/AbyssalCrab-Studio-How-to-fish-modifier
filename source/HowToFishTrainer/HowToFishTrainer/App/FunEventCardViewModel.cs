@@ -27,7 +27,9 @@ public sealed class FunEventCardViewModel : INotifyPropertyChanged
 
 	public string RiskLabel => Definition.RiskLabel;
 
-	public int RequestedCount => Definition.RequestedCount;
+	public bool HasAnimalCount => Definition.HasAnimalCount;
+	public NumericInput CountInput { get; }
+	public int RequestedCount => HasAnimalCount ? (int)CountInput.LastValidValue : Definition.RequestedCount;
 
 	public bool Available
 	{
@@ -77,7 +79,7 @@ public sealed class FunEventCardViewModel : INotifyPropertyChanged
 		{
 			if (Available)
 			{
-				return !Busy;
+				return !Busy && (!HasAnimalCount || !CountInput.HasError);
 			}
 			return false;
 		}
@@ -90,6 +92,8 @@ public sealed class FunEventCardViewModel : INotifyPropertyChanged
 	internal FunEventCardViewModel(FunEventDefinition definition, Func<FunEventCardViewModel, Task> execute)
 	{
 		Definition = definition;
+		CountInput = new NumericInput("每波动物数量",definition.RequestedCount,1,50,true);
+		CountInput.PropertyChanged += (_, e) => { if(e.PropertyName==nameof(NumericInput.Text)){OnPropertyChanged(nameof(RequestedCount));OnPropertyChanged(nameof(CanExecute));} };
 		_execute = execute;
 		ExecuteCommand = new RelayCommand(() =>
 		{

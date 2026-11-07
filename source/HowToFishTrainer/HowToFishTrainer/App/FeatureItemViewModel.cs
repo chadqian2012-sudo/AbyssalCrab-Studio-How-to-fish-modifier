@@ -36,6 +36,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 	private bool _suppressToggleExecution;
 
 	private bool _isBusy;
+    private int _operationEpoch;
 
 	private bool _isSuccessful;
 
@@ -43,9 +44,23 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
     private string _spinSpeedText = "4";
     private double _appliedSpinSpeed = 4d;
     private double _lastValidSpinSpeed = 4d;
+    private bool _spinAutoJump;
+    private bool _appliedSpinAutoJump;
+
+    public bool SpinAutoJump
+    {
+        get => _spinAutoJump;
+        set
+        {
+            if (_spinAutoJump == value) return;
+            _spinAutoJump = value;
+            Changed(nameof(SpinAutoJump));
+            NotifyStateChanged();
+        }
+    }
 
     public bool IsSpin => Descriptor.Id == "player.spin.lock";
-    public bool IsStandardToggle => !IsSpin;
+    public bool IsStandardToggle => !IsSpin && !IsMagicBullet;
     public bool HasSpinSpeedError => IsSpin && !TrySpinSpeed(SpinSpeedText, out _);
     public string SpinSpeedText
     {
@@ -58,6 +73,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
             Changed(nameof(SpinSpeedValidationMessage));
             Changed(nameof(HasSpinSpeedError));
             Changed(nameof(CanApplySpinSpeed));
+                Changed(nameof(CanApplyMagic));
             NotifyStateChanged();
         }
     }
@@ -69,9 +85,9 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
         return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out speed) &&
             double.IsFinite(speed) && speed >= 2d && speed <= 15d;
     }
-    public static JsonElement SpinArguments(bool enabled, double speed)
+    public static JsonElement SpinArguments(bool enabled, double speed, bool autoJump = false)
     {
-        return enabled ? JsonSerializer.SerializeToElement(new { enabled, rotationsPerSecond = speed }) :
+        return enabled ? JsonSerializer.SerializeToElement(new { enabled, rotationsPerSecond = speed, autoJump }) :
             JsonSerializer.SerializeToElement(new { enabled });
     }
     private double RequireSpinSpeed()
@@ -136,6 +152,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 				_enabled = value;
 				Changed("Enabled");
                 Changed(nameof(CanApplySpinSpeed));
+                Changed(nameof(CanApplyMagic));
 				NotifyStateChanged();
 				if (Descriptor.Control == FeatureControl.Toggle && !_suppressToggleExecution)
 				{
@@ -267,7 +284,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 		}
 	}
 
-	public IReadOnlyList<CatalogOption> Options { get; }
+	public IReadOnlyList<CatalogOption> Options { get; private set; }
 
 	public IReadOnlyList<string> Kinds
 	{
@@ -319,7 +336,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 		}
 	}
 
-	public IReadOnlyList<CatalogOption> FilteredOptions => SortCatalogOptions(Options.Where((CatalogOption option) => MatchesCatalogView(option) && (SelectedKind == "全部" || string.Equals(option.Kind, SelectedKind, StringComparison.CurrentCultureIgnoreCase)) && (string.IsNullOrWhiteSpace(SearchText) || option.Name.Contains(SearchText.Trim(), StringComparison.CurrentCultureIgnoreCase) || option.Id.ToString().Contains(SearchText.Trim(), StringComparison.Ordinal)))).ToArray();
+	public IReadOnlyList<CatalogOption> FilteredOptions => FilterCatalogOptions();
 
 	public bool ShowWeaponConfiguration
 	{
@@ -369,6 +386,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 		}
 		set
 		{
+			if (ReferenceEquals(_selectedOption, value)) return;
 			_selectedOption = value;
 			if (!_restoringParameters && value != null) _pendingCatalogParameters = null;
 			if ((object)value != null)
@@ -398,6 +416,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 			Changed("LaserSight");
 			Changed(nameof(IsFavorite));
 			Changed(nameof(FavoriteButtonText));
+			Changed(nameof(CanGenerate));
 		}
 	}
 
@@ -412,6 +431,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 			RememberAttachmentSelection("sightId", value?.Id, _selectedSight?.Id);
 			_selectedSight = value;
 			Changed("SelectedSight");
+			Changed(nameof(CanGenerate));
 		}
 	}
 
@@ -426,6 +446,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 			RememberAttachmentSelection("barrelId", value?.Id, _selectedBarrel?.Id);
 			_selectedBarrel = value;
 			Changed("SelectedBarrel");
+			Changed(nameof(CanGenerate));
 		}
 	}
 
@@ -440,6 +461,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 			RememberAttachmentSelection("ammoId", value?.Id, _selectedAmmo?.Id);
 			_selectedAmmo = value;
 			Changed("SelectedAmmo");
+			Changed(nameof(CanGenerate));
 		}
 	}
 
@@ -454,6 +476,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 			RememberAttachmentSelection("skinId", value?.Id, _selectedSkin?.Id);
 			_selectedSkin = value;
 			Changed("SelectedSkin");
+			Changed(nameof(CanGenerate));
 		}
 	}
 
@@ -564,7 +587,9 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 				_isBusy = value;
 				Changed("IsBusy");
 				Changed("CanInteract");
+				Changed(nameof(CanGenerate));
                 Changed(nameof(CanApplySpinSpeed));
+                Changed(nameof(CanApplyMagic));
 				Changed("VisualState");
 			}
 		}
@@ -621,6 +646,9 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 		}
 	}
 
+    private bool HasValidGeneratorSelection => SelectedOption != null && Options.Contains(SelectedOption) && FilteredOptions.Contains(SelectedOption);
+    public bool CanGenerate => CanInteract && HasValidGeneratorSelection && !HasUnresolvedCatalogChoice;
+
 	private bool IsClientProtectionRestricted => ClientProtectionNotice.IsRestricted(Descriptor.Id, _capabilities);
 
 	public string CapabilityLabel => "实时控制";
@@ -629,7 +657,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 
 	public ICommand CleanupCommand { get; }
 
-	public bool IsAvailable { get; }
+	public bool IsAvailable { get; private set; }
 
 	public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -637,6 +665,8 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 	{
 		_showFeatureNotice = showFeatureNotice;
 		Descriptor = descriptor;
+        foreach (var input in new[] { MagicAngleInput, MagicDistanceInput, MagicStrengthInput })
+            input.PropertyChanged += (_, _) => Changed(nameof(CanApplyMagic));
 		_runtime = runtime;
 		_capabilities = capabilities;
 		_stateChanged = stateChanged;
@@ -661,10 +691,22 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 			_status = toggleState.Status;
 			_stateLabel = toggleState.StateLabel;
 			_isSuccessful = toggleState.IsSuccessful;
+            _isBusy = toggleState.IsBusy;
+            _magicTargetTeammates = toggleState.MagicTargetTeammates;
+            // A cached offline label must not override current session availability.
+            if (IsAvailable && !_enabled && _stateLabel == "不可用")
+            {
+                _status = "准备就绪";
+                _stateLabel = "待命";
+                _isSuccessful = false;
+            }
+            _appliedMagicArguments = toggleState.AppliedMagicArguments;
             if (IsSpin)
             {
                 _spinSpeedText = toggleState.SpinSpeedText;
                 _appliedSpinSpeed = toggleState.AppliedSpinSpeed;
+                _spinAutoJump = toggleState.SpinAutoJump;
+                _appliedSpinAutoJump = toggleState.AppliedSpinAutoJump;
             }
 		}
 		if (IsClientProtectionRestricted && runtime != null)
@@ -692,9 +734,10 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 	private void SelectFirstFiltered()
 	{
 		if (_restoringParameters) return;
-		if (!FilteredOptions.Contains(SelectedOption))
+        var filtered = FilteredOptions;
+		if (!filtered.Contains(SelectedOption))
 		{
-			SelectedOption = FilteredOptions.FirstOrDefault();
+			SelectedOption = filtered.FirstOrDefault();
 		}
 	}
 
@@ -702,8 +745,13 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 	{
 		return new FeatureToggleState(Enabled, Status, StateLabel, IsSuccessful)
         {
+            IsBusy = IsBusy,
+            MagicTargetTeammates = MagicTargetTeammates,
             SpinSpeedText = SpinSpeedText,
-            AppliedSpinSpeed = _appliedSpinSpeed
+            AppliedSpinSpeed = _appliedSpinSpeed,
+            SpinAutoJump = SpinAutoJump,
+            AppliedSpinAutoJump = _appliedSpinAutoJump,
+            AppliedMagicArguments = _appliedMagicArguments
         };
 	}
 
@@ -715,6 +763,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 
 	public void ApplyExternalToggleState(FeatureToggleState state)
 	{
+        _operationEpoch++;
 		if (IsClientProtectionRestricted)
 		{
 			state = ClientProtectionNotice.DisabledState;
@@ -726,17 +775,28 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 			_status = state.Status;
 			_stateLabel = state.StateLabel;
 			_isSuccessful = state.IsSuccessful;
+            _isBusy = state.IsBusy;
+            _magicTargetTeammates = state.MagicTargetTeammates;
+            _appliedMagicArguments = state.AppliedMagicArguments;
+            Changed(nameof(IsBusy));
+            Changed(nameof(CanInteract));
+            Changed(nameof(MagicTargetTeammates));
             if (IsSpin)
             {
                 _spinSpeedText = state.SpinSpeedText;
                 _appliedSpinSpeed = state.AppliedSpinSpeed;
+                _spinAutoJump = state.SpinAutoJump;
+                _appliedSpinAutoJump = state.AppliedSpinAutoJump;
+                Changed(nameof(SpinAutoJump));
                 Changed(nameof(SpinSpeedText));
                 Changed(nameof(SpinSpeedValidationMessage));
                 Changed(nameof(HasSpinSpeedError));
                 Changed(nameof(CanApplySpinSpeed));
+                Changed(nameof(CanApplyMagic));
             }
 			Changed("Enabled");
 			Changed("Status");
+            Changed(nameof(CanApplyMagic));
 			Changed("StateLabel");
 			Changed("IsSuccessful");
 			Changed("VisualState");
@@ -756,7 +816,9 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 		}
 	}
 
-	private async Task ExecuteToggleAsync(bool desired, bool? previousState = null)
+    internal Task SetEnabledAsync(bool enabled) => ExecuteToggleAsync(enabled, Enabled);
+
+    private async Task ExecuteToggleAsync(bool desired, bool? previousState = null, JsonElement? argumentsOverride = null)
 	{
         if (desired && _executionBlockReason?.Invoke() is string reason) { RevertToggle(false); Status=reason; StateLabel="待开启"; NotifyStateChanged(); return; }
 		if (ShowClientProtectionNotice())
@@ -764,7 +826,10 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 			return;
 		}
 		bool previous = previousState ?? !desired;
+        if (IsMagicBullet && desired && !argumentsOverride.HasValue && NumericInput.FirstError(MagicAngleInput, MagicDistanceInput, MagicStrengthInput) is string magicError && magicError.Length > 0)
+        { Status = magicError; RevertToggle(previous); return; }
         double spinSpeed = 4d;
+        bool spinAutoJump = SpinAutoJump;
         if (IsSpin && desired && !TrySpinSpeed(SpinSpeedText, out spinSpeed))
         {
             Status = "请输入每秒 2–15 圈的转速";
@@ -778,21 +843,31 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 			RevertToggle(previous);
 			return;
 		}
+		int operationEpoch=++_operationEpoch;
 		IsBusy = true;
 		IsSuccessful = false;
 		StateLabel = "执行中";
 		Status = (desired ? "正在开启并等待运行时确认…" : "正在关闭并恢复原始状态…");
 		try
 		{
-			JsonElement arguments = IsSpin ? SpinArguments(desired, spinSpeed) : JsonSerializer.SerializeToElement(new
+            JsonElement arguments = argumentsOverride ?? (IsSpin ? SpinArguments(desired, spinSpeed, spinAutoJump) : IsMagicBullet ? MagicArguments(desired) : JsonSerializer.SerializeToElement(new
 			{
 				enabled = desired
-			});
+            }));
 			OperationReceipt operationReceipt = await new FeatureEngine(_runtime).ExecuteAsync(new FeatureCommand(Descriptor.Id, arguments, Descriptor.RequiredCapability), _capabilities, CancellationToken.None);
+            if(operationEpoch!=_operationEpoch)return;
 			ReceiptStatus status = operationReceipt.Status;
 			bool flag = (uint)status <= 1u;
 			bool flag2 = flag;
-            if (IsSpin && desired && flag2) _appliedSpinSpeed = spinSpeed;
+            if (flag2) RevertToggle(desired);
+            if (IsMagicBullet && desired && flag2) _appliedMagicArguments = arguments.Clone();
+            if (IsMagicBullet && argumentsOverride.HasValue && !flag2)
+            { _magicTargetTeammates = TargetingArguments.Teammates(_appliedMagicArguments); Changed(nameof(MagicTargetTeammates)); }
+            if (IsSpin && desired && flag2)
+            {
+                _appliedSpinSpeed = spinSpeed;
+                _appliedSpinAutoJump = spinAutoJump;
+            }
 			Status = operationReceipt.Message;
 			int num;
 			if (desired & flag2)
@@ -855,6 +930,9 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 		}
 		catch (Exception ex)
 		{
+            if(operationEpoch!=_operationEpoch)return;
+			if (IsMagicBullet && argumentsOverride.HasValue)
+			{ _magicTargetTeammates = TargetingArguments.Teammates(_appliedMagicArguments); Changed(nameof(MagicTargetTeammates)); }
 			Status = "执行失败 · " + ex.Message;
 			StateLabel = "执行失败";
 			IsSuccessful = false;
@@ -862,7 +940,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 		}
 		finally
 		{
-			IsBusy = false;
+            if(operationEpoch==_operationEpoch){IsBusy = false;NotifyStateChanged();}
 		}
 	}
 
@@ -892,15 +970,22 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 		}
 	}
 
-	private async Task Execute(IGameRuntimeClient? runtime, CapabilitySet? capabilities)
+	internal async Task Execute(IGameRuntimeClient? runtime, CapabilitySet? capabilities)
 	{
 		if (IsBusy || ShowClientProtectionNotice())
 		{
 			return;
 		}
+        if(_executionBlockReason?.Invoke() is string blocked){Status=blocked;StateLabel="不可用";return;}
+        if (IsSpin) { await ExecuteToggleAsync(Enabled, Enabled); return; }
         if (Descriptor.Control == FeatureControl.Generator && HasUnresolvedCatalogChoice)
         {
             Status = "上次选择的物品或配件当前不可用，请重新选择后生成";
+            StateLabel = "待选择"; IsSuccessful = false; return;
+        }
+        if (Descriptor.Control == FeatureControl.Generator && !HasValidGeneratorSelection)
+        {
+            Status = "请从当前目录选择有效的物品或鱼类后再生成";
             StateLabel = "待选择"; IsSuccessful = false; return;
         }
         string inputError = Descriptor.Control switch
@@ -938,15 +1023,20 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 		{
 			JsonElement arguments = JsonSerializer.SerializeToElement(Descriptor.Control switch
 			{
-                FeatureControl.Toggle when IsSpin => SpinArguments(Enabled, Enabled ? RequireSpinSpeed() : 4d),
+                FeatureControl.Toggle when IsSpin => SpinArguments(Enabled, Enabled ? RequireSpinSpeed() : 4d, SpinAutoJump),
 				FeatureControl.Toggle => (object)new
 				{
 					enabled = Enabled
-				}, 
-				FeatureControl.Number => new
-				{
-					value = Value
-				}, 
+				},
+				FeatureControl.Number when Descriptor.Id.EndsWith(".multiplier", StringComparison.Ordinal) => new
+                {
+                    value = Value,
+                    enabled = true
+                },
+                FeatureControl.Number => new
+                {
+                    value = Value
+                },
 				FeatureControl.Generator => new
 				{
 					value = (int)Value,
@@ -965,17 +1055,17 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 						extendedMag = ExtendedMagazine,
 						laser = LaserSight
 					}
-				}, 
+				},
 				FeatureControl.Coordinates => new
 				{
 					x = X,
 					y = Y,
 					z = Z
-				}, 
+				},
 				_ => new
 				{
 					value = Value
-				}, 
+				},
 			});
 			OperationReceipt operationReceipt = await new FeatureEngine(runtime).ExecuteAsync(new FeatureCommand(Descriptor.Id, arguments, Descriptor.RequiredCapability, SaveAfter && CanRequestNativeSave), capabilities, CancellationToken.None);
 			Status = operationReceipt.Message;
@@ -1014,6 +1104,8 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 
 	private async Task CleanupGeneratedAsync()
 	{
+        if(IsBusy)return;
+        if(_executionBlockReason?.Invoke() is string blocked){Status=blocked;StateLabel="不可用";return;}
 		if (_runtime != null)
 		{
 			CapabilitySet? capabilities = _capabilities;

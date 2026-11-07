@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -15,6 +16,7 @@ namespace HowToFishTrainer.App;
 
 public sealed partial class MainViewModel
 {
+    public CombatFeedbackViewModel CombatFeedback { get; } = new();
     private ExperienceSettings _experience = new();
     private ExperienceSettingsStore _experienceStore = new(null);
     private DispatcherTimer? _experienceSaveTimer;
@@ -34,20 +36,44 @@ public sealed partial class MainViewModel
     private DateTimeOffset _lastDeathSample;
     private bool _deathSampleBusy;
     private bool _positionActionBusy;
+    private int _positionContextEpoch;
+    private long _positionEditorRevision;
+    private bool IsCurrentPositionContext(IGameRuntimeClient runtime, int connection, int context) =>
+        runtime == _runtime && connection == _connectionEpoch && context == _positionContextEpoch;
+    private void InitializePositionEditorTracking()
+    {
+        foreach (var input in new[] { CurrentXInput, CurrentYInput, CurrentZInput })
+        {
+            PropertyChangedEventHandler handler = (_, e) => { if (e.PropertyName == nameof(NumericInput.Text)) _positionEditorRevision++; };
+            input.PropertyChanged += handler;
+            _parameterUnsubscribe.Add(() => input.PropertyChanged -= handler);
+        }
+        string? selectedKey = RoomMembersPage.SelectedMember?.Key;
+        PropertyChangedEventHandler memberHandler = (_, e) => {
+            if (e.PropertyName != nameof(RoomMembersPage.SelectedMember)) return;
+            string? key = RoomMembersPage.SelectedMember?.Key;
+            if (key != selectedKey && TargetRoomMember) _positionEditorRevision++;
+            selectedKey = key;
+            OnPropertyChanged(nameof(SelectedTeleportMember));
+        };
+        RoomMembersPage.PropertyChanged += memberHandler;
+        _parameterUnsubscribe.Add(() => RoomMembersPage.PropertyChanged -= memberHandler);
+    }
     public bool CanPositionAction => !_positionActionBusy && !PresetBusy;
     private async Task RunPositionActionAsync(Func<Task> action)
     {
         if(!CanPositionAction)return;
-        _positionActionBusy=true;OnPropertyChanged(nameof(CanPositionAction));int epoch=_connectionEpoch;
+        _positionActionBusy=true;OnPropertyChanged(nameof(CanPositionAction));int epoch=_connectionEpoch,context=_positionContextEpoch;
         try{await action();}
-        catch(Exception e){if(epoch==_connectionEpoch)PositionStatus="位置操作失败 · "+e.Message;}
-        finally{_positionActionBusy=false;OnPropertyChanged(nameof(CanPositionAction));}
+        catch(Exception e){if(epoch==_connectionEpoch&&context==_positionContextEpoch)PositionStatus="位置操作失败 · "+e.Message;}
+        finally{if(epoch==_connectionEpoch&&context==_positionContextEpoch){_positionActionBusy=false;OnPropertyChanged(nameof(CanPositionAction));OverlayStatus=PositionStatus;}}
     }
     public bool TrackDeathPosition { get=>_trackDeathPosition; set=>Set(ref _trackDeathPosition,value); }
     private string _deathPositionStatus="开启后每两秒读取本机状态，记录倒地前最后一个采样位置";
     public string DeathPositionStatus { get=>_deathPositionStatus;private set=>Set(ref _deathPositionStatus,value); }
     private string _combatDiagnostics = "连接游戏后读取武器与瞄准数据";
     private bool _diagnosticOnly, _autoRefill, _experienceWorkBusy;
+    private int _experienceWorkVersion, _spinStopVersion;
     private int _autoRefillCount, _autoGeneration;
     private string _autoRefillStatus = "自动补充已关闭";
     private DateTimeOffset _lastRefill, _spinStarted;
@@ -62,31 +88,34 @@ public sealed partial class MainViewModel
     public ObservableCollection<ParameterPreset> Presets { get; } = new();
     public ParameterPreset? SelectedPreset { get => _selectedPreset; set => Set(ref _selectedPreset,value); }
     public string PresetName { get => _presetName; set => Set(ref _presetName,value ?? ""); }
-    public string ExperienceStatus { get => _experienceStatus; private set => Set(ref _experienceStatus,value); }
-    public bool PresetBusy { get => _presetBusy; private set { if(Set(ref _presetBusy,value)){OnPropertyChanged(nameof(CanEditParameters));foreach(var f in Features)f.RefreshExperienceAvailability();} } }
+    public string ExperienceStatus { get => _experienceStore.Warning ?? _experienceStatus; private set => Set(ref _experienceStatus,value); }
+    public bool PresetBusy { get => _presetBusy; private set { if(Set(ref _presetBusy,value)){OnPropertyChanged(nameof(CanRestoreLastSession));OnPropertyChanged(nameof(CanEditParameters));OnPropertyChanged(nameof(CanPositionAction));OnPropertyChanged(nameof(CanLoadSelectedIsland));foreach(var f in AllFeatures)f.RefreshExperienceAvailability();} } }
     public bool CanEditParameters => !PresetBusy;
+    private int _presetApplyVersion;
+    private void InvalidatePresetApply()
+    {
+        Interlocked.Increment(ref _presetApplyVersion);
+        PresetBusy=false;
+    }
     public bool WidgetVisible { get => _experience.WidgetVisible; set { if (_experience.WidgetVisible == value) return; _experience.WidgetVisible=value; OnPropertyChanged(); ScheduleExperienceSave(); } }
     public double WidgetLeft { get => _experience.WidgetLeft; set { _experience.WidgetLeft=value; ScheduleExperienceSave(); } }
     public double WidgetTop { get => _experience.WidgetTop; set { _experience.WidgetTop=value; ScheduleExperienceSave(); } }
     public bool CompactNavigation { get => _experience.CompactNavigation; set { if (_experience.CompactNavigation == value) return; _experience.CompactNavigation=value; OnPropertyChanged(); ScheduleExperienceSave(); } }
     public string FeatureQuery { get => _featureQuery; set { if (Set(ref _featureQuery,value ?? "")) OnPropertyChanged(nameof(SearchResults)); } }
-    public IReadOnlyList<SearchHit> SearchResults => string.IsNullOrWhiteSpace(FeatureQuery) ? Array.Empty<SearchHit>() :
-        FeatureRegistry.All.Where(f => (f.Title+" "+f.Description+" "+f.Id+" "+DisplayCategory(f.Id,f.Category)).Contains(FeatureQuery.Trim(),StringComparison.CurrentCultureIgnoreCase))
-        .Select(f => new SearchHit(f.Title,DisplayCategory(f.Id,f.Category),f.Id,f.Description)).Take(55).ToArray();
+    public IReadOnlyList<SearchHit> SearchResults => GetSearchResults();
     public SearchHit? SelectedSearchHit
     {
         get => _selectedSearchHit;
         set { if (!Set(ref _selectedSearchHit,value) || value == null) return; var page=Pages.FirstOrDefault(p=>p.Category==value.Category); if(page!=null) SelectedPage=page; ExperienceStatus="已定位分类 · "+value.Title; }
     }
-    public IReadOnlyList<FeatureItemViewModel> FeelFeatures => SelectedPage.Category is "玩家" or "钓鱼"
-        ? Features.Where(f => f.Descriptor.Control == FeatureControl.Number).ToArray() : Array.Empty<FeatureItemViewModel>();
+    public IReadOnlyList<FeatureItemViewModel> FeelFeatures { get { EnsureFeatureViews();return _feelView; } }
     public bool HasFeelFeatures => FeelFeatures.Count > 0;
-    public IReadOnlyList<FeatureItemViewModel> DisplayFeatures => Features.Except(FeelFeatures).ToArray();
+    public IReadOnlyList<FeatureItemViewModel> DisplayFeatures { get { EnsureFeatureViews();return _displayView; } }
     public string ActiveFeaturesText
     {
         get {
             var titles = _toggleStates.Where(e=>e.Value.Enabled).Select(e=>FeatureRegistry.All.FirstOrDefault(f=>f.Id==e.Key)?.Title ?? e.Key).ToList();
-            if(AimAssist.Enabled) titles.Add("辅助瞄准"); if(Crosshair.Enabled) titles.Add("外置准星"); if(AutoRefill) titles.Add("海鸥自动补充");
+            if(AimAssist.Enabled) titles.Add("辅助瞄准"); if(Crosshair.Enabled) titles.Add("外置准星"); if(AutoRefill) titles.Add("海鸥自动补充"); if(CombatFeedback.Active)titles.Add("战斗反馈");
             return titles.Count==0 ? "持续功能均已关闭" : string.Join(" · ",titles);
         }
     }
@@ -94,7 +123,7 @@ public sealed partial class MainViewModel
     public bool DiagnosticOnly
     {
         get => _diagnosticOnly;
-        set { if(!Set(ref _diagnosticOnly,value))return; if(value) { AimAssist.Enabled=false; var silent=Features.FirstOrDefault(f=>f.Descriptor.Id=="combat.silent_aim"); if(silent?.Enabled==true)silent.Enabled=false; } foreach(var f in Features)f.RefreshExperienceAvailability(); }
+        set { if(!Set(ref _diagnosticOnly,value))return; if(value) { AimAssist.Enabled=false; var silent=AllFeatures.FirstOrDefault(f=>f.Descriptor.Id=="combat.silent_aim"); if(silent?.Enabled==true)silent.Enabled=false; } foreach(var f in AllFeatures)f.RefreshExperienceAvailability(); }
     }
     public string[] PointColors { get; } = { "青色","蓝色","紫色","金色","绿色" };
     public string[] PointIcons { get; } = { "⌖","★","⚑","⚓","◆" };
@@ -116,14 +145,14 @@ public sealed partial class MainViewModel
             if(value && (_runtime==null || !_capabilities.CanExecute(Capability.HostWorld) || RefillLimitInput.HasError)) { AutoRefillStatus="进入世界并填写 1–20 的整数上限后再开启"; OnPropertyChanged(); return; }
             if(!Set(ref _autoRefill,value))return;
             _autoGeneration++; if(value)AutoRefillCount=0; _lastRefill=DateTimeOffset.MinValue;
-            AutoRefillStatus=value?"等待海鸥存活数量；耗尽后补充一波 8 只":"自动补充已停止";
+            AutoRefillStatus=value?"等待海鸥存活数量；耗尽后按海鸥迁徙的数量设置补充":"自动补充已停止";
             OnPropertyChanged(nameof(ActiveFeaturesText));
         }
     }
 
     public ICommand SavePresetCommand => new RelayCommand(SavePreset);
     public ICommand ApplyPresetCommand => new RelayCommand(()=>_ = ApplySelectedPresetAsync());
-    public ICommand DeletePresetCommand => new RelayCommand(()=> { if(SelectedPreset==null||PresetBusy)return; _experience.Presets.Remove(SelectedPreset); Presets.Remove(SelectedPreset); SelectedPreset=Presets.FirstOrDefault(); ScheduleExperienceSave(); });
+    public ICommand DeletePresetCommand => new RelayCommand(()=> { if(SelectedPreset==null||PresetBusy)return; RemoveOverlayReference(new("preset",SelectedPreset.Name)); _experience.Presets.Remove(SelectedPreset); Presets.Remove(SelectedPreset); SelectedPreset=Presets.FirstOrDefault(); ScheduleExperienceSave(); });
     public ICommand SavePointDetailsCommand => new RelayCommand(()=> {
         var point=SelectedTeleportPoint; if(point==null) { PositionStatus="请先选择已保存的坐标"; return; }
         if(PointNote.Length>500) { PositionStatus="备注最多 500 字";return; }
@@ -144,6 +173,14 @@ public sealed partial class MainViewModel
     private void InitializeExperience(string? path)
     {
         _experienceStore=new(path); _experience=_experienceStore.Load();
+        CombatFeedback.Load(_experience.CombatFeedback);
+        CombatFeedback.SettingsChanged+=()=>{_experience.CombatFeedback=CombatFeedback.Capture();ScheduleExperienceSave();};
+        CombatFeedback.PropertyChanged+=(_,e)=>{if(e.PropertyName==nameof(CombatFeedback.Active))OnPropertyChanged(nameof(ActiveFeaturesText));};
+        foreach(var card in FunEventsPage.Events.Where(e=>e.HasAnimalCount))
+        {
+            if(_experience.AnimalCounts.TryGetValue(card.Id,out int count))card.CountInput.Value=count;
+            card.CountInput.PropertyChanged+=(_,e)=>{if(e.PropertyName==nameof(NumericInput.Text)){_experience.AnimalCounts[card.Id]=card.RequestedCount;ScheduleExperienceSave();}};
+        }
         foreach(var preset in _experience.Presets)Presets.Add(preset); SelectedPreset=Presets.FirstOrDefault();
         RefillLimitInput.Value=_experience.RefillLimit;
         RefillLimitInput.PropertyChanged+=(_,e)=>{if(e.PropertyName==nameof(NumericInput.Text)){_experience.RefillLimit=(int)RefillLimitInput.LastValidValue; ScheduleExperienceSave();}};
@@ -152,8 +189,7 @@ public sealed partial class MainViewModel
         FunEventsPage.CleanupRequested+=()=>AutoRefill=false;
         AimAssist.PropertyChanged+=(_,e)=>{if(e.PropertyName==nameof(AimAssist.Enabled)){if(DiagnosticOnly&&AimAssist.Enabled)AimAssist.Enabled=false; OnPropertyChanged(nameof(ActiveFeaturesText));}};
         Crosshair.PropertyChanged+=(_,e)=>{if(e.PropertyName==nameof(Crosshair.Enabled))OnPropertyChanged(nameof(ActiveFeaturesText));};
-        if(_experienceStore.Warning!=null)ExperienceStatus=_experienceStore.Warning;
-        foreach(var feature in Features)AttachExperience(feature);
+        foreach(var feature in AllFeatures)AttachExperience(feature);
     }
     private void AttachExperience(FeatureItemViewModel feature)
     {
@@ -173,9 +209,10 @@ public sealed partial class MainViewModel
     {
         _experienceSaveTimer?.Stop(); if(!_experienceDirty)return true;
         try{_experienceStore.Save(_experience);_experienceDirty=false;return true;}
-        catch(Exception e){ExperienceStatus="体验设置保存失败 · "+e.Message;return false;}
+        catch(Exception){return false;}
+        finally{OnPropertyChanged(nameof(ExperienceStatus));OnPropertyChanged(nameof(OverlayStatus));}
     }
-    public void CloseExperience(){if(_closedExperience)return;StopExperienceAutomation();FlushExperience();_closedExperience=true; if(_experienceSaveTimer!=null){_experienceSaveTimer.Stop();_experienceSaveTimer.Tick-=SaveExperienceTick;}}
+    public void CloseExperience(){if(_closedExperience)return;if(_runtime!=null){_preferencesDirty=true;FlushPreferences();}InvalidatePresetApply();StopExperienceAutomation();FlushExperience();_closedExperience=true;OnPropertyChanged(nameof(CanRestoreLastSession)); if(_experienceSaveTimer!=null){_experienceSaveTimer.Stop();_experienceSaveTimer.Tick-=SaveExperienceTick;}}
     private void SavePreset()
     {
         string name=PresetName.Trim(); if(name.Length==0||name.Length>40){ExperienceStatus="预设名称需要 1–40 个字符";return;}
@@ -183,32 +220,90 @@ public sealed partial class MainViewModel
         var old=_experience.Presets.FirstOrDefault(p=>string.Equals(p.Name,name,StringComparison.OrdinalIgnoreCase));
         if(old==null&&Presets.Count>=50){ExperienceStatus="最多保存 50 套预设";return;}
         var preset=new ParameterPreset(name,CapturePreferences().ToJson());
-        if(old!=null){_experience.Presets.Remove(old);Presets.Remove(old);}
+        if(old!=null){ReplaceOverlayReference(new("preset",old.Name),new("preset",name));_experience.Presets.Remove(old);Presets.Remove(old);}
         _experience.Presets.Add(preset);Presets.Add(preset);SelectedPreset=preset;ActivePresetName=name;ScheduleExperienceSave();ExperienceStatus="预设已保存 · "+name;
     }
-    public async Task ApplySelectedPresetAsync()
+    public Task ApplySelectedPresetAsync() => ApplySavedPreferencesAsync(SelectedPreset?.Parameters, SelectedPreset?.Name ?? "", false);
+    private async Task ApplySavedPreferencesAsync(string? json, string name, bool restoreSession)
     {
-        var preset=SelectedPreset;if(preset==null||PresetBusy)return;
+        if(json==null||PresetBusy||_closedExperience)return;
+        int version=Interlocked.Increment(ref _presetApplyVersion);
+        var runtime=_runtime;int epoch=_connectionEpoch,context=_positionContextEpoch;
+        bool Current()=>version==Volatile.Read(ref _presetApplyVersion)&&!_closedExperience&&runtime==_runtime&&epoch==_connectionEpoch&&context==_positionContextEpoch;
         PresetBusy=true;
         try{
-            var parameters=TrainerUserPreferences.Parse(preset.Parameters);
-            _featureActionEpoch++;
-            Interlocked.Increment(ref _connectionEpoch);
+            if(!Current())return;
+            var parameters=TrainerUserPreferences.Parse(json);
+            InvalidateFeatureActions();
+            epoch=Interlocked.Increment(ref _connectionEpoch);
+            ResetPendingSessionWork();
+            context=_positionContextEpoch;
             // Stop accepting aim requests before clearing all locks; no old intent may replay after clear.
             StopExperienceAutomation(); AimAssist.Disconnect();
-            var runtime=_runtime;int epoch=_connectionEpoch;
-            if(runtime!=null){var result=await runtime.ExecuteAsync(new FeatureCommand("locks.disable_all",JsonSerializer.SerializeToElement(new{}),Capability.OwnedPlayer),CancellationToken.None);if(runtime!=_runtime||epoch!=_connectionEpoch)return;if(!result.Succeeded){AimAssist.Connect(runtime,_capabilities);ExperienceStatus="未切换预设 · 停用失败，请检查游戏中的持续效果："+result.Message;return;}}
-            MarkAllLocksDisabled("预设切换，已停用"); AimAssist.Disconnect(); RoomMembersPage.Disconnect();
-            if(runtime!=null)RoomMembersPage.Connect(runtime,_capabilities);
-            _restoringPreferences=true;
-            try{_parameterDrafts.Clear();_preferences=parameters;ApplyPreferences(parameters);}
-            finally{_restoringPreferences=false;}
-            if(runtime!=null)AimAssist.Connect(runtime,_capabilities);
+            try
+            {
+                if(runtime!=null){var result=await runtime.ExecuteAsync(new FeatureCommand("locks.disable_all",JsonSerializer.SerializeToElement(new{}),Capability.OwnedPlayer),CancellationToken.None);if(!Current())return;if(!result.Succeeded){ExperienceStatus="未切换预设 · 停用失败，请检查游戏中的持续效果："+result.Message;return;}}
+                MarkAllLocksDisabled("预设切换，已停用"); AimAssist.Disconnect(); RoomMembersPage.Disconnect();
+                if(runtime!=null)RoomMembersPage.Connect(runtime,_capabilities);
+                _restoringPreferences=true;
+                try{_parameterDrafts.Clear();_preferences=parameters;ApplyPreferences(parameters);}
+                finally{_restoringPreferences=false;}
+                _experience.CombatFeedback=CombatFeedback.Capture();ScheduleExperienceSave();
+            }
+            finally { if(Current() && runtime!=null)AimAssist.Connect(runtime,_capabilities); }
             _preferredIslandKey=parameters.Teleport.Text("islandKey");
             SelectedIsland=IslandOptions.FirstOrDefault(i=>i.Key==_preferredIslandKey);
-            SchedulePreferencesSave();ActivePresetName=preset.Name;ExperienceStatus="已恢复「"+preset.Name+"」参数 · 持续功能请手动开启";
-        }catch(Exception e){ExperienceStatus="预设恢复失败 · "+e.Message;}
-        finally{PresetBusy=false;RefreshFeatures();OnPropertyChanged(nameof(ActiveFeaturesText));if(_runtime!=null&&IslandOptions.Count==0)_=LoadIslandCatalogAsync(_runtime,_connectionEpoch);}
+            if(restoreSession && runtime!=null)
+            {
+                var failures = await RestoreSessionSwitchesAsync(parameters, runtime, Current);
+                if(!Current())return;
+                ExperienceStatus=failures.Count==0?"已恢复上次会话的参数与功能开关":"上次会话未全部恢复 · "+string.Join("；",failures);
+            }
+            else ExperienceStatus="已恢复「"+name+"」参数 · 持续功能请手动开启";
+            SchedulePreferencesSave();ActivePresetName=name;
+        }catch(Exception e){if(Current())ExperienceStatus="预设恢复失败 · "+e.Message;}
+        finally{if(Current()){PresetBusy=false;RebuildFeatureModels();OnPropertyChanged(nameof(ActiveFeaturesText));if(_runtime!=null&&IslandOptions.Count==0)_=LoadIslandCatalogAsync(_runtime,_connectionEpoch);}}
+    }
+    public async Task EmergencyDisableAsync(IGameRuntimeClient? commandRuntime = null)
+    {
+        if(_closedExperience)return;
+        InvalidatePresetApply();
+        CaptureSessionSwitches();
+        foreach(var descriptor in FeatureRegistry.All.Where(f=>f.Control==FeatureControl.Toggle))
+            _preferences.Session.Put("toggle:"+descriptor.Id,false);
+        foreach(string key in new[]{"aimAssist","crosshair","combatFeedback","slotMachine","roulette","autoRefill"})
+            _preferences.Session.Put(key,false);
+        _preferencesDirty=true;
+        int version=Volatile.Read(ref _presetApplyVersion);
+        InvalidateFeatureActions();
+        int epoch=Interlocked.Increment(ref _connectionEpoch);
+        ResetPendingSessionWork();
+        var runtime=_runtime;
+        commandRuntime??=runtime;
+        int context=_positionContextEpoch;
+        bool Current()=>version==Volatile.Read(ref _presetApplyVersion)&&!_closedExperience&&runtime==_runtime&&epoch==_connectionEpoch&&context==_positionContextEpoch;
+        PresetBusy=true;
+        StopExperienceAutomation(); AimAssist.Disconnect(); Crosshair.Enabled=false;
+        foreach(var pair in _toggleStates.Where(p=>p.Value.Enabled).ToArray())
+            ApplyRememberedToggleState(pair.Key,pair.Value with {Enabled=false,Status="停用请求待确认",StateLabel="等待确认",IsSuccessful=false});
+        try
+        {
+            if(commandRuntime==null){MarkAllLocksDisabled("已停用本地持续功能");return;}
+            var result=await commandRuntime.ExecuteAsync(new FeatureCommand("locks.disable_all",JsonSerializer.SerializeToElement(new{}),Capability.OwnedPlayer),CancellationToken.None);
+            if(!Current())return;
+            ModeStatus=result.Succeeded?"已紧急停用全部持续修改":"紧急停用失败 · "+result.Message;
+            if(result.Succeeded)MarkAllLocksDisabled("已通过紧急快捷键停用");
+        }
+        catch(Exception e){if(Current())ModeStatus="紧急停用失败 · "+e.Message;}
+        finally
+        {
+            if(Current())
+            {
+                if(runtime!=null)AimAssist.Connect(runtime,_capabilities);
+                PresetBusy=false;RebuildFeatureModels();
+                if(runtime!=null&&IslandOptions.Count==0)_=LoadIslandCatalogAsync(runtime,_connectionEpoch);
+            }
+        }
     }
     private void LoadPointDetails()
     {
@@ -216,19 +311,50 @@ public sealed partial class MainViewModel
         PointNote=meta?.Note??"";PointColor=meta!=null&&PointColors.Contains(meta.Color)?meta.Color:"青色";
         PointIcon=meta!=null&&PointIcons.Contains(meta.Icon)?meta.Icon:"⌖";PointFavorite=meta?.Favorite??false;
     }
-    private IEnumerable<TrainerTeleportPoint> SortPoints(IEnumerable<TrainerTeleportPoint> points) => PointSort switch{
-        "名称"=>points.OrderBy(p=>p.Name,StringComparer.CurrentCultureIgnoreCase),
-        "分组"=>points.OrderBy(p=>p.Group,StringComparer.CurrentCultureIgnoreCase).ThenBy(p=>p.Name,StringComparer.CurrentCultureIgnoreCase),
-        "最近添加"=>points.Reverse(),
-        _=>points.OrderByDescending(p=>_experience.Points.Any(m=>m.Group==p.Group&&m.Name==p.Name&&m.Favorite)).ThenBy(p=>p.Name,StringComparer.CurrentCultureIgnoreCase)
-    };
-    private bool PointMatches(TrainerTeleportPoint point,string query) => query.Length==0 || (point.Name+" "+point.Group+" "+_experience.Points.FirstOrDefault(m=>m.Group==point.Group&&m.Name==point.Name)?.Note).Contains(query,StringComparison.CurrentCultureIgnoreCase);
-    public string ExportTeleportPoints() => JsonSerializer.Serialize(new {version=1,points=TeleportPoints.Select(p=>new{group=p.Group,name=p.Name,x=p.X,y=p.Y,z=p.Z,decoration=_experience.Points.FirstOrDefault(m=>m.Group==p.Group&&m.Name==p.Name)})},new JsonSerializerOptions{WriteIndented=true});
+    private Dictionary<(string Group,string Name),(PointDecoration First,bool Favorite)> CreatePointMetadataIndex()
+    {
+        // Exact-case metadata keys and the first annotation match the previous lookup.
+        // Favorite sorting used Any(), so retain a later duplicate's favorite flag too.
+        var index=new Dictionary<(string Group,string Name),(PointDecoration First,bool Favorite)>();
+        foreach(var point in _experience.Points)
+        {
+            var key=(point.Group,point.Name);
+            if(index.TryGetValue(key,out var old))
+            {if(point.Favorite&&!old.Favorite)index[key]=(old.First,true);}
+            else index.Add(key,(point,point.Favorite));
+        }
+        return index;
+    }
+    private IEnumerable<TrainerTeleportPoint> GetFilteredTeleportPoints(string query)
+    {
+        // Rebuild for each operation; edits/imports and culture changes cannot leave a stale cache.
+        var metadata=CreatePointMetadataIndex();string group=SelectedTeleportGroup;
+        var points=TeleportPoints.Where(p=>(group=="全部分组"||string.Equals(p.Group,group,StringComparison.CurrentCultureIgnoreCase))&&
+            (query.Length==0||(p.Name+" "+p.Group+" "+(metadata.TryGetValue((p.Group,p.Name),out var item)?item.First.Note:null)).Contains(query,StringComparison.CurrentCultureIgnoreCase)));
+        return PointSort switch{
+            "名称"=>points.OrderBy(p=>p.Name,StringComparer.CurrentCultureIgnoreCase),
+            "分组"=>points.OrderBy(p=>p.Group,StringComparer.CurrentCultureIgnoreCase).ThenBy(p=>p.Name,StringComparer.CurrentCultureIgnoreCase),
+            "最近添加"=>points.Reverse(),
+            _=>points.OrderByDescending(p=>metadata.TryGetValue((p.Group,p.Name),out var item)&&item.Favorite).ThenBy(p=>p.Name,StringComparer.CurrentCultureIgnoreCase)
+        };
+    }
+    public string ExportTeleportPoints()
+    {
+        var metadata=CreatePointMetadataIndex();
+        return JsonSerializer.Serialize(new {version=1,points=TeleportPoints.Select(p=>new{group=p.Group,name=p.Name,x=p.X,y=p.Y,z=p.Z,decoration=metadata.TryGetValue((p.Group,p.Name),out var item)?item.First:null})},new JsonSerializerOptions{WriteIndented=true});
+    }
     public int ImportTeleportPoints(string json)
     {
         using var doc=JsonDocument.Parse(json);var root=doc.RootElement;
         if(!root.TryGetProperty("version",out var v)||!v.TryGetInt32(out int version)||version!=1||!root.TryGetProperty("points",out var entries)||entries.ValueKind!=JsonValueKind.Array||entries.GetArrayLength()>2000)throw new JsonException("传送点格式或版本无效（最多 2000 个）");
         var staged=TeleportPoints.ToList();var decorations=_experience.Points.ToList();int imported=0;
+        var names=new Dictionary<string,HashSet<string>>(StringComparer.CurrentCultureIgnoreCase);
+        bool RememberName(string group,string name)
+        {
+            if(!names.TryGetValue(group,out var set))names[group]=set=new(StringComparer.CurrentCultureIgnoreCase);
+            return set.Add(name);
+        }
+        foreach(var point in staged)RememberName(point.Group,point.Name);
         foreach(var e in entries.EnumerateArray()){
             string? group=e.TryGetProperty("group",out var g)&&g.ValueKind==JsonValueKind.String?g.GetString():null;
             string? name=e.TryGetProperty("name",out var n)&&n.ValueKind==JsonValueKind.String?n.GetString():null;
@@ -236,24 +362,38 @@ public sealed partial class MainViewModel
             if(string.IsNullOrWhiteSpace(group)||string.IsNullOrWhiteSpace(name)||group.Length>80||name.Length>80)throw new JsonException("传送点名称或分组无效");
             double x=Coordinate("x"),y=Coordinate("y"),z=Coordinate("z");
             // Merge only; a same-name point is never silently overwritten.
-            if(staged.Any(p=>p.Group.Equals(group,StringComparison.CurrentCultureIgnoreCase)&&p.Name.Equals(name,StringComparison.CurrentCultureIgnoreCase)))continue;
+            if(!RememberName(group,name))continue;
             if(staged.Count>=2000)throw new JsonException("合并后的传送点超过 2000 个");
             staged.Add(new(group,name,x,y,z));imported++;
             if(e.TryGetProperty("decoration",out var meta)&&meta.ValueKind==JsonValueKind.Object){var d=JsonSerializer.Deserialize<PointDecoration>(meta.GetRawText());if(d!=null&&d.Note?.Length<=500&&PointColors.Contains(d.Color)&&PointIcons.Contains(d.Icon))decorations.Add(d with{Group=group,Name=name});}
         }
-        _settings.Save(staged);TeleportPoints.Clear();foreach(var p in staged)TeleportPoints.Add(p);_experience.Points=decorations;ScheduleExperienceSave();PointMetadataChanged();RefreshTeleportGroups();RefreshTeleportFilter();PositionStatus=$"已导入 {imported} 个新坐标，同名坐标保留原值";return imported;
+        _settings.Save(staged);foreach(var p in staged.Skip(staged.Count-imported))TeleportPoints.Add(p);_experience.Points=decorations;ScheduleExperienceSave();PointMetadataChanged();RefreshTeleportGroups();RefreshTeleportFilter();PositionStatus=$"已导入 {imported} 个新坐标，同名坐标保留原值";return imported;
     }
     private async Task RememberSafePositionAsync()
     {
-        var runtime=_runtime;int epoch=_connectionEpoch;if(runtime==null){PositionStatus="请先连接游戏";return;}
-        try{var result=await runtime.ExecuteAsync(new FeatureCommand("world.position.read",JsonSerializer.SerializeToElement(new{}),Capability.ReadOnly),CancellationToken.None);if(runtime!=_runtime||epoch!=_connectionEpoch)return;
+        var runtime=_runtime;int epoch=_connectionEpoch,context=_positionContextEpoch;if(runtime==null){PositionStatus="请先连接游戏";return;}
+        try{var result=await runtime.ExecuteAsync(new FeatureCommand("world.position.read",JsonSerializer.SerializeToElement(new{}),Capability.ReadOnly),CancellationToken.None);if(!IsCurrentPositionContext(runtime,epoch,context))return;
             if(result.Succeeded&&result.Applied is JsonElement p&&p.ValueKind==JsonValueKind.Object){double x=p.GetProperty("x").GetDouble(),y=p.GetProperty("y").GetDouble(),z=p.GetProperty("z").GetDouble();if(!new[]{x,y,z}.All(d=>double.IsFinite(d)&&Math.Abs(d)<=100000))throw new InvalidDataException("位置无效");_safePosition=new("临时","本次安全位置",x,y,z);PositionStatus="本机安全位置已记录，仅在当前世界有效";}else PositionStatus=result.Message;
-        }catch(Exception e){PositionStatus="记录安全位置失败 · "+e.Message;}
+        }catch(Exception e){if(IsCurrentPositionContext(runtime,epoch,context))PositionStatus="记录安全位置失败 · "+e.Message;}
     }
-    internal void StopExperienceAutomation(){AutoRefill=false;_autoGeneration++;_spinWasEnabled=false;_curveAppliedSpeed=null;}
-    internal void ResetExperienceWorld(){StopExperienceAutomation();_safePosition=null;_lastLivingPosition=_deathPosition=null;_lastSampleAlive=false;TrackDeathPosition=false;DeathPositionStatus="世界已切换，临时位置已清空";CombatDiagnostics="世界已切换，等待读取新会话";}
+    internal void StopExperienceAutomation()
+    {
+        FunEventsPage.SlotMachine.CancelPendingOperation();
+        AutoRefill = false;
+        CombatFeedback.ResetSession();
+        _autoGeneration++;
+        _experienceWorkVersion++;
+        _experienceWorkBusy = false;
+        _spinStopVersion++;
+        _spinStopPending = false;
+        _spinWasEnabled = false;
+        _curveAppliedSpeed = null;
+    }
+    private void ResetPendingSessionWork(){_positionContextEpoch++;_islandLoadBusy=false;Volatile.Write(ref _proofRefreshBusy,0);_positionActionBusy=false;_deathSampleBusy=false;OnPropertyChanged(nameof(CanPositionAction));OnPropertyChanged(nameof(CanLoadSelectedIsland));}
+    internal void ResetExperienceWorld(){InvalidatePresetApply();StopExperienceAutomation();CombatFeedback.ResetSession();ResetPendingSessionWork();_safePosition=null;_lastLivingPosition=_deathPosition=null;_lastSampleAlive=false;TrackDeathPosition=false;DeathPositionStatus="世界已切换，临时位置已清空";CombatDiagnostics="世界已切换，等待读取新会话";}
     public void UpdateExperienceSession(JsonElement? raw)
     {
+        if(raw is JsonElement feedbackSession)CombatFeedback.UpdateSession(feedbackSession);
         if(raw is not JsonElement session||session.ValueKind!=JsonValueKind.Object){CombatDiagnostics="当前运行时未提供诊断数据";if(AutoRefill){AutoRefill=false;AutoRefillStatus="缺少会话计数，自动补充已停止";}return;}
         if(!session.TryGetProperty("predictiveAim",out var aim)||aim.ValueKind!=JsonValueKind.Object){CombatDiagnostics="当前运行时未提供瞄准诊断";if(AutoRefill){AutoRefill=false;AutoRefillStatus="缺少迁徙海鸥计数，自动补充已停止";}return;}
         static JsonElement Field(JsonElement p,string key)=>p.ValueKind==JsonValueKind.Object&&p.TryGetProperty(key,out var v)?v:default;
@@ -276,12 +416,12 @@ public sealed partial class MainViewModel
         if(RefillLimitInput.HasError||AutoRefillCount>=RefillLimitInput.LastValidValue){AutoRefill=false;AutoRefillStatus="已达到补充上限，请手动重新开启";return;}
         var runtime=_runtime;int epoch=_connectionEpoch,generation=_autoGeneration;
         var card=FunEventsPage.Events.FirstOrDefault(e=>e.Id=="seagull-migration");if(runtime==null||card?.CanExecute!=true||!FunEventsPage.CanExecuteWave)return;
-        _experienceWorkBusy=true;_lastRefill=DateTimeOffset.UtcNow;
+        int work=++_experienceWorkVersion;_experienceWorkBusy=true;_lastRefill=DateTimeOffset.UtcNow;
         try{var result=await FunEventsPage.ExecuteWaveAsync("seagull-migration");if(runtime!=_runtime||epoch!=_connectionEpoch||generation!=_autoGeneration)return;
-            if(result){AutoRefillCount++;AutoRefillStatus=$"已补充第 {AutoRefillCount} 波（每波 8 只）";}
+            if(result){AutoRefillCount++;AutoRefillStatus=$"已补充第 {AutoRefillCount} 波（按本波实际数量生成）";}
             else{AutoRefill=false;AutoRefillStatus="补充未成功，已停止；请检查趣味事件结果";}
         }catch(Exception e){if(runtime==_runtime&&epoch==_connectionEpoch){AutoRefill=false;AutoRefillStatus="自动补充失败 · "+e.Message;}}
-        finally{_experienceWorkBusy=false;}
+        finally{if(work==_experienceWorkVersion)_experienceWorkBusy=false;}
     }
     public async Task TickExperienceAsync(DateTimeOffset now)
     {
@@ -292,27 +432,27 @@ public sealed partial class MainViewModel
         if(!enabled){_spinWasEnabled=false;_curveAppliedSpeed=null;return;}
         if(!_spinWasEnabled){_spinWasEnabled=true;_spinStarted=now;}
         if(_experienceWorkBusy||_runtime==null||PresetBusy||_spinStopPending||_closedExperience)return;
-        var live=Features.FirstOrDefault(f=>f.IsSpin);if(live?.IsBusy==true)return;
+        var live=AllFeatures.FirstOrDefault(f=>f.IsSpin);if(live?.IsBusy==true)return;
         double speed=live?.LastValidSpinSpeed??(_preferences.Features.TryGetValue("player.spin.lock",out var p)?p.Number("spinSpeed")??4:4);
         double desired=SpinCurveValue(SpinCurve,speed,(now-_spinStarted).TotalSeconds);
         if(SpinCurve=="固定"&&_curveAppliedSpeed==null||_curveAppliedSpeed is double prior&&Math.Abs(prior-desired)<0.03)return;
-        var runtime=_runtime;int epoch=_connectionEpoch;_experienceWorkBusy=true;
-        try{var result=await runtime.ExecuteAsync(new FeatureCommand("player.spin.lock",FeatureItemViewModel.SpinArguments(true,desired),Capability.OwnedPlayer),CancellationToken.None);
-            if(runtime!=_runtime||epoch!=_connectionEpoch)return;
+        var runtime=_runtime;int epoch=_connectionEpoch,work=++_experienceWorkVersion;_experienceWorkBusy=true;
+        try{var result=await runtime.ExecuteAsync(new FeatureCommand("player.spin.lock",FeatureItemViewModel.SpinArguments(true,desired,live?.CaptureToggleState().AppliedSpinAutoJump??state?.AppliedSpinAutoJump??false),Capability.OwnedPlayer),CancellationToken.None);
+            if(runtime!=_runtime||epoch!=_connectionEpoch||work!=_experienceWorkVersion)return;
             if(result.Succeeded)_curveAppliedSpeed=desired;else{SpinCurve="固定";ExperienceStatus="旋转曲线暂停 · "+result.Message;}
-        }catch(Exception e){if(runtime==_runtime&&epoch==_connectionEpoch)ExperienceStatus="旋转曲线失败 · "+e.Message;}
-        finally{_experienceWorkBusy=false;}
+        }catch(Exception e){if(runtime==_runtime&&epoch==_connectionEpoch&&work==_experienceWorkVersion)ExperienceStatus="旋转曲线失败 · "+e.Message;}
+        finally{if(work==_experienceWorkVersion)_experienceWorkBusy=false;}
     }
     private async Task SampleDeathPositionAsync(DateTimeOffset now)
     {
-        var runtime=_runtime;int epoch=_connectionEpoch;if(runtime==null||!_capabilities.CanExecute(Capability.HostWorld))return;
+        var runtime=_runtime;int epoch=_connectionEpoch,context=_positionContextEpoch;if(runtime==null||!_capabilities.CanExecute(Capability.HostWorld))return;
         _deathSampleBusy=true;_lastDeathSample=now;
         try{var result=await runtime.ExecuteAsync(new FeatureCommand("players.catalog",JsonSerializer.SerializeToElement(new{}),Capability.HostWorld),CancellationToken.None);
-            if(runtime!=_runtime||epoch!=_connectionEpoch||!TrackDeathPosition)return;
+            if(!IsCurrentPositionContext(runtime,epoch,context)||!TrackDeathPosition)return;
             if(!result.Succeeded||result.Applied is not JsonElement p){DeathPositionStatus="本机状态读取失败";return;}
             ApplyDeathPositionSample(p);
-        }catch(Exception e){if(runtime==_runtime&&epoch==_connectionEpoch)DeathPositionStatus="本机状态读取失败 · "+e.Message;}
-        finally{_deathSampleBusy=false;}
+        }catch(Exception e){if(IsCurrentPositionContext(runtime,epoch,context))DeathPositionStatus="本机状态读取失败 · "+e.Message;}
+        finally{if(IsCurrentPositionContext(runtime,epoch,context))_deathSampleBusy=false;}
     }
     public void ApplyDeathPositionSample(JsonElement catalog)
     {
@@ -340,10 +480,10 @@ public sealed partial class MainViewModel
     private async Task StopSpinAsync()
     {
         var runtime=_runtime;int epoch=_connectionEpoch;if(runtime==null)return;
-        _spinStopPending=true;
+        int stop=++_spinStopVersion;_spinStopPending=true;
         try{var result=await runtime.ExecuteAsync(new FeatureCommand("player.spin.lock",FeatureItemViewModel.SpinArguments(false,4),Capability.OwnedPlayer),CancellationToken.None);
-            if(runtime==_runtime&&epoch==_connectionEpoch&&result.Succeeded)ApplyRememberedToggleState("player.spin.lock",new(false,result.Message,"已关闭",true));
-        }catch(Exception e){ExperienceStatus="停止旋转失败 · "+e.Message;}
-        finally{_spinStopPending=false;}
+            if(runtime==_runtime&&epoch==_connectionEpoch&&stop==_spinStopVersion&&result.Succeeded)ApplyRememberedToggleState("player.spin.lock",new(false,result.Message,"已关闭",true));
+        }catch(Exception e){if(runtime==_runtime&&epoch==_connectionEpoch&&stop==_spinStopVersion)ExperienceStatus="停止旋转失败 · "+e.Message;}
+        finally{if(stop==_spinStopVersion)_spinStopPending=false;}
     }
 }

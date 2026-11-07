@@ -5,6 +5,17 @@ namespace HowToFishTrainer.App;
 internal static class NativeOverlay
 {
 	[DllImport("user32.dll")]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	internal static extern bool IsWindow(nint hwnd);
+
+	[DllImport("user32.dll")]
+	internal static extern nint GetWindow(nint hwnd, uint command);
+
+	[DllImport("user32.dll")]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	internal static extern bool SetForegroundWindow(nint hwnd);
+
+	[DllImport("user32.dll")]
 	internal static extern nint GetForegroundWindow();
 
 	[DllImport("user32.dll")]

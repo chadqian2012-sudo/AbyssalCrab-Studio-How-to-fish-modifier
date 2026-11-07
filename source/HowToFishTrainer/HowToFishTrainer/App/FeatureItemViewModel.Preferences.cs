@@ -12,7 +12,8 @@ public sealed partial class FeatureItemViewModel
     private ParameterValues? _pendingCatalogParameters;
     internal double LastValidSpinSpeed => _lastValidSpinSpeed;
 
-    internal IReadOnlyDictionary<string, NumericInput> ParameterInputs => Descriptor.Control switch {
+    internal IReadOnlyDictionary<string, NumericInput> ParameterInputs => IsMagicBullet ? new Dictionary<string, NumericInput> {
+        ["angle"] = MagicAngleInput, ["distance"] = MagicDistanceInput, ["strength"] = MagicStrengthInput } : Descriptor.Control switch {
         FeatureControl.Number => new Dictionary<string, NumericInput> { ["value"] = ValueInput },
         FeatureControl.Generator => new Dictionary<string, NumericInput> {
             ["quantity"] = QuantityInput, ["distance"] = DistanceInput, ["weight"] = WeightInput },
@@ -25,7 +26,16 @@ public sealed partial class FeatureItemViewModel
         var values = _pendingCatalogParameters?.Copy() ?? new ParameterValues();
         foreach (var pair in ParameterInputs) values.Put(pair.Key, pair.Value.LastValidValue);
         values.Put("saveAfter", SaveAfter);
-        if (IsSpin) values.Put("spinSpeed", _lastValidSpinSpeed);
+        if (IsMagicBullet)
+        {
+            values.Put("magicTrigger", MagicTrigger.Value);
+            values.Put("targetTeammates", MagicTargetTeammates);
+        }
+        if (IsSpin)
+        {
+            values.Put("spinSpeed", _lastValidSpinSpeed);
+            values.Put("spinAutoJump", SpinAutoJump);
+        }
         if (Descriptor.Control == FeatureControl.Generator)
         {
             values.Put("search", SearchText); values.Put("kind", SelectedKind);
@@ -80,6 +90,11 @@ public sealed partial class FeatureItemViewModel
                 Rare = values.Boolean("rare") ?? Rare;
             }
             SaveAfter = values.Boolean("saveAfter") ?? SaveAfter;
+            if (IsMagicBullet)
+            {
+                MagicTrigger = MagicTriggerModes.FirstOrDefault(t => t.Value == values.Text("magicTrigger")) ?? MagicTriggerModes[1];
+                MagicTargetTeammates = values.Boolean("targetTeammates") ?? false;
+            }
             foreach (var pair in ParameterInputs)
             {
                 if (values.Number(pair.Key) is double number && pair.Value.IsValidValue(number)) pair.Value.Value = number;
@@ -87,12 +102,26 @@ public sealed partial class FeatureItemViewModel
             }
             if (IsSpin)
             {
+                SpinAutoJump = values.Boolean("spinAutoJump") ?? false;
                 if (values.Number("spinSpeed") is double speed && speed >= 2 && speed <= 15)
                 { _lastValidSpinSpeed = speed; SpinSpeedText = speed.ToString("G", CultureInfo.InvariantCulture); }
                 if (drafts != null && drafts.TryGetValue("spinSpeed", out var draft)) SpinSpeedText = draft;
             }
         }
         finally { _restoringParameters = false; }
+    }
+
+    internal void UpdateCatalog(IReadOnlyList<CatalogOption> options)
+    {
+        var parameters = CaptureParameters();
+        var drafts = CaptureParameterDrafts();
+        Options = options;
+        IsAvailable = _runtime != null && (_capabilities?.CanExecute(Descriptor.RequiredCapability) ?? false)
+            && RuntimeFeatureSupport.ImplementedIds.Contains(Descriptor.Id) && Options.Count > 0;
+        RestoreParameters(parameters, drafts);
+        Changed(nameof(Options)); Changed(nameof(Kinds)); Changed(nameof(FilteredOptions));
+        Changed(nameof(IsAvailable)); Changed(nameof(CanInteract)); Changed(nameof(CanGenerate));
+        if (!IsBusy && !HasUnresolvedCatalogChoice) { Status = IsAvailable ? "准备就绪" : "等待实时目录"; StateLabel = IsAvailable ? "待命" : "不可用"; }
     }
 
     private void RememberAttachmentSelection(string key, string? id, string? previousId)

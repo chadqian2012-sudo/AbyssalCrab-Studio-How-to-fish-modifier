@@ -18,6 +18,7 @@ namespace AbyssalCrab.Runtime
         private const BindingFlags Flags=BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Static|BindingFlags.Instance;
         private static TrainerBridgeHost _host;
         private static bool _enabled,_leadEnabled,_headLockEnabled,_bound,_wasAds;
+        private static bool _targetTeammates;
         private static float _strength=60,_range=35,_angle=8,_acquireCos,_trackCos;
         private static float _nextCatalog,_nextScan,_nextProof;
         private static int _catalogCount=-1,_handledFrame=-1,_adsEdgeFrame=-1,_firstLockDelay=-1;
@@ -31,6 +32,7 @@ namespace AbyssalCrab.Runtime
         private static readonly Comparison<AimTargetTrack> Order=new Comparison<AimTargetTrack>(CompareTargets);
         private static readonly Dictionary<Type,Dictionary<string,MemberInfo>> Members=new Dictionary<Type,Dictionary<string,MemberInfo>>();
         private static AccessTools.FieldRef<Item,Collider[]> _colliders;
+        private static AccessTools.FieldRef<OtherPlayer,CapsuleCollider> _playerCapsule;
         private static AccessTools.FieldRef<Weapon,WeaponInfo> _weaponInfo;
         private static AccessTools.FieldRef<Weapon,float> _aimPercent,_forwardLength;
         private static Func<Weapon,float> _projectileSpeed;
@@ -67,6 +69,7 @@ namespace AbyssalCrab.Runtime
         {
             if(_bound)return;
             _colliders=AccessTools.FieldRefAccess<Item,Collider[]>("_worldColliders");
+            _playerCapsule=AccessTools.FieldRefAccess<OtherPlayer,CapsuleCollider>("_col");
             _weaponInfo=AccessTools.FieldRefAccess<Weapon,WeaponInfo>("_weaponInfo");
             _aimPercent=AccessTools.FieldRefAccess<Weapon,float>("_aimPercent");
             _forwardLength=AccessTools.FieldRefAccess<Weapon,float>("_modelForwardLength");
@@ -87,7 +90,7 @@ namespace AbyssalCrab.Runtime
         public static void Validate(string id,JObject args)
         {
             if(id!="combat.aim_assist")return;
-            foreach(string key in new[]{"leadEnabled","headLockEnabled"})if(args[key]!=null&&args[key].Type!=JTokenType.Boolean)throw new ArgumentException(key+" 必须是布尔值");
+            foreach(string key in new[]{"leadEnabled","headLockEnabled","targetTeammates"})if(args[key]!=null&&args[key].Type!=JTokenType.Boolean)throw new ArgumentException(key+" 必须是布尔值");
         }
 
         public static JToken Configure(JToken result,string id,JObject args)
@@ -95,6 +98,7 @@ namespace AbyssalCrab.Runtime
             if(id!="combat.aim_assist")return result;
             _host=Read(typeof(Bootstrap),"_bridge") as TrainerBridgeHost;
             _enabled=args.Value<bool?>("enabled")??true;_leadEnabled=args.Value<bool?>("leadEnabled")??false;_headLockEnabled=args.Value<bool?>("headLockEnabled")??false;
+            _targetTeammates=args.Value<bool?>("targetTeammates")??false;
             _strength=args.Value<float>("strength");_range=args.Value<float>("distance");_angle=args.Value<float>("angle");
             _acquireCos=Mathf.Cos(_angle*Mathf.Deg2Rad);_trackCos=Mathf.Cos(Mathf.Min(30f,Mathf.Max(_angle+4f,_angle*1.5f))*Mathf.Deg2Rad);
             _wasAds=false;_target=_silentTarget=null;_nextScan=_nextCatalog=0;_state=_enabled?"waiting-for-ads":"off";_failure=null;
@@ -119,6 +123,7 @@ namespace AbyssalCrab.Runtime
             _enabled=false;_wasAds=false;_target=_silentTarget=null;_handledAssist=null;_handledFrame=-1;
             Targets.Clear();Candidates.Clear();Cache.Clear();_catalogCount=-1;_nextCatalog=_nextScan=0;_state="off";
             _nativeAssist=null;_nativeArguments=null;
+            _targetTeammates=false;
         }
 
         public static void BeginSelection(TrainerBridgeHost host) { }
@@ -128,14 +133,14 @@ namespace AbyssalCrab.Runtime
         private static bool Alive(AimTargetTrack t)
         {
             if(t==null||!t.Target||!t.Target.gameObject.activeInHierarchy)return false;
-            if(t.Creature)return t.Creature.isActiveAndEnabled&&!t.Creature.IsDeinitializing&&!t.Creature.IsDead;
-            return t.Player&&t.Player!=Player.LocalPlayer&&t.Player.Dying&&!t.Player.Dying.IsDead&&t.Capsule&&t.Capsule.enabled;
+            if(t.Creature)return GameplayTargeting.IsAliveCreature(t.Creature);
+            return _targetTeammates&&t.Player&&t.Player!=Player.LocalPlayer&&!t.Player.IsDeinitializing&&t.Player.Dying&&!t.Player.Dying.IsDead&&t.Capsule&&t.Capsule.enabled&&t.Capsule.gameObject.activeInHierarchy;
         }
         private static Vector3 Center(AimTargetTrack t)=>t.Creature?(t.Rig?t.Rig.worldCenterOfMass:t.Transform.position):t.Capsule.bounds.center;
         private static bool Finite(Vector3 v)=>!float.IsNaN(v.x)&&!float.IsNaN(v.y)&&!float.IsNaN(v.z)&&!float.IsInfinity(v.x)&&!float.IsInfinity(v.y)&&!float.IsInfinity(v.z);
         private static bool Clear(Vector3 origin,Vector3 point)
         {_occlusionChecks++;return !Physics.Linecast(origin,point,(int)GameInfo.LevelLayer|(int)GameInfo.BoatLayer,QueryTriggerInteraction.Ignore);}
-        private static int CompareTargets(AimTargetTrack a,AimTargetTrack b)=>AimLockPolicy.CompareDistance(a.DistanceSquared,b.DistanceSquared);
+        private static int CompareTargets(AimTargetTrack a,AimTargetTrack b)=>GameplayPolicy.Compare(GameplayTargeting.Priority(a.Target),a.DistanceSquared,GameplayTargeting.Priority(b.Target),b.DistanceSquared);
 
         private static AimTargetTrack Track(Creature creature)
         {
@@ -144,6 +149,22 @@ namespace AbyssalCrab.Runtime
                 t=new AimTargetTrack{Target=creature,Creature=creature,Transform=creature.transform,Rig=creature.Rig,Colliders=_colliders(creature)};
                 if(t.Colliders==null||t.Colliders.Length==0)t.Colliders=creature.GetComponentsInChildren<Collider>();
                 Cache[creature]=t;
+            }
+            return t;
+        }
+
+        private static AimTargetTrack TrackPlayer(Player player)
+        {
+            AimTargetTrack t;if(!Cache.TryGetValue(player,out t))
+            {t=new AimTargetTrack{Target=player,Player=player};Cache[player]=t;}
+            var other=player.Other;var capsule=other?_playerCapsule(other):null;var transform=player.Transform;
+            // Silent lead and camera selection share tracks. Native avatars may arrive later
+            // or be replaced while the persistent Player component stays the same.
+            if(!ReferenceEquals(t.Capsule,capsule)||!ReferenceEquals(t.Transform,transform))
+            {
+                t.Capsule=capsule;t.Transform=transform;
+                t.SampleReady=false;t.SamplePosition=t.SampleVelocity=Vector3.zero;t.SampleTime=0;
+                t.HasHead=false;t.NextHeadCheck=0;
             }
             return t;
         }
@@ -167,17 +188,13 @@ namespace AbyssalCrab.Runtime
                 if((position-localPosition).sqrMagnitude<=near)
                 {_nearbyFound++;if(!creature.isActiveAndEnabled)_componentDisabled++;if(creature.IsDeinitializing)_deinitializing++;Targets.Add(Track(creature));}
             }
-            // Remote players remain available to ordinary assist, as before; head mode excludes them.
+            // Alive applies the independent teammate option; damage still uses native friendly fire.
             var resolver=Read(typeof(Bootstrap),"Targets");
             var players=resolver==null?null:AccessTools.Method(resolver.GetType(),"Players").Invoke(resolver,null) as IEnumerable;
             if(players!=null)foreach(object value in players)
             {
                 var player=value as Player;if(!player||player==Player.LocalPlayer)continue;
-                AimTargetTrack t;if(!Cache.TryGetValue(player,out t))
-                {
-                    var capsule=Read(Read(player,"Other"),"_col") as CapsuleCollider;
-                    t=new AimTargetTrack{Target=player,Player=player,Transform=player.Transform,Capsule=capsule};Cache[player]=t;
-                }
+                var t=TrackPlayer(player);
                 if(t.Capsule)Targets.Add(t);
             }
         }
@@ -192,7 +209,7 @@ namespace AbyssalCrab.Runtime
             float threshold=t.Creature.HeadPos,bestZ=float.NegativeInfinity;bool found=false;
             foreach(var collider in t.Colliders)
             {
-                if(!collider||!collider.enabled||collider.isTrigger||!collider.gameObject.activeInHierarchy)continue;
+                if(!GameplayTargeting.ProjectileCollider(collider))continue;
                 Bounds bounds=collider.bounds;float minZ=float.PositiveInfinity,maxZ=float.NegativeInfinity;
                 for(int mask=0;mask<8;mask++)
                 {
@@ -207,7 +224,7 @@ namespace AbyssalCrab.Runtime
                 Ray ray=new Ray(origin,difference/distance);float first=float.PositiveInfinity;Vector3 firstPoint=default(Vector3);bool hit=false;
                 foreach(var physical in t.Colliders)
                 {
-                    if(!physical||!physical.enabled||physical.isTrigger||!physical.gameObject.activeInHierarchy)continue;
+                    if(!GameplayTargeting.ProjectileCollider(physical))continue;
                     RaycastHit result;if(physical.Raycast(ray,out result,distance+.05f)&&result.distance<first){first=result.distance;firstPoint=result.point;hit=true;}
                 }
                 if(!hit||t.Transform.InverseTransformPoint(firstPoint).z<=threshold+.0001f)continue;
@@ -221,7 +238,7 @@ namespace AbyssalCrab.Runtime
         private static bool Point(AimTargetTrack t,Vector3 muzzle,bool head,bool force,out Vector3 point)
         {
             if(!head){point=Center(t);return Finite(point);}
-            if(!t.Creature){point=default(Vector3);return false;}
+            if(!t.Creature){point=t.Capsule.bounds.center+Vector3.up*t.Capsule.bounds.extents.y*.65f;return Finite(point);}
             if(force||!t.HasHead||Time.unscaledTime>=t.NextHeadCheck)return SolveHead(t,muzzle,out point);
             point=t.Transform.TransformPoint(t.LocalHead);return Finite(point);
         }
@@ -242,10 +259,11 @@ namespace AbyssalCrab.Runtime
             _aliveRejected=0;_nearestCenterDistance=float.MaxValue;_bestAlignment=-1;
             foreach(var t in Targets)
             {
-                if(!Alive(t)||(_headLockEnabled&&!t.Creature)){_aliveRejected++;continue;}
+                if(!Alive(t)){_aliveRejected++;continue;}
                 Vector3 direction=Center(t)-origin;float d=direction.sqrMagnitude;
-                _nearestCenterDistance=Math.Min(_nearestCenterDistance,Mathf.Sqrt(d));_bestAlignment=Math.Max(_bestAlignment,Vector3.Dot(forward,direction)/Mathf.Sqrt(d));
-                if(!AimLockPolicy.Eligible(d,Vector3.Dot(forward,direction)/Mathf.Sqrt(d),_range*_range,cameraLock?-1f:_acquireCos))continue;
+                float centerDistance=Mathf.Sqrt(d), alignment=Vector3.Dot(forward,direction)/centerDistance;
+                _nearestCenterDistance=Math.Min(_nearestCenterDistance,centerDistance);_bestAlignment=Math.Max(_bestAlignment,alignment);
+                if(!AimLockPolicy.Eligible(d,alignment,_range*_range,cameraLock?-1f:_acquireCos))continue;
                 t.DistanceSquared=d;Candidates.Add(t);
             }
             Candidates.Sort(Order);
@@ -278,6 +296,15 @@ namespace AbyssalCrab.Runtime
             t.SampleVelocity=Vector3.Lerp(t.SampleVelocity,measured,1f-Mathf.Exp(-35f*dt));return t.SampleVelocity;
         }
 
+        public static bool SilentLeadEnabled() => _leadEnabled;
+        public static Vector3 SilentVelocity(Component target,Vector3 point)
+        {
+            Bind();var creature=target as Creature;
+            if(creature)return Velocity(Track(creature),point);
+            var player=target as Player;if(!player)return Vector3.zero;
+            return Velocity(TrackPlayer(player),point);
+        }
+
         private static bool Predict(AimTargetTrack t,Vector3 point,Vector3 muzzle,float speed,out Vector3 launch)
         {
             launch=point-muzzle;_distance=launch.magnitude;_flightTime=_drop=0;_leadOffset=_velocity=Vector3.zero;
@@ -307,7 +334,7 @@ namespace AbyssalCrab.Runtime
                 bool entering=!_wasAds;_wasAds=true;if(entering){_adsEdges++;_adsEdgeFrame=Time.frameCount;_firstLockDelay=-1;}
                 Vector3 forward=Quaternion.Euler(cameraEuler)*Vector3.forward,point=default(Vector3);
                 var previousTarget=_target;
-                if(entering||!Valid(_target,cameraPosition,forward,_muzzle,-1f,false,out point))
+                if(entering||Time.unscaledTime>=_nextScan||!Valid(_target,cameraPosition,forward,_muzzle,-1f,false,out point))
                 {
                     _target=null;
                     if(AimLockPolicy.RetryNow(entering,previousTarget!=null,Time.unscaledTime,_nextScan))
@@ -318,7 +345,7 @@ namespace AbyssalCrab.Runtime
                 if(_firstLockDelay<0)_firstLockDelay=Time.frameCount-_adsEdgeFrame;
                 _lockedFrames++;
                 _measureTracking=true;
-                if(_headLockEnabled){_headFrames++;_headMargin=_target.Transform.InverseTransformPoint(point).z-_target.Creature.HeadPos;}
+                if(_headLockEnabled&&_target.Creature){_headFrames++;_headMargin=_target.Transform.InverseTransformPoint(point).z-_target.Creature.HeadPos;}
                 Vector3 launch;if(!Predict(_target,point,_muzzle,_speed,out launch))launch=point-_muzzle;
                 Vector3 desired=Quaternion.LookRotation(launch,Vector3.up).eulerAngles;
                 Vector2 difference=new Vector2(Mathf.DeltaAngle(cameraEuler.x,desired.x),Mathf.DeltaAngle(cameraEuler.y,desired.y));
@@ -371,7 +398,7 @@ namespace AbyssalCrab.Runtime
         {
             var obj=session as JObject;if(obj==null)return session;
             if(_allocationProbe<0){long before=GC.GetAllocatedBytesForCurrentThread();var allocation=new byte[4096];GC.KeepAlive(allocation);_allocationProbe=GC.GetAllocatedBytesForCurrentThread()-before;}
-            var diagnostic=new JObject{["enabled"]=_enabled,["leadEnabled"]=_leadEnabled,["headLockEnabled"]=_headLockEnabled,["selection"]="nearest-distance-on-ads",
+            var diagnostic=new JObject{["enabled"]=_enabled,["leadEnabled"]=_leadEnabled,["headLockEnabled"]=_headLockEnabled,["selection"]="boss-animal-player-nearest-on-ads",
                 ["adsOnly"]=true,["cameraAcquisitionAngleRestricted"]=false,["lockedTarget"]=_target!=null&&_target.Target?_target.Target.name:null,["firstLockDelayFrames"]=_firstLockDelay,["selectedScanDistance"]=_selectedScanDistance,
                 ["selectionDiagnostics"]=new JObject{["range"]=_range,["angle"]=_angle,["acquireCos"]=_acquireCos,["items"]=_itemsInspected,["creatures"]=_creaturesFound,["nearby"]=_nearbyFound,["componentDisabled"]=_componentDisabled,["deinitializing"]=_deinitializing,["aliveRejected"]=_aliveRejected,["candidates"]=_lastCandidates,["nearestCenterDistance"]=_nearestCenterDistance,["bestAlignment"]=_bestAlignment},
                 ["predictedFrames"]=_predictedFrames,["headFrames"]=_headFrames,["silentShots"]=_silentShots,["hitscanFrames"]=_hitscanFrames,["headRegionMargin"]=_headMargin,

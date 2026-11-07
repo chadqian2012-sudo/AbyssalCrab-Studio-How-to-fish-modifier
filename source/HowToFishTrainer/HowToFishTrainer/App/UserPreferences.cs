@@ -26,6 +26,9 @@ public sealed class ParameterValues : Dictionary<string, JsonElement>
 
 public sealed class TrainerUserPreferences
 {
+    private static readonly JsonSerializerOptions JsonOptions = new() {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true
+    };
     public const int CurrentVersion = 1;
     public int SchemaVersion { get; } = CurrentVersion;
     public Dictionary<string, ParameterValues> Features { get; } = new(StringComparer.Ordinal);
@@ -36,6 +39,7 @@ public sealed class TrainerUserPreferences
     public ParameterValues Roulette { get; private set; } = new();
     public ParameterValues SlotMachine { get; private set; } = new();
     public ParameterValues RoomMembers { get; private set; } = new();
+    public ParameterValues Session { get; private set; } = new();
 
     public static TrainerUserPreferences Parse(string json)
     {
@@ -49,7 +53,7 @@ public sealed class TrainerUserPreferences
         var result = new TrainerUserPreferences {
             General = Read("general"), Teleport = Read("teleport"), AimAssist = Read("aimAssist"),
             Crosshair = Read("crosshair"), Roulette = Read("roulette"),
-            SlotMachine = Read("slotMachine"), RoomMembers = Read("roomMembers")
+            SlotMachine = Read("slotMachine"), RoomMembers = Read("roomMembers"), Session = Read("session")
         };
         if (root.TryGetProperty("features", out var features) && features.ValueKind == JsonValueKind.Object)
             foreach (var feature in features.EnumerateObject())
@@ -57,9 +61,20 @@ public sealed class TrainerUserPreferences
         return result;
     }
 
-    public string ToJson() => JsonSerializer.Serialize(this, new JsonSerializerOptions {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true
-    });
+    // Snapshot mutable dictionaries directly; serializing and parsing the whole model here
+    // duplicates the JSON work performed by the store and by preset export.
+    public TrainerUserPreferences Copy()
+    {
+        var copy = new TrainerUserPreferences {
+            General = General.Copy(), Teleport = Teleport.Copy(), AimAssist = AimAssist.Copy(),
+            Crosshair = Crosshair.Copy(), Roulette = Roulette.Copy(),
+            SlotMachine = SlotMachine.Copy(), RoomMembers = RoomMembers.Copy(), Session = Session.Copy()
+        };
+        foreach (var feature in Features) copy.Features[feature.Key] = feature.Value.Copy();
+        return copy;
+    }
+
+    public string ToJson() => JsonSerializer.Serialize(this, JsonOptions);
 }
 
 public interface IUserPreferencesStore
@@ -121,7 +136,9 @@ public sealed class FileUserPreferencesStore : IUserPreferencesStore
                 // A broken primary must never replace a usable backup.
                 bool primaryValid;
                 try { TrainerUserPreferences.Parse(File.ReadAllText(_path)); primaryValid = true; }
-                catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or NotSupportedException) { primaryValid = false; }
+                catch (NotSupportedException e) { throw new IOException("参数文件版本较新，未覆盖原文件", e); }
+                catch (Exception e) when (e is JsonException or InvalidOperationException) { primaryValid = false; }
+                // A read/permission failure is not proof of corruption; leave the file intact.
                 File.Replace(temporary, _path, primaryValid ? _path + ".bak" : null);
             }
             else File.Move(temporary, _path);

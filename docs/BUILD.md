@@ -9,9 +9,9 @@
 
 ## 环境 | Prerequisites
 
-需要 Windows、PowerShell 和 .NET 8 Windows Desktop SDK。目录中的打包说明提到一个位于本机其他工作目录的便携 SDK；该 SDK 不包含在仓库中，不能假设克隆后该路径存在。构建前请安装官方 .NET 8 SDK，并检查项目引用及脚本中是否仍有本机绝对路径。
+需要 Windows、PowerShell 和 .NET 8 Windows Desktop SDK。脚本从 PATH 查找 dotnet，或接受 `-DotnetPath` 指定便携 SDK。离线依赖缓存可用 `-PackageCache` 指定；无需已清理的历史 SDK 下载清单。
 
-Build on Windows with PowerShell and the .NET 8 Windows Desktop SDK. The delivery notes refer to a portable SDK stored in another local workspace; it is not included in this repository, so that path will not exist on a fresh clone. Install the official .NET 8 SDK and check project references and scripts for machine-specific absolute paths before building.
+Build on Windows with PowerShell and the .NET 8 Windows Desktop SDK. The script resolves dotnet from PATH or accepts `-DotnetPath`; `-PackageCache` selects an existing NuGet cache. The SDK is not bundled. Historical SDK-download manifests are no longer required.
 
 ## 发布模式 | Package modes
 
@@ -20,6 +20,7 @@ Build on Windows with PowerShell and the .NET 8 Windows Desktop SDK. The deliver
 & '.\build\Build-Release.ps1' -PackageMode CompressedSingleFile
 & '.\build\Build-Release.ps1' -PackageMode Folder
 & '.\build\Build-Release.ps1' -PackageMode FrameworkDependent
+& '.\build\Build-Release.ps1' -DotnetPath '<SDK>/dotnet.exe' -OutputDirectory '<output>' -OutputName 'AbyssalCrab Studio.exe'
 ```
 
 默认模式生成 Windows x64 自包含单文件，无需用户另装 .NET。压缩单文件在启动时解压；目录版必须整体分发；框架依赖版要求目标电脑安装 .NET 8 Desktop Runtime x64。正式分发前应按当前交付说明核验输出与嵌入资源。
@@ -28,6 +29,26 @@ The default mode creates a Windows x64 self-contained single file and does not r
 
 ## 当前限制 | Current limitations
 
-此工作区没有安装 .NET SDK。打包说明中的便携 SDK 位于仓库外的本机路径；项目依赖的 DLL、图标和品牌 PNG 也未纳入此公共源码仓库。因此尚未在干净环境验证本仓库能否直接重建。请从获授权来源准备这些依赖，并检查本机绝对路径。部分旧 UI 合并或签收脚本可能引用历史目录或历史 Runtime，不应视为通用构建入口。
+r18 持物修复从哈希已核对的 r17c Runtime 制作增量补丁，不重新拼接历史版本：
 
-No .NET SDK is installed in the current workspace. The portable SDK mentioned in the packaging notes is outside the repository. The DLLs, icon, and brand PNG required by the project are also excluded from this public source repository, so a clean clone has not been verified as directly rebuildable. Obtain these dependencies only from sources you are authorized to use, and check for machine-specific absolute paths. Some older UI merge or finalization scripts may reference historical directories or runtimes and should not be treated as general build entry points.
+```powershell
+& '.\build\Build-HeldMotionRuntime.ps1' -DotnetPath '<SDK>/dotnet.exe' -GameManagedDirectory '<game>/How to Fish_Data/Managed' -DnlibPath '<dnlib>/dnlib.dll' -ParentRuntimePath '<authorized-r17c>/HowToFishTrainer.Runtime.dll'
+python '.\build\refresh_extraction.py' '<candidate.exe>' '<verification>/assemblies'
+python '.\build\compare_packaged_payloads.py' '<default.exe>' '<compressed.exe>' '<verification>'
+python '.\build\check_branding.py' '<default.exe>' '<verification>/single-file/assemblies'
+```
+
+补丁脚本先执行行为检查及原方法保留核查，成功后才更新本工作副本中的 Runtime。审计输出位于 `build/staging/held-motion`。游戏程序集只读。提取脚本自行解析单文件包，不再依赖已删除的外部解包目录，也不执行输入 EXE。
+
+The r18 patch requires the verified r17c parent Runtime, authorized game assemblies, Harmony and dnlib. It runs behavior checks and an existing-method preservation audit before updating this worktree's embedded Runtime. Audit outputs are under `build/staging/held-motion`; game assemblies remain read-only. The bundle inspection script is now self-contained and does not execute the input EXE.
+
+公共仓库不附带 .NET SDK。打包说明中的便携 SDK 位于仓库外的本机路径；项目依赖的 DLL、图标和品牌 PNG 也未纳入此公共源码仓库。因此尚未在干净环境验证本仓库能否直接重建。请从获授权来源准备这些依赖，并检查本机绝对路径。部分旧 UI 合并或签收脚本可能引用历史目录或历史 Runtime，不应视为通用构建入口。
+
+The public repository does not bundle the .NET SDK. The portable SDK mentioned in the packaging notes is outside the repository. The DLLs, icon, and brand PNG required by the project are also excluded from this public source repository, so a clean clone has not been verified as directly rebuildable. Obtain these dependencies only from sources you are authorized to use, and check for machine-specific absolute paths. Some older UI merge or finalization scripts may reference historical directories or runtimes and should not be treated as general build entry points.
+
+
+## r16b 与独立手记 | r16b and standalone journal
+
+独立手记项目为 `source/AnglerCompanion/AnglerCompanion.csproj`，共享修改器内的手记源码。r16b 的本地验证使用 .NET 8 Windows Desktop SDK；公共源码不包含 DLL、图标、品牌图片、程序包或游戏程序集。构建前请准备项目文件列出的获授权依赖。旧打包脚本具有版本前提，不能用它们任意组合历史 Runtime。干净克隆重建和真实游戏验收尚未完成。
+
+The standalone journal project is `source/AnglerCompanion/AnglerCompanion.csproj` and shares journal sources with the trainer. Local r16b validation used the .NET 8 Windows Desktop SDK. DLLs, icons, branding images, distributables and game assemblies are excluded from this source publication. Supply authorized dependencies required by the project files; historical packaging scripts have version-specific assumptions. A clean-clone rebuild and live-game acceptance remain pending.

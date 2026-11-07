@@ -21,6 +21,7 @@ public sealed class SlotMachineControlViewModel : INotifyPropertyChanged
 	private CapabilitySet _capabilities = CapabilitySet.Empty;
 
 	private int _targetRarity = 3;
+	private int? _appliedRarity;
 
 	private bool _enabled;
 
@@ -29,6 +30,7 @@ public sealed class SlotMachineControlViewModel : INotifyPropertyChanged
 	private string _status = "等待房主运行时";
 
 	private int _connectionEpoch;
+    private int _operationVersion;
 
 	public IReadOnlyList<SlotMachineRarityOption> RarityOptions { get; }
 
@@ -58,11 +60,15 @@ public sealed class SlotMachineControlViewModel : INotifyPropertyChanged
 			if (Set(ref _targetRarity, Math.Clamp(value, 1, 3), "TargetRarity"))
 			{
 				OnPropertyChanged("SelectedRarity");
+				OnPropertyChanged(nameof(TargetRarityLabel));
 			}
 		}
 	}
 
 	public string TargetRarityLabel => "目标档位 · " + SelectedRarity.Label;
+    private string AppliedRarityLabel => _appliedRarity is int rarity
+        ? "目标档位 · " + RarityOptions.First(option => option.Value == rarity).Label
+        : "目标档位待运行时确认";
 
 	public bool Enabled
 	{
@@ -72,7 +78,7 @@ public sealed class SlotMachineControlViewModel : INotifyPropertyChanged
 		}
 		private set
 		{
-			Set(ref _enabled, value, "Enabled");
+			if(Set(ref _enabled, value, "Enabled"))OnPropertyChanged(nameof(CanDisable));
 		}
 	}
 
@@ -148,6 +154,8 @@ public sealed class SlotMachineControlViewModel : INotifyPropertyChanged
 		Interlocked.Increment(ref _connectionEpoch);
 		_runtime = runtime;
 		_capabilities = capabilities;
+        _appliedRarity = null;
+        _busy = false;
 		Enabled = false;
 		Status = (capabilities.CanExecute(Capability.HostWorld) ? "房主运行时已就绪 · 尚未开启" : "仅房主或单人世界可用");
 		NotifyCommands();
@@ -159,16 +167,27 @@ public sealed class SlotMachineControlViewModel : INotifyPropertyChanged
 		Interlocked.Increment(ref _connectionEpoch);
 		_runtime = null;
 		_capabilities = CapabilitySet.Empty;
+        _appliedRarity = null;
 		_busy = false;
 		Enabled = false;
 		Status = "等待房主运行时";
 		NotifyCommands();
 	}
 
+    internal void CancelPendingOperation()
+    {
+        if (!_busy) return;
+        Interlocked.Increment(ref _connectionEpoch);
+        _busy = false;
+        NotifyCommands();
+    }
+
 	public async Task RefreshAsync()
 	{
 		IGameRuntimeClient runtime = _runtime;
 		int epoch = Volatile.Read(in _connectionEpoch);
+		int version = Volatile.Read(in _operationVersion);
+		if(_busy)return;
 		if (runtime == null || !_capabilities.CanExecute(Capability.HostWorld))
 		{
 			Status = "仅房主或单人世界可用";
@@ -178,7 +197,7 @@ public sealed class SlotMachineControlViewModel : INotifyPropertyChanged
 		try
 		{
 			RuntimeCommandResult runtimeCommandResult = await runtime.ExecuteAsync(Command("features.proofs", new { }), CancellationToken.None);
-			if (epoch != Volatile.Read(in _connectionEpoch) || runtime != _runtime)
+			if (epoch != Volatile.Read(in _connectionEpoch) || runtime != _runtime || version != Volatile.Read(in _operationVersion) || _busy)
 			{
 				return;
 			}
@@ -197,7 +216,7 @@ public sealed class SlotMachineControlViewModel : INotifyPropertyChanged
 			if (jsonElement.HasValue)
 			{
 				JsonElement valueOrDefault2 = jsonElement.GetValueOrDefault();
-				if (valueOrDefault2.TryGetProperty("state", out var value2))
+				if (valueOrDefault2.ValueKind == JsonValueKind.Object && valueOrDefault2.TryGetProperty("state", out var value2))
 				{
 					string text = value2.GetString();
 					bool enabled = ((text == "waiting" || text == "applied") ? true : false);
@@ -207,7 +226,7 @@ public sealed class SlotMachineControlViewModel : INotifyPropertyChanged
 					string status;
 					if (string.IsNullOrWhiteSpace(text2))
 					{
-						status = (Enabled ? ("已开启 · " + TargetRarityLabel + " · 优先未拥有皮肤") : "尚未开启");
+						status = (Enabled ? ("已开启 · " + AppliedRarityLabel + " · 优先未拥有皮肤") : "尚未开启");
 					}
 					else
 					{
@@ -219,14 +238,14 @@ public sealed class SlotMachineControlViewModel : INotifyPropertyChanged
 		}
 		catch (Exception ex)
 		{
-			if (epoch == Volatile.Read(in _connectionEpoch) && runtime == _runtime)
+			if (epoch == Volatile.Read(in _connectionEpoch) && runtime == _runtime && version == Volatile.Read(in _operationVersion) && !_busy)
 			{
 				Status = "读取状态失败 · " + ex.Message;
 			}
 		}
 	}
 
-	private async Task ApplyAsync()
+	internal async Task ApplyAsync()
 	{
 		if (!CanConfigure)
 		{
@@ -239,27 +258,31 @@ public sealed class SlotMachineControlViewModel : INotifyPropertyChanged
 		}
 		IGameRuntimeClient runtime = _runtime;
 		int epoch = Volatile.Read(in _connectionEpoch);
+		int requestedRarity = TargetRarity;
+		Interlocked.Increment(ref _operationVersion);
 		_busy = true;
 		NotifyCommands();
 		try
 		{
 			RuntimeCommandResult runtimeCommandResult = await runtime.ExecuteAsync(Command("fun.slot_machine.rarity", new
 			{
-				value = TargetRarity
+				value = requestedRarity
 			}), CancellationToken.None);
+            if(epoch != Volatile.Read(in _connectionEpoch) || runtime != _runtime)return;
 			if (!runtimeCommandResult.Succeeded)
 			{
 				Status = runtimeCommandResult.Message;
 				return;
 			}
+            _appliedRarity = requestedRarity;
 			RuntimeCommandResult runtimeCommandResult2 = await runtime.ExecuteAsync(Command("fishing.skin_jackpot", new
 			{
 				enabled = true
 			}), CancellationToken.None);
 			if (epoch == Volatile.Read(in _connectionEpoch) && runtime == _runtime)
 			{
-				Enabled = runtimeCommandResult2.Succeeded;
-				Status = (runtimeCommandResult2.Succeeded ? ("已开启 · " + TargetRarityLabel + " · 优先未拥有皮肤；奖池全收集后恢复原版，可能重复") : runtimeCommandResult2.Message);
+				if(runtimeCommandResult2.Succeeded)Enabled = true;
+				Status = (runtimeCommandResult2.Succeeded ? ("已开启 · " + AppliedRarityLabel + " · 优先未拥有皮肤；奖池全收集后恢复原版，可能重复") : runtimeCommandResult2.Message);
 			}
 		}
 		catch (Exception ex)
@@ -271,8 +294,7 @@ public sealed class SlotMachineControlViewModel : INotifyPropertyChanged
 		}
 		finally
 		{
-			_busy = false;
-			NotifyCommands();
+            if(epoch == Volatile.Read(in _connectionEpoch) && runtime == _runtime){_busy = false;NotifyCommands();}
 		}
 	}
 
@@ -283,6 +305,8 @@ public sealed class SlotMachineControlViewModel : INotifyPropertyChanged
 			return;
 		}
 		IGameRuntimeClient runtime = _runtime;
+		int epoch = Volatile.Read(in _connectionEpoch);
+		Interlocked.Increment(ref _operationVersion);
 		_busy = true;
 		NotifyCommands();
 		try
@@ -291,17 +315,17 @@ public sealed class SlotMachineControlViewModel : INotifyPropertyChanged
 			{
 				enabled = false
 			}), CancellationToken.None);
-			Enabled = false;
+            if(epoch != Volatile.Read(in _connectionEpoch) || runtime != _runtime)return;
+			if(runtimeCommandResult.Succeeded)Enabled = false;
 			Status = (runtimeCommandResult.Succeeded ? "已关闭 · 恢复原生老虎机结果" : runtimeCommandResult.Message);
 		}
 		catch (Exception ex)
 		{
-			Status = "关闭失败 · " + ex.Message;
+            if(epoch == Volatile.Read(in _connectionEpoch) && runtime == _runtime)Status = "关闭失败 · " + ex.Message;
 		}
 		finally
 		{
-			_busy = false;
-			NotifyCommands();
+            if(epoch == Volatile.Read(in _connectionEpoch) && runtime == _runtime){_busy = false;NotifyCommands();}
 		}
 	}
 
