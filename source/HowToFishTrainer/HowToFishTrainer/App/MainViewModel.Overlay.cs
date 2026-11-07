@@ -14,9 +14,12 @@ public sealed class OverlayShortcutViewModel
 {
     private readonly MainViewModel _owner;
     internal OverlayShortcut Reference { get; }
+    public string Kind => Reference.Kind;
     public string Title { get; }
     public string KindLabel { get; }
+    public string ActionLabel => Kind switch { "teleport" => "传送", "preset" => "恢复参数", _ => "打开设置" };
     public bool IsAvailable { get; }
+    public FeatureItemViewModel? SourceFeature { get; }
     public FeatureItemViewModel? Feature { get; }
     public ICommand ExecuteCommand { get; }
     public ICommand OpenCommand { get; }
@@ -28,6 +31,7 @@ public sealed class OverlayShortcutViewModel
     {
         _owner = owner; Reference = reference;
         var feature = owner.AllFeatures.FirstOrDefault(f => f.Descriptor.Id == reference.Key);
+        SourceFeature = reference.Kind == "feature" ? feature : null;
         var page = owner.Pages.FirstOrDefault(p => p.Category == reference.Key);
         var point = owner.TeleportPoints.FirstOrDefault(p => p.Group == reference.Group && p.Name == reference.Key);
         var preset = owner.Presets.FirstOrDefault(p => p.Name == reference.Key);
@@ -75,7 +79,7 @@ public sealed partial class MainViewModel
         }
     }
     public string OverlayPanelName { get => _overlayPanelName; set => Set(ref _overlayPanelName, value ?? ""); }
-    public string OverlayStatus { get => _overlayStatus; set => Set(ref _overlayStatus, value ?? ""); }
+    public string OverlayStatus { get => _experienceStore.Warning ?? _overlayStatus; set => Set(ref _overlayStatus, value ?? ""); }
     public string OverlayHotkey
     {
         get => _experience.OverlayHotkey;
@@ -91,8 +95,14 @@ public sealed partial class MainViewModel
     public ICommand DeleteOverlayPanelCommand => new RelayCommand(DeleteOverlayPanel);
     public ICommand AddFeatureToOverlayCommand => new RelayCommand(parameter => {
         var choice = parameter as OverlayFeatureChoice ?? SelectedOverlayFeatureChoice;
-        if (parameter is FeatureItemViewModel feature) AddOverlayReference(new("feature", feature.Descriptor.Id));
+        if (parameter is SearchHit hit) {
+            if (ResolveOverlaySearchReference(hit) is { } reference) AddOverlayReference(reference);
+        }
+        else if (parameter is FeatureItemViewModel feature) AddOverlayReference(new("feature", feature.Descriptor.Id));
         else if (choice != null) AddOverlayReference(new(choice.IsPage ? "page" : "feature", choice.Id));
+    });
+    public ICommand OpenOverlaySearchCommand => new RelayCommand(parameter => {
+        if (parameter is SearchHit hit && ResolveOverlaySearchReference(hit) is { } reference) OpenOverlayReference(reference);
     });
     public ICommand AddTeleportToOverlayCommand => new RelayCommand(parameter => {
         var point = parameter as TrainerTeleportPoint ?? SelectedTeleportPoint;
@@ -205,6 +215,18 @@ public sealed partial class MainViewModel
     {
         if (previous != null) ReplaceOverlayReference(new("teleport", previous.Name, previous.Group), new("teleport", replacement.Name, replacement.Group));
     }
+    private OverlayShortcut? ResolveOverlaySearchReference(SearchHit hit)
+    {
+        if (AllFeatures.Any(f => f.Descriptor.Id == hit.Id)) return new("feature", hit.Id);
+        var descriptor = FeatureRegistry.All.FirstOrDefault(f => f.Id == hit.Id);
+        if (descriptor != null && (TeleportCustomFeatureIds.Contains(hit.Id) || CombatCustomFeatureIds.Contains(hit.Id) ||
+            hit.Id is "fishing.skin_jackpot" or "fun.slot_machine.rarity")) {
+            string category = DisplayCategory(descriptor.Id, descriptor.Category);
+            if (Pages.Any(p => p.Category == category)) return new("page", category);
+        }
+        OverlayStatus = "该搜索结果已失效，请重新搜索";
+        return null;
+    }
     internal void OpenOverlayReference(OverlayShortcut reference)
     {
         string? category = reference.Kind switch {
@@ -231,6 +253,6 @@ public sealed partial class MainViewModel
         int version = _presetApplyVersion, epoch = _connectionEpoch, context = _positionContextEpoch;
         await operation;
         if (version == _presetApplyVersion && epoch == _connectionEpoch && context == _positionContextEpoch)
-            OverlayStatus = ExperienceStatus;
+            OverlayStatus = _experienceStatus;
     }
 }

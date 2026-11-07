@@ -8,15 +8,25 @@ AbyssalCrab Studio 是一款面向《How to Fish》的 Windows 桌面助手。�
 
 AbyssalCrab Studio is a Windows desktop assistant for *How to Fish*. It uses a WPF interface and an in-game runtime bridge for player, fishing, combat, teleport, item, and fun-event controls. The application has 11 feature categories, with search, parameter presets, favorites, recent generation settings, teleport-point management, aim-assist options, and a status widget.
 
-## 当前版本 | Current release
+## r22b 修正停用后的迟到开启 | Stop pending slot-machine operations
 
-当前分支为 **r18b 候选（2026-11-06）**：游戏悬浮控制面板共用主窗口功能、参数和执行状态；加入多套快捷面板、传送点及预设入口；高速时取消本机手持物的移动摆动。该候选只做代码与离线检查，真实游戏效果和桌面交付仍待验收。使用方法见 [功能指南](docs/FEATURES.md)，验证边界见 [验证说明](docs/VERIFICATION.md)。
+2026-11-07：紧急停用、预设切换、切换世界和退出现在先撤销老虎机尚未完成的操作，避免迟到的档位回复追加开启命令；清锁失败仍保留连接和已确认状态。悬浮窗定位复用本次读取的位置及 DPI，轮询和拖动等路径不再立即重复查询。最终包通过 432 项离线行为检查；实际热键和游戏效果仍待人工验收。
 
-Current branch: **r18b candidate (2026-11-06)**. A game panel shares main-window feature state and supports custom shortcut panels, local-player teleports and named presets. Local held-item movement bob is suppressed above the applied native speed. This is an offline-reviewed candidate; live behavior and desktop promotion remain pending. See [usage](docs/FEATURES.md) and [verification scope](docs/VERIFICATION.md).
+The r22b patch cancels pending slot-machine work through the existing stop owner before clearing or leaving the session. A delayed rarity reply cannot enqueue a later enable, and clear failures retain the connection and confirmed state. Overlay placement reuses the current event's client geometry and DPI instead of immediately querying again. The final package passed 432 offline behavior assertions; real input and gameplay still require manual acceptance.
 
-r17c 的紧急停用、队友选项和会话恢复修复继续保留，历史检查结果见 [会话恢复说明](docs/SESSION_RESTORE.md)。桌面仍使用 r17c，候选未实机验收前不替换。
+## r22 交付记录 | r22 delivery history
 
-The r17c emergency-stop, teammate-option and session-restore fixes are retained; their historical checks are in [session restoration](docs/SESSION_RESTORE.md). The desktop remains on r17c until live acceptance of this candidate.
+当前分支为 **r22 候选（2026-11-07）**。重复导入传送点保留选择与草稿；保存恢复后清除旧错误。小窗口的传送点、预设及全部功能页可滚动到操作项，长状态限制高度并保留全文提示。`Ctrl+F` 保留给面板搜索。玻璃主题、动画、共享参数与 Runtime 保留。最终包通过 240 项行为检查和 94 项界面检查，生成 95 张离屏图，绑定错误记录为空。两种包的 450 个有效文件内容一致。桌面快捷方式已按用户要求更新至 r22；真实游戏验收未进行。见 [功能指南](docs/FEATURES.md) 与 [验证说明](docs/VERIFICATION.md)。
+
+Current branch: **r22 candidate (2026-11-07)**. Duplicate teleport imports preserve selection and drafts, while successful save retries clear old warnings. Short teleport, preset and full-feature pages scroll to their controls; status height is bounded with full-text tooltips. `Ctrl+F` remains panel search. Glass styling, animation, shared parameters and Runtime are retained. The final package passed 240 behavior assertions and 94 UI checks with 95 off-screen renders and no binding errors. Both package variants contain 450 byte-identical active files. The desktop shortcut now points to r22 as requested; live-game acceptance remains pending. See [usage](docs/FEATURES.md) and [verification](docs/VERIFICATION.md).
+
+上一候选 **r21（2026-11-06）** 修正了搜索、持续功能摘要和长提示挤占小窗口操作区的问题。其最终包通过 233 项行为检查和 76 项离屏界面检查。该记录仅对应 r21，不算作 r22 的包内核验。
+
+The previous **r21 candidate (2026-11-06)** corrected search, the continuous-feature summary and long messages consuming short-window content. Its final package passed 233 behavior assertions and 76 off-screen UI checks. Those results belong to r21 and are not counted as r22 package verification.
+
+r17c 的紧急停用、队友选项和会话恢复修复继续保留，历史检查结果见 [会话恢复说明](docs/SESSION_RESTORE.md)。桌面现有快捷方式的目标、图标、空启动参数及目标文件哈希已读回核对。旧快捷方式已备份，r17c 程序保持原样供回退；更新不代表实机验收完成。
+
+The r17c emergency-stop, teammate-option and session-restore fixes are retained; their historical checks are in [session restoration](docs/SESSION_RESTORE.md). The existing shortcut's target, icon, empty launch arguments and target-file hash were read back and verified. The old shortcut is backed up and the unchanged r17c executable remains available for rollback. This update does not establish live-game acceptance.
 
 主要体验功能包括：全局搜索、最多 50 套参数预设、物品/鱼类收藏与最近配置、可导入/导出的传送标记、角色手感参数、战斗诊断、状态组件、大陀螺速度曲线和带上限的可选海鸥自动补充。完整说明见 [功能指南 | Feature guide](docs/FEATURES.md)。
 
