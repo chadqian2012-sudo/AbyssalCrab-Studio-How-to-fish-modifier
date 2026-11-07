@@ -1,70 +1,262 @@
 using System;
 using System.ComponentModel;
+using System.Diagnostics;
+using System.Linq;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Data;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 
 namespace HowToFishTrainer.App;
 
-public sealed class StatusWidget : Window, IDisposable
+public sealed partial class StatusWidget : Window, IDisposable
 {
+    private const int OverlayHotkeyId = 4740167;
+    private const double LauncherSize = 52;
     private readonly MainViewModel _vm;
     private readonly Window _main;
     private readonly Func<int?> _processId;
     private readonly DispatcherTimer _timer;
-    private bool _disposed;
     private readonly bool _preview;
-    public StatusWidget(MainViewModel vm, Window main, Func<int?> processId)
+    private readonly ScaleTransform _expandedScale = new(1, 1);
+    private nint _handle, _gameWindow;
+    private int? _gameProcess;
+    private int _expandAnimationVersion;
+    private HwndSource? _source;
+    private string? _registeredHotkey, _failedHotkey;
+    private bool _disposed, _expanded, _pointerDown, _dragged;
+    private Point _dragStart;
+    private double _dragLeft, _dragTop;
+    private UIElement? _dragElement;
+
+    public StatusWidget(MainViewModel vm, Window main, Func<int?> processId, Action<int>? openJournal = null)
     {
-        _vm=vm;_main=main;_processId=processId;DataContext=vm;
-        Width=330;SizeToContent=SizeToContent.Height;MinHeight=120;MaxHeight=300;
-        ShowInTaskbar=false;ShowActivated=false;Topmost=true;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;
-        AllowsTransparency=true;Background=Brushes.Transparent;Title="AbyssalCrab Studio · 游戏状态";
-        Left=Math.Clamp(vm.WidgetLeft,SystemParameters.VirtualScreenLeft,SystemParameters.VirtualScreenLeft+Math.Max(0,SystemParameters.VirtualScreenWidth-Width));
-        Top=Math.Clamp(vm.WidgetTop,SystemParameters.VirtualScreenTop,SystemParameters.VirtualScreenTop+Math.Max(0,SystemParameters.VirtualScreenHeight-300));
-        var border=new Border{CornerRadius=new CornerRadius(16),Padding=new Thickness(14),BorderThickness=new Thickness(1)};
-        border.SetResourceReference(Border.BackgroundProperty,"GlassCardBrush");border.SetResourceReference(Border.BorderBrushProperty,"GlassEdgeChromeBrush");
-        var panel=new StackPanel();border.Child=panel;Content=border;
-        var heading=new TextBlock{Text="AbyssalCrab Studio · 拖动移动",FontWeight=FontWeights.SemiBold,FontSize=12,Cursor=Cursors.SizeAll};
-        heading.SetResourceReference(TextBlock.ForegroundProperty,"TextBrush");heading.MouseLeftButtonDown+=(_,e)=>{if(e.LeftButton==MouseButtonState.Pressed){DragMove();vm.WidgetLeft=Left;vm.WidgetTop=Top;}};panel.Children.Add(heading);
-        AddText(panel,"ConnectionStatus",10);AddText(panel,"ActiveFeaturesText",11);AddText(panel,"ActivePresetName",10);AddText(panel,"PageTitle",10);
-        var buttons=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(0,8,0,0)};
-        var open=new Button{Content="打开面板",Padding=new Thickness(10,4,10,4)};open.Click+=(_,_)=>{main.Show();main.WindowState=WindowState.Normal;main.Activate();};buttons.Children.Add(open);
-        var hide=new Button{Content="隐藏组件",Padding=new Thickness(10,4,10,4),Margin=new Thickness(8,0,0,0)};hide.Click+=(_,_)=>vm.WidgetVisible=false;buttons.Children.Add(hide);panel.Children.Add(buttons);
-        AddText(panel,"",9,"紧急停用：Ctrl + Shift + F12");
-        _timer=new DispatcherTimer(DispatcherPriority.Background){Interval=TimeSpan.FromMilliseconds(250)};_timer.Tick+=Tick;
-        _preview=Array.Exists(Environment.GetCommandLineArgs(),arg=>arg.Equals("--ui-preview",StringComparison.OrdinalIgnoreCase));
-        _vm.PropertyChanged+=ModelChanged;
-        SyncTimer();
+        _vm = vm; _main = main; _processId = processId;
+        _preview = Environment.GetCommandLineArgs().Contains("--ui-preview", StringComparer.OrdinalIgnoreCase);
+        InitializeComponent();
+        ExpandedSurface.RenderTransformOrigin = new Point(0.5, 0.5);
+        ExpandedSurface.RenderTransform = _expandedScale;
+        DataContext = vm;
+        TrainerContent.OpenJournalRequested = tab => { SetExpanded(false, false); openJournal?.Invoke(tab); };
+        Width = Height = LauncherSize;
+        _timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(200) };
+        _timer.Tick += Tick;
+        _vm.PropertyChanged += ModelChanged;
+        _vm.OverlayNavigationRequested += Navigate;
+        KeyDown += HandleKey;
+        LostMouseCapture += HandleLostCapture;
+        new WindowInteropHelper(this).EnsureHandle();
+        SyncEnabled();
     }
-    private void ModelChanged(object? sender,PropertyChangedEventArgs args)
-    {if(args.PropertyName==nameof(MainViewModel.WidgetVisible))SyncTimer();}
-    private void SyncTimer()
+    protected override void OnSourceInitialized(EventArgs e)
     {
-        if(_disposed)return;
-        if(!_vm.WidgetVisible){_timer.Stop();if(IsVisible)Hide();return;}
-        if(!_preview)_timer.Start();
+        base.OnSourceInitialized(e);
+        _handle = new WindowInteropHelper(this).Handle;
+        _source = HwndSource.FromHwnd(_handle);
+        _source?.AddHook(WindowMessage);
+        UpdateActivationStyle();
     }
-    private static void AddText(Panel panel,string path,int size,string? literal=null)
+    private nint WindowMessage(nint hwnd, int message, nint wParam, nint lParam, ref bool handled)
     {
-        var text=new TextBlock{FontSize=size,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,6,0,0)};
-        text.SetResourceReference(TextBlock.ForegroundProperty,"MutedBrush");if(literal!=null)text.Text=literal;else text.SetBinding(TextBlock.TextProperty,new Binding(path));panel.Children.Add(text);
+        if (message == 786 && wParam == OverlayHotkeyId)
+        {
+            if (TryGameClient(out _, out _, out _) && IsRelevantForeground()) SetExpanded(!_expanded, true);
+            handled = true;
+        }
+        else if (message == 33 && !_expanded) { handled = true; return 3; }
+        return 0;
     }
-    private void Tick(object? sender,EventArgs args)
+    private void ModelChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if(_disposed)return;
-        var front=NativeOverlay.GetForegroundWindow();NativeOverlay.GetWindowThreadProcessId(front,out uint pid);
-        bool visible=_vm.WidgetVisible&&(_main.IsActive||IsActive||_processId()==pid);
-        if(visible&&!IsVisible)Show();else if(!visible&&IsVisible)Hide();
+        if (e.PropertyName == nameof(MainViewModel.WidgetVisible)) SyncEnabled();
+        else if (e.PropertyName == nameof(MainViewModel.OverlayHotkey)) { _failedHotkey = null; SyncHotkey(IsVisible && !_preview); }
     }
-    protected override void OnClosing(CancelEventArgs args)
+    private void SyncEnabled()
     {
-        // Alt+F4 hides this reusable component; only owner disposal destroys it.
-        if(!_disposed){args.Cancel=true;_vm.WidgetVisible=false;Hide();}
-        base.OnClosing(args);
+        if (_disposed) return;
+        if (!_vm.WidgetVisible) { _timer.Stop(); SyncHotkey(false); SetExpanded(false, IsActive); Hide(); }
+        else if (!_preview) { _timer.Start(); Tick(null, EventArgs.Empty); }
     }
-    public void Dispose(){if(_disposed)return;_disposed=true;_timer.Stop();_timer.Tick-=Tick;_vm.PropertyChanged-=ModelChanged;Close();}
+    private void Tick(object? sender, EventArgs e)
+    {
+        if (_disposed) return;
+        if (!_vm.WidgetVisible || !TryGameClient(out var rect, out var origin, out double scale) || !IsRelevantForeground())
+        {
+            SyncHotkey(false); SetExpanded(false, false); _dragElement?.ReleaseMouseCapture();
+            if (IsVisible) Hide();
+            return;
+        }
+        if (!IsVisible) Show();
+        PlaceInsideGame(rect, origin, scale); SyncHotkey(true);
+    }
+    private bool TryGameClient(out NativeRect rect, out NativePoint origin, out double scale)
+    {
+        rect = default; origin = default; scale = 1;
+        int? pid = _processId();
+        if (!pid.HasValue) { _gameWindow = 0; _gameProcess = null; return false; }
+        if (_gameProcess != pid) { _gameProcess = pid; _gameWindow = 0; }
+        var front = NativeOverlay.GetForegroundWindow();
+        NativeOverlay.GetWindowThreadProcessId(front, out uint frontPid);
+        if (frontPid == pid.Value) _gameWindow = front;
+        if (_gameWindow != 0)
+        {
+            NativeOverlay.GetWindowThreadProcessId(_gameWindow, out uint cachedPid);
+            if (!NativeOverlay.IsWindow(_gameWindow) || cachedPid != pid.Value) _gameWindow = 0;
+        }
+        if (_gameWindow == 0)
+        {
+            try { using var game = Process.GetProcessById(pid.Value); _gameWindow = game.MainWindowHandle; }
+            catch (ArgumentException) { return false; }
+            catch (InvalidOperationException) { return false; }
+            catch (Win32Exception) { return false; }
+        }
+        if (_gameWindow == 0 || NativeOverlay.IsIconic(_gameWindow) || !NativeOverlay.GetClientRect(_gameWindow, out rect) || rect.Right <= 0 || rect.Bottom <= 0) return false;
+        if (!NativeOverlay.ClientToScreen(_gameWindow, ref origin)) return false;
+        uint dpi = NativeOverlay.GetDpiForWindow(_gameWindow);
+        scale = dpi > 0 ? dpi / 96d : 1;
+        return true;
+    }
+    private bool IsRelevantForeground()
+    {
+        var front = NativeOverlay.GetForegroundWindow();
+        var mainHandle = new WindowInteropHelper(_main).Handle;
+        for (int depth = 0; front != 0 && depth < 12; depth++)
+        {
+            if (front == _gameWindow || front == _handle || front == mainHandle) return true;
+            front = NativeOverlay.GetWindow(front, 4);
+        }
+        return false;
+    }
+    private void PlaceInsideGame(NativeRect rect, NativePoint origin, double scale)
+    {
+        double availableWidth = rect.Right / scale, availableHeight = rect.Bottom / scale;
+        double width = _expanded ? Math.Clamp(_vm.WidgetWidth, Math.Min(600, availableWidth), availableWidth) : Math.Min(LauncherSize, availableWidth);
+        double height = _expanded ? Math.Clamp(_vm.WidgetHeight, Math.Min(380, availableHeight), availableHeight) : Math.Min(LauncherSize, availableHeight);
+        Width = width; Height = height;
+        double left = Math.Clamp(_vm.WidgetLeft, 0, Math.Max(0, availableWidth - width));
+        double top = Math.Clamp(_vm.WidgetTop, 0, Math.Max(0, availableHeight - height));
+        NativeOverlay.SetWindowPos(_handle, 0, origin.X + (int)Math.Round(left * scale), origin.Y + (int)Math.Round(top * scale), (int)Math.Round(width * scale), (int)Math.Round(height * scale), 0x0004 | 0x0010);
+    }
+    private void UpdateActivationStyle()
+    {
+        if (_handle == 0) return;
+        long style = NativeOverlay.GetWindowLongPtr(_handle, -20).ToInt64();
+        style = _expanded ? style & ~0x08000000L : style | 0x08000000L;
+        NativeOverlay.SetWindowLongPtr(_handle, -20, new IntPtr(style));
+    }
+    private void SetExpanded(bool expanded, bool returnFocus)
+    {
+        if (_expanded == expanded) return;
+        bool hasGameClient = TryGameClient(out var rect, out var origin, out double dpiScale);
+        if (expanded && !hasGameClient) { _vm.OverlayStatus = "进入游戏窗口后可展开游戏面板"; return; }
+        bool wasActive = IsActive;
+        _expanded = expanded;
+        int animationVersion = ++_expandAnimationVersion;
+        StopExpansionAnimation();
+        Launcher.Visibility = expanded ? Visibility.Collapsed : Visibility.Visible;
+        ExpandedSurface.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+        UpdateActivationStyle();
+        if (hasGameClient) PlaceInsideGame(rect, origin, dpiScale);
+        if (expanded)
+        {
+            if (!IsVisible) Show(); Activate();
+            Duration duration = TryFindResource("MotionExpand") is Duration value ? value : UiMotion.Expand;
+            if (duration.HasTimeSpan && duration.TimeSpan > TimeSpan.Zero)
+            {
+                var easing = TryFindResource("EaseEnter") as IEasingFunction;
+                var fade = new DoubleAnimation(0, 1, duration) { FillBehavior = FillBehavior.Stop, EasingFunction = easing };
+                var scale = new DoubleAnimation(0.985, 1, duration) { FillBehavior = FillBehavior.Stop, EasingFunction = easing };
+                fade.Completed += (_, _) => { if (animationVersion == _expandAnimationVersion && !_disposed) StopExpansionAnimation(); };
+                _expandedScale.BeginAnimation(ScaleTransform.ScaleXProperty, scale);
+                _expandedScale.BeginAnimation(ScaleTransform.ScaleYProperty, scale);
+                ExpandedSurface.BeginAnimation(OpacityProperty, fade);
+            }
+        }
+        else if (returnFocus && wasActive && TryGameClient(out _, out _, out _)) NativeOverlay.SetForegroundWindow(_gameWindow);
+    }
+    private void StopExpansionAnimation()
+    {
+        ExpandedSurface.BeginAnimation(OpacityProperty, null);
+        _expandedScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        _expandedScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+    }
+    private void SyncHotkey(bool enabled)
+    {
+        string requested = _vm.OverlayHotkey.Trim();
+        if (_registeredHotkey != null && (!enabled || !string.Equals(_registeredHotkey, requested, StringComparison.OrdinalIgnoreCase)))
+        { NativeHotkeys.UnregisterHotKey(_handle, OverlayHotkeyId); _registeredHotkey = null; }
+        if (!enabled) { _failedHotkey = null; return; }
+        if (_registeredHotkey != null || _failedHotkey == requested) return;
+        if (!NativeHotkeys.TryParse(requested, out uint modifiers, out uint key))
+        { _failedHotkey = requested; _vm.OverlayStatus = "快捷键无效，请填写 Home、F8 或 Ctrl+Home；Ctrl+F 用于搜索，Ctrl+Shift+F12 用于紧急停用"; return; }
+        if (!NativeHotkeys.RegisterHotKey(_handle, OverlayHotkeyId, modifiers | 0x4000u, key))
+        { _failedHotkey = requested; _vm.OverlayStatus = "快捷键已被占用，请在设置中更换；仍可点击悬浮按钮"; return; }
+        _registeredHotkey = requested;
+        _vm.OverlayStatus = requested + " 展开 / 收起 · Ctrl + Shift + F12 紧急停用";
+    }
+    private void Drag_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left || !TryGameClient(out _, out var origin, out double scale)) return;
+        _dragStart = PointToScreen(e.GetPosition(this));
+        var windowOrigin = PointToScreen(new Point());
+        _dragLeft = (windowOrigin.X - origin.X) / scale; _dragTop = (windowOrigin.Y - origin.Y) / scale;
+        _pointerDown = true; _dragged = false; _dragElement = (UIElement)sender;
+        _dragElement.CaptureMouse(); e.Handled = true;
+    }
+    private void Drag_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_pointerDown || e.LeftButton != MouseButtonState.Pressed || !TryGameClient(out var rect, out var origin, out double scale)) return;
+        Point point = PointToScreen(e.GetPosition(this));
+        double dx = (point.X - _dragStart.X) / scale, dy = (point.Y - _dragStart.Y) / scale;
+        if (!_dragged && Math.Abs(dx) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(dy) < SystemParameters.MinimumVerticalDragDistance) return;
+        _dragged = true;
+        _vm.WidgetLeft = Math.Clamp(_dragLeft + dx, 0, Math.Max(0, rect.Right / scale - Width));
+        _vm.WidgetTop = Math.Clamp(_dragTop + dy, 0, Math.Max(0, rect.Bottom / scale - Height));
+        PlaceInsideGame(rect, origin, scale); e.Handled = true;
+    }
+    private void Drag_MouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_pointerDown || e.ChangedButton != MouseButton.Left) return;
+        _pointerDown = false; _dragElement?.ReleaseMouseCapture(); _dragElement = null;
+        if (!_dragged && ReferenceEquals(sender, Launcher)) SetExpanded(true, false);
+        e.Handled = true;
+    }
+    private void HandleLostCapture(object sender, MouseEventArgs e)
+    { if (ReferenceEquals(e.OriginalSource, _dragElement)) { _pointerDown = false; _dragElement = null; } }
+    private void Resize_DragDelta(object sender, DragDeltaEventArgs e)
+    {
+        if (!_expanded || !TryGameClient(out var rect, out var origin, out double scale)) return;
+        _vm.WidgetWidth = Math.Clamp(Width + e.HorizontalChange, Math.Min(600, rect.Right / scale), rect.Right / scale);
+        _vm.WidgetHeight = Math.Clamp(Height + e.VerticalChange, Math.Min(380, rect.Bottom / scale), rect.Bottom / scale);
+        PlaceInsideGame(rect, origin, scale);
+    }
+    private void Navigate(string category) { OverlayTabs.SelectedIndex = category == "@presets" ? 3 : 1; SetExpanded(true, false); }
+    private void HandleKey(object sender, KeyEventArgs e)
+    {
+        if (e.Handled || !_expanded) return;
+        if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control) { ShowSearch(); e.Handled = true; }
+        else if (e.Key == Key.Escape) { SetExpanded(false, true); e.Handled = true; }
+    }
+    private void ShowSearch()
+    {
+        SearchArea.Visibility = Visibility.Visible;
+        FeatureSearch.Focus(); FeatureSearch.SelectAll();
+    }
+    private void Search_Click(object sender, RoutedEventArgs e) => ShowSearch();
+    private void CloseSearch_Click(object sender, RoutedEventArgs e) { SearchArea.Visibility = Visibility.Collapsed; OverlayTabs.Focus(); }
+    private void Collapse_Click(object sender, RoutedEventArgs e) => SetExpanded(false, true);
+    private void Settings_Click(object sender, RoutedEventArgs e) => OverlayTabs.SelectedIndex = 4;
+    private void TeleportPage_Click(object sender, RoutedEventArgs e) { _vm.SelectedPage = _vm.Pages.First(p => p.Category == "世界传送"); OverlayTabs.SelectedIndex = 1; }
+    protected override void OnClosing(CancelEventArgs e) { if (!_disposed) { e.Cancel = true; SetExpanded(false, true); } base.OnClosing(e); }
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true; _expandAnimationVersion++; StopExpansionAnimation(); _timer.Stop(); _timer.Tick -= Tick;
+        SyncHotkey(false); _source?.RemoveHook(WindowMessage);
+        _vm.PropertyChanged -= ModelChanged; _vm.OverlayNavigationRequested -= Navigate;
+        KeyDown -= HandleKey; LostMouseCapture -= HandleLostCapture; _dragElement?.ReleaseMouseCapture(); Close();
+    }
 }

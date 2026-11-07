@@ -3,8 +3,11 @@ using System.Windows.Input;
 
 namespace HowToFishTrainer.App;
 
-public sealed class RelayCommand(Action action) : ICommand
+public sealed class RelayCommand : ICommand
 {
+	private readonly Action<object?> _action;
+	public RelayCommand(Action action) { _action = _ => action(); }
+	public RelayCommand(Action<object?> action) { _action = action; }
 	public event EventHandler? CanExecuteChanged
 	{
 		add
@@ -22,6 +25,6 @@ public sealed class RelayCommand(Action action) : ICommand
 
 	public void Execute(object? parameter)
 	{
-		action();
+		_action(parameter);
 	}
 }

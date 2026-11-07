@@ -1,6 +1,5 @@
 using System;
 using System.ComponentModel;
-using System.IO;
 using System.Linq;
 using System.Windows;
 
@@ -9,9 +8,6 @@ public partial class MainWindow
 {
     private FishingViewModel? _fishingJournal;
     private FishingWindow? _fishingWindow;
-    private void OpenJournal_Click(object sender, RoutedEventArgs e) => OpenJournal(0);
-    private void OpenRecap_Click(object sender, RoutedEventArgs e) => OpenJournal(2);
-    private void OpenSaveBackups_Click(object sender, RoutedEventArgs e) => OpenJournal(3);
     private void OpenJournal(int tab)
     {
         bool preview = Environment.GetCommandLineArgs().Contains("--ui-preview", StringComparer.OrdinalIgnoreCase);

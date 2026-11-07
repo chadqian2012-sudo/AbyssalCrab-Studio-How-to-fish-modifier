@@ -11,7 +11,6 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Markup;
 using System.Windows.Media;
-using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using HowToFishTrainer.App.Licensing;
 using HowToFishTrainer.Core;
@@ -91,12 +90,13 @@ public partial class MainWindow : Window, IComponentConnector
 		_sponsorGate = new SponsorAccessGate(() => _license.Current);
 		_viewModel = new MainViewModel(null, _sponsorGate, (string title, string message) =>
 		{
-			MessageBox.Show(this, message, title, MessageBoxButton.OK, MessageBoxImage.Asterisk);
+			MessageBox.Show(_statusWidget?.IsActive == true ? _statusWidget : this, message, title, MessageBoxButton.OK, MessageBoxImage.Asterisk);
 		}, preferencesStore);
 		_sponsorGate.ActivationRequested += SponsorGate_ActivationRequested;
 		_license.StatusChanged += License_StatusChanged;
 		InitializeComponent();
 		DataContext = _viewModel;
+        TrainerContent.OpenJournalRequested = OpenJournal;
 		_crosshairOverlay = new CrosshairOverlay(_viewModel.Crosshair, () => _attachedProcessId, Dispatcher);
 		_viewModel.UpdateLicenseStatus(_license.Current);
         // The callback constructor starts immediately, including in preview windows.
@@ -111,28 +111,8 @@ public partial class MainWindow : Window, IComponentConnector
         InitializeExperienceUi();
 	}
 
-	// =====================================================================================
-	// 浮动选中胶囊（纯表现层）
-	//
-	// 设计约束（交接文档 §9「顶部品牌与导航」、§10.5）：
-	//   · 指示面只是装饰，真正的选中状态仍然来自 ListBox 的 SelectedItem / SelectedPage，
-	//     这里从不写 SelectedIndex，也不参与任何命令派发。
-	//   · 快速点选要"追随最新项、不排队播旧动画"。因此每次都用
-	//     BeginAnimation(prop, animation) 重新指向当前目标——WPF 默认的
-	//     HandoffBehavior.SnapshotAndReplace 会用新动画替换旧时钟，而不是排队累加。
-	//   · TopCategories 的 ItemsPanel 是 WrapPanel：窄窗口下会换成两行，
-	//     所以位移必须同时含 X 与 Y，单个横向位移表达不了跨行跳变。
-	//   · 只动 TranslateTransform 的 X/Y，不动 Width/Height/Margin，避免触发长列表重排。
-	// =====================================================================================
-
-	private bool _navCapsuleMovePending;
     private bool _appearanceClosing;
-    private int _navAnimationVersion;
 
-	private void TopCategories_SelectionChanged(object sender, SelectionChangedEventArgs e)
-	{
-		ScheduleNavCapsuleMove();
-	}
 
 	// ---- 材质强度菜单（纯外观设置） ------------------------------------------------------
 	// 三档只影响玻璃材质 token；不触碰任何功能、参数、协议或连接路径。
@@ -164,151 +144,6 @@ public partial class MainWindow : Window, IComponentConnector
 			: $"玻璃材质强度：实色 / 着色玻璃（默认）/ 通透。当前：{UiAppearance.DisplayName}。纯外观设置，不影响任何功能。";
 	}
 
-	protected override void OnRenderSizeChanged(SizeChangedInfo sizeInfo)
-	{
-		base.OnRenderSizeChanged(sizeInfo);
-		// 换行阈值跨过时（1180–1320 区间）条目会重新排布，胶囊要跟着回到新的真实位置。
-		ScheduleNavCapsuleMove();
-	}
-
-	private void ScheduleNavCapsuleMove()
-	{
-		if (_appearanceClosing || _navCapsuleMovePending)
-		{
-			return;
-		}
-		_navCapsuleMovePending = true;
-		// 等布局完成再量容器位置，否则换行后的坐标还是旧的。
-		Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
-		{
-			_navCapsuleMovePending = false;
-			if (!_appearanceClosing) MoveNavCapsule(animate: true);
-		}));
-	}
-
-	private void MoveNavCapsule(bool animate)
-	{
-		if (NavCapsule == null || TopCategories == null || TopCategories.Items.Count == 0)
-		{
-			return;
-		}
-
-		int index = TopCategories.SelectedIndex;
-		if (index < 0)
-		{
-			NavCapsule.Visibility = Visibility.Collapsed;
-			return;
-		}
-
-		if (TopCategories.ItemContainerGenerator.ContainerFromIndex(index) is not FrameworkElement container
-			|| container.ActualWidth <= 0)
-		{
-			// 容器还没生成出来（虚拟化/首次布局），下一次布局事件会再试。
-			return;
-		}
-
-		// 量到胶囊层坐标系。胶囊层与 ListBox 是同一个 Grid 的两个兄弟，尺寸一致。
-		Point origin = container.TranslatePoint(new Point(0, 0), NavCapsuleLayer);
-		double width = container.ActualWidth;
-		double height = container.ActualHeight;
-		if (width <= 0 || height <= 0)
-		{
-			return;
-		}
-
-		NavCapsule.Visibility = Visibility.Visible;
-		NavCapsule.Width = width;
-		NavCapsule.Height = height;
-
-		// 胶囊的 RenderTransform 是 TransformGroup：[ScaleTransform, TranslateTransform]。
-		// TranslateTransform 负责 X/Y 位移（基值写法与"追随最新项"策略不变），
-		// ScaleTransform 负责到位时"轻微放大到 1"的收束感。
-		if (NavCapsule.RenderTransform is not TransformGroup navTransform)
-		{
-			return;
-		}
-		TranslateTransform? transform = navTransform.Children.OfType<TranslateTransform>().FirstOrDefault();
-		if (transform == null)
-		{
-			return;
-		}
-		// 缩放中心取胶囊自身中心：宽高每帧都在变，所以每次都要跟着更新。
-		ScaleTransform? settle = navTransform.Children.OfType<ScaleTransform>().FirstOrDefault();
-		if (settle != null)
-		{
-			settle.CenterX = width / 2;
-			settle.CenterY = height / 2;
-		}
-        double currentX = transform.X;
-        double currentY = transform.Y;
-        int animationVersion = ++_navAnimationVersion;
-
-		if (!animate)
-		{
-			// 首帧直接就位，避免窗口刚显示时胶囊从左上角滑过来。
-			transform.BeginAnimation(TranslateTransform.XProperty, null);
-			transform.BeginAnimation(TranslateTransform.YProperty, null);
-			transform.X = origin.X;
-			transform.Y = origin.Y;
-			if (settle != null)
-			{
-				settle.BeginAnimation(ScaleTransform.ScaleXProperty, null);
-				settle.BeginAnimation(ScaleTransform.ScaleYProperty, null);
-				settle.ScaleX = 1;
-				settle.ScaleY = 1;
-			}
-			return;
-		}
-
-		// 先把目标写进基值，再交给动画做过渡。
-		// 这一步是必要的：动画只存在于时钟上，基值不变。一旦时钟被释放（窗口关闭的清理路径、
-		// 或任何 BeginAnimation(prop, null)），属性会回落到基值——不写基值的话胶囊会弹回初始位置。
-		// Capture the current animated position before updating the base target; an
-        // explicit From also makes the first selection animate instead of jumping.
-		transform.X = origin.X;
-		transform.Y = origin.Y;
-
-		Duration duration = TryFindResource("MotionSelect") as Duration? ?? new Duration(TimeSpan.FromMilliseconds(250));
-		IEasingFunction easing = TryFindResource("EaseSelect") as IEasingFunction
-			?? new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.18 };
-
-        var xAnimation = new DoubleAnimation(currentX, origin.X, duration) { EasingFunction = easing, FillBehavior = FillBehavior.Stop };
-        var yAnimation = new DoubleAnimation(currentY, origin.Y, duration) { EasingFunction = easing, FillBehavior = FillBehavior.Stop };
-        xAnimation.Completed += (_, _) =>
-        {
-            if (!_appearanceClosing && animationVersion == _navAnimationVersion)
-                transform.BeginAnimation(TranslateTransform.XProperty, null);
-        };
-        yAnimation.Completed += (_, _) =>
-        {
-            if (!_appearanceClosing && animationVersion == _navAnimationVersion)
-                transform.BeginAnimation(TranslateTransform.YProperty, null);
-        };
-        transform.BeginAnimation(TranslateTransform.XProperty, xAnimation);
-        transform.BeginAnimation(TranslateTransform.YProperty, yAnimation);
-
-		// 收束：从 0.97 轻微放大到 1，复用同一个 MotionSelect / EaseSelect（BackEase 带一点点过冲）。
-		// 与位移用同一套保护：新动画直接替换旧时钟（不排队），结束后按版本号释放时钟，且只在最新一次里释放。
-		if (settle != null)
-		{
-			settle.ScaleX = 1;
-			settle.ScaleY = 1;
-			var scaleXAnimation = new DoubleAnimation(0.97, 1, duration) { EasingFunction = easing, FillBehavior = FillBehavior.Stop };
-			var scaleYAnimation = new DoubleAnimation(0.97, 1, duration) { EasingFunction = easing, FillBehavior = FillBehavior.Stop };
-			scaleXAnimation.Completed += (_, _) =>
-			{
-				if (!_appearanceClosing && animationVersion == _navAnimationVersion)
-					settle.BeginAnimation(ScaleTransform.ScaleXProperty, null);
-			};
-			scaleYAnimation.Completed += (_, _) =>
-			{
-				if (!_appearanceClosing && animationVersion == _navAnimationVersion)
-					settle.BeginAnimation(ScaleTransform.ScaleYProperty, null);
-			};
-			settle.BeginAnimation(ScaleTransform.ScaleXProperty, scaleXAnimation);
-			settle.BeginAnimation(ScaleTransform.ScaleYProperty, scaleYAnimation);
-		}
-	}
 
 	public void ApplyLicenseStatus(LicenseStatus status)
 	{
@@ -410,8 +245,6 @@ public partial class MainWindow : Window, IComponentConnector
 		{
 			_viewModel.ModeStatus = "紧急停用快捷键 Ctrl+Shift+F12 注册失败";
 		}
-		// 浮动胶囊首帧直接就位，不让它从画布左上角滑过来。
-		Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() => MoveNavCapsule(animate: false)));
 		// 材质菜单勾选状态要与启动时实际生效的档位一致。
 		Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(SyncMaterialMenu));
 	}

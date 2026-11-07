@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net8.0-windows7.0</TargetFramework><UseWPF>true</UseWPF><OutputType>Exe</OutputType><LangVersion>12</LangVersion><Nullable>enable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup><Compile Include="../OverlayUiVerification.cs"/><Reference Include="HowToFishTrainer"><HintPath>../../source/HowToFishTrainer/bin/Release/net8.0-windows7.0/HowToFishTrainer.dll</HintPath></Reference><Reference Include="HowToFishTrainer.Core"><HintPath>../../patched/HowToFishTrainer.Core.dll</HintPath></Reference><Reference Include="HowToFishTrainer.Memory"><HintPath>../../references/HowToFishTrainer.Memory.dll</HintPath></Reference></ItemGroup>
+</Project>
