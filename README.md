@@ -8,7 +8,13 @@ AbyssalCrab Studio 是一款面向《How to Fish》的 Windows 桌面助手。�
 
 AbyssalCrab Studio is a Windows desktop assistant for *How to Fish*. It uses a WPF interface and an in-game runtime bridge for player, fishing, combat, teleport, item, and fun-event controls. The application has 11 feature categories, with search, parameter presets, favorites, recent generation settings, teleport-point management, aim-assist options, and a status widget.
 
-## 当前版本 | Current release
+## r22b 修正停用后的迟到开启 | Stop pending slot-machine operations
+
+2026-11-07：紧急停用、预设切换、切换世界和退出现在先撤销老虎机尚未完成的操作，避免迟到的档位回复追加开启命令；清锁失败仍保留连接和已确认状态。悬浮窗定位复用本次读取的位置及 DPI，轮询和拖动等路径不再立即重复查询。最终包通过 432 项离线行为检查；实际热键和游戏效果仍待人工验收。
+
+The r22b patch cancels pending slot-machine work through the existing stop owner before clearing or leaving the session. A delayed rarity reply cannot enqueue a later enable, and clear failures retain the connection and confirmed state. Overlay placement reuses the current event's client geometry and DPI instead of immediately querying again. The final package passed 432 offline behavior assertions; real input and gameplay still require manual acceptance.
+
+## r22 交付记录 | r22 delivery history
 
 当前分支为 **r22 候选（2026-11-07）**。重复导入传送点保留选择与草稿；保存恢复后清除旧错误。小窗口的传送点、预设及全部功能页可滚动到操作项，长状态限制高度并保留全文提示。`Ctrl+F` 保留给面板搜索。玻璃主题、动画、共享参数与 Runtime 保留。最终包通过 240 项行为检查和 94 项界面检查，生成 95 张离屏图，绑定错误记录为空。两种包的 450 个有效文件内容一致。桌面快捷方式已按用户要求更新至 r22；真实游戏验收未进行。见 [功能指南](docs/FEATURES.md) 与 [验证说明](docs/VERIFICATION.md)。
 

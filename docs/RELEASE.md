@@ -1,5 +1,11 @@
 # 发布说明 | Release Notes
 
+## r22b 修复停用后重新开启 | r22b pending-operation fix
+
+2026-11-07：修复老虎机档位回执迟到时可能越过紧急停用继续开启的问题；普通参数预设、切世界及退出也使用同一取消入口。停用失败时仍能手动重试。悬浮窗复用本次事件的游戏窗口位置和 DPI，减少重复读取。Runtime 与 r22 相同。最终离线行为检查 432 项通过；真实游戏验收仍待完成，原有 60 项 TODO 不勾选。
+
+Cancels pending slot-machine work before emergency stop, parameter presets, world changes or closing; failed clears still allow manual retry. Overlay placement reuses current event geometry/DPI. Runtime is unchanged from r22. All 432 final-package offline behavior assertions passed; the 60 manual/game acceptance items remain open.
+
 ## r22 已完成离线交付并更新桌面 | r22 delivered with desktop update
 
 2026-11-07：r22 修正小窗口传送点、预设和全部功能页面、搜索热键冲突、重复导入取消选择，以及保存恢复后残留错误提示。沿用玻璃主题、共享参数和现有 Runtime。交付包含默认单文件版、压缩单文件版、对应源码、验证记录及人工验收清单。最终包通过 240 项行为检查和 94 项界面检查，两包的 450 个有效文件内容一致。
