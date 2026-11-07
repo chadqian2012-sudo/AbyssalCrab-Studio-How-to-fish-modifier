@@ -80,6 +80,8 @@ sealed class DelayedAimRuntime : IGameRuntimeClient
 static class PreferencesVerification
 {
     static readonly List<string> Checks = new();
+    static string IsolatedRoot = "";
+    static MainViewModel CreateModel(IUserPreferencesStore preferencesStore) => new(preferencesStore: preferencesStore, experiencePath: Path.Combine(IsolatedRoot, Guid.NewGuid().ToString("N"), "experience.json"));
     static void Check(bool ok, string name) { if(!ok) throw new Exception("FAILED: "+name); Checks.Add(name); }
     static void Pump(int milliseconds = 0)
     {
@@ -137,7 +139,7 @@ static class PreferencesVerification
         }
         MainViewModel Connected(TrainerUserPreferences p,out PreferencesRuntime runtime,out CountingPreferencesStore store)
         {
-            store=new CountingPreferencesStore{Json=p.ToJson()};var vm=new MainViewModel(preferencesStore:store);
+            store=new CountingPreferencesStore{Json=p.ToJson()};var vm=CreateModel(preferencesStore:store);
             runtime=new PreferencesRuntime();vm.Connect(runtime,caps);Pump(10);return vm;
         }
         bool Successful(MainViewModel vm)=>vm.ExperienceStatus.Contains("已恢复")&&!vm.ExperienceStatus.Contains("失败");
@@ -150,13 +152,13 @@ static class PreferencesVerification
                 &&!c.FeatureId.StartsWith("players.",StringComparison.Ordinal)),
                 "Last-session replay sends no generation, teleport, currency, animal-event or member mutation commands: "+string.Join(",",runtime.Commands.Select(c=>c.FeatureId)));
         }
-        var legacy=new MainViewModel(preferencesStore:new CountingPreferencesStore());
+        var legacy=CreateModel(preferencesStore:new CountingPreferencesStore());
         var legacyRuntime=new PreferencesRuntime();legacy.Connect(legacyRuntime,caps);Pump(10);
         Check(!legacy.CanRestoreLastSession,"Legacy preferences have no session snapshot to restore");
         AwaitSession(legacy.RestoreLastSessionAsync());Check(Writable(legacyRuntime).Length==0,"Restoring a missing snapshot sends no mutation");CloseSession(legacy);
 
         var seed=Saved();string original=seed.ToJson();var store=new CountingPreferencesStore{Json=original};
-        var restored=new MainViewModel(preferencesStore:store);
+        var restored=CreateModel(preferencesStore:store);
         Check(!restored.CanRestoreLastSession&&!restored.AimAssist.Enabled&&!restored.Crosshair.Enabled,"A stored session starts offline with continuous features disabled");
         var runtime=new PreferencesRuntime();restored.Connect(runtime,caps);Pump(10);
         Check(restored.CanRestoreLastSession&&Writable(runtime).Length==0,"Connecting only enables the restore button, without replaying saved commands");
@@ -186,7 +188,7 @@ static class PreferencesVerification
 
         foreach(bool disconnect in new[]{false,true})
         {
-            var captureStore=new CountingPreferencesStore();var source=new MainViewModel(preferencesStore:captureStore);var live=new PreferencesRuntime();source.Connect(live,caps);Pump(10);
+            var captureStore=new CountingPreferencesStore();var source=CreateModel(preferencesStore:captureStore);var live=new PreferencesRuntime();source.Connect(live,caps);Pump(10);
             Feature(source,"player.health.lock").Enabled=true;Feature(source,"combat.silent_aim");Feature(source,"player.fullness.lock").Enabled=true;source.Crosshair.Enabled=true;source.AutoRefill=true;source.TrackDeathPosition=true;
             if(disconnect)source.Disconnect();
             CloseSession(source);var captured=TrainerUserPreferences.Parse(captureStore.Json);
@@ -268,11 +270,71 @@ static class PreferencesVerification
             "Applying a normal parameter preset does not replay its captured continuous switches");CloseSession(preset);
         var copy=seed.Copy();copy.Session.Put("toggle:player.health.lock",false);
         Check(seed.Session.Boolean("toggle:player.health.lock")==true&&TrainerUserPreferences.Parse(seed.ToJson()).Session.Boolean("snapshot")==true,"Session dictionaries are copied deeply and round-trip under schema version one");
+        foreach (string transition in new[] { "emergency", "failed clear", "throwing clear", "world", "close", "preset" })
+        {
+            var savedSlot = Saved(false); savedSlot.Session.Put("slotMachine", true);
+            var vm = Connected(savedSlot, out var heldRuntime, out _);
+            var slot = vm.FunEventsPage.SlotMachine;
+            vm.PresetName = "Clear slot"; vm.SavePresetCommand.Execute(null);
+            bool alreadyEnabled = transition == "failed clear";
+            if (alreadyEnabled) AwaitSession((Task)Invoke(slot, "ApplyAsync"));
+            heldRuntime.HoldFeature = "fun.slot_machine.rarity";
+            Task apply = transition == "preset" || alreadyEnabled ? (Task)Invoke(slot, "ApplyAsync") : vm.RestoreLastSessionAsync();
+            Pump();
+            Check(!apply.IsCompleted && heldRuntime.Pending.Count == 1, "Slot rarity write is pending before " + transition);
+            heldRuntime.HoldFeature = "locks.disable_all";
+            Task clear = Task.CompletedTask;
+            if (transition == "world") vm.ResetWorldContext();
+            else if (transition == "close") CloseSession(vm);
+            else if (transition == "preset") clear = vm.ApplySelectedPresetAsync();
+            else
+            {
+                if (transition == "throwing clear") heldRuntime.ThrowFeature = "locks.disable_all";
+                clear = vm.EmergencyDisableAsync();
+            }
+            if (transition is "emergency" or "failed clear" or "preset")
+                Check(!clear.IsCompleted && heldRuntime.Pending.Count == 2, "The clear request is in flight before the rarity reply: " + transition);
+            int sent = heldRuntime.Commands.Count;
+            heldRuntime.Complete(); AwaitSession(apply);
+            Check(!heldRuntime.Commands.Skip(sent).Any(c => c.FeatureId == "fishing.skin_jackpot" && c.Arguments.GetProperty("enabled").GetBoolean()),
+                "A delayed rarity reply cannot send a jackpot enable after " + transition);
+            if (!clear.IsCompleted) heldRuntime.Complete(transition != "failed clear");
+            AwaitSession(clear);
+            if (transition != "close")
+            {
+                Check(slot.Enabled == alreadyEnabled && slot.CanConfigure && !vm.PresetBusy, "Available slot controls retain the last confirmed switch state after " + transition);
+                if (transition is "failed clear" or "throwing clear")
+                {
+                    Check(vm.ModeStatus.Contains("失败"), "The failed emergency clear remains visible: " + transition);
+                    AwaitSession((Task)Invoke(slot, "ApplyAsync"));
+                    Check(slot.Enabled, "Manual slot activation can be retried after " + transition);
+                }
+                CloseSession(vm);
+            }
+        }
+        {
+            var closing=Connected(Saved(),out var pendingRuntime,out var closingStore);
+            AwaitSession(closing.RestoreLastSessionAsync());closing.FlushPreferences();
+            Check(TrainerUserPreferences.Parse(closingStore.Json).Session.Boolean("toggle:player.health.lock")==true,
+                "Emergency-close fixture starts with saved enabled switches");
+            pendingRuntime.HoldFeature="locks.disable_all";var stop=closing.EmergencyDisableAsync();Pump();
+            Check(!stop.IsCompleted,"Emergency-close fixture waits for the actual clear receipt");
+            CloseSession(closing);var stopped=TrainerUserPreferences.Parse(closingStore.Json);
+            Check(stopped.Session.Boolean("toggle:player.health.lock")==false&&stopped.Session.Boolean("toggle:player.fullness.lock")==false
+                &&new[]{"aimAssist","crosshair","combatFeedback","slotMachine","roulette","autoRefill"}.All(k=>stopped.Session.Boolean(k)==false),
+                "Closing during emergency clear saves revoked intents for every stopped owner");
+            Check(stopped.Session.Boolean("trackDeathPosition")==true,"Emergency stop retains unrelated saved observation preferences");
+            pendingRuntime.Complete();AwaitSession(stop);
+            var next=Connected(stopped,out var nextRuntime,out _);AwaitSession(next.RestoreLastSessionAsync());
+            Check(!Feature(next,"player.health.lock").Enabled&&!next.AimAssist.Enabled&&!next.FunEventsPage.Roulette.Active,
+                "Explicit restoration after emergency close does not re-enable revoked switches");CloseSession(next);
+        }
     }
 
     [STAThread] public static int Main(string[] args)
     {
         string root=args[0],recovery=args[1];
+        IsolatedRoot = Path.Combine(root, "verification", "preferences-experience-" + Guid.NewGuid().ToString("N"));
         AssemblyLoadContext.Default.Resolving+=(ctx,name)=> {string path=Path.Combine(recovery,"extracted",name.Name+".dll");return File.Exists(path)?ctx.LoadFromAssemblyPath(path):null;};
         if(Environment.GetEnvironmentVariable("ABYSS_SESSION_ONLY")=="1")
         {
@@ -290,7 +352,7 @@ static class PreferencesVerification
         Directory.CreateDirectory(temporary);
         string path=Path.Combine(temporary,"user-preferences.json");
         var store=new FileUserPreferencesStore(path);
-        var vm=new MainViewModel(preferencesStore:store);
+        var vm=CreateModel(preferencesStore:store);
         Check(!File.Exists(path),"first launch is read only");
         var numericIds=FeatureRegistry.All.Where(f=>f.Control==FeatureControl.Number && f.Id!="world.island.load" && f.Id!="fun.slot_machine.rarity").Select(f=>f.Id).ToArray();
         var expected=new Dictionary<string,double>();
@@ -344,7 +406,7 @@ static class PreferencesVerification
         Check(File.Exists(path),"close flushes preferences");
         string saved=File.ReadAllText(path);
         Check(!saved.Contains("\"enabled\"",StringComparison.OrdinalIgnoreCase)&&!saved.Contains("playerKey"),"snapshot excludes activation/session state");
-        var restored=new MainViewModel(preferencesStore:new FileUserPreferencesStore(path));
+        var restored=CreateModel(preferencesStore:new FileUserPreferencesStore(path));
         Check(restored.SelectedPage.Category=="钓鱼"&&!restored.SoundEnabled,"page and sound restored");
         foreach(var pair in expected)
         {
@@ -386,30 +448,30 @@ static class PreferencesVerification
         Check(reconnectRuntime.Commands.Any(c=>c.FeatureId=="player.spin.lock"&&c.Arguments.GetProperty("enabled").GetBoolean()&&c.Arguments.GetProperty("rotationsPerSecond").GetDouble()==7.25),"manual spin activation uses restored decimal speed");
         spin.Enabled=false;Pump();restored.ClosePreferences();
 
-        var missing=new MainViewModel(preferencesStore:new FileUserPreferencesStore(path));
+        var missing=CreateModel(preferencesStore:new FileUserPreferencesStore(path));
         var missingRuntime=new PreferencesRuntime {MissingItem=true};missing.Connect(missingRuntime,caps);Pump();
         var unavailable=Feature(missing,"generation.item");int before=missingRuntime.Commands.Count;
         unavailable.ExecuteCommand.Execute(null);Pump();
         Check(unavailable.SelectedOption==null&&missingRuntime.Commands.Count==before&&unavailable.Status.Contains("重新选择"),"missing saved catalog ID blocks unintended substitute generation");
         missing.SoundEnabled=false;missing.ClosePreferences();
-        var recoveredCatalog=new MainViewModel(preferencesStore:new FileUserPreferencesStore(path));
+        var recoveredCatalog=CreateModel(preferencesStore:new FileUserPreferencesStore(path));
         recoveredCatalog.Connect(new PreferencesRuntime(),caps);Pump();
         Check(Feature(recoveredCatalog,"generation.item").SelectedOption?.Id==11,"unavailable selection remains remembered for later catalog recovery");
         recoveredCatalog.ClosePreferences();
 
-        var missingAttachment=new MainViewModel(preferencesStore:new FileUserPreferencesStore(path));
+        var missingAttachment=CreateModel(preferencesStore:new FileUserPreferencesStore(path));
         var missingAttachmentRuntime=new PreferencesRuntime {MissingSight=true};missingAttachment.Connect(missingAttachmentRuntime,caps);Pump();
         var incomplete=Feature(missingAttachment,"generation.item");before=missingAttachmentRuntime.Commands.Count;
         incomplete.ExecuteCommand.Execute(null);Pump();
         Check(incomplete.SelectedOption?.Id==11&&incomplete.SelectedSight==null&&missingAttachmentRuntime.Commands.Count==before,"missing attachment blocks silent fallback to default");
         missingAttachment.SoundEnabled=true;missingAttachment.ClosePreferences();
-        var attachmentRecovery=new MainViewModel(preferencesStore:new FileUserPreferencesStore(path));attachmentRecovery.Connect(new PreferencesRuntime(),caps);Pump();
+        var attachmentRecovery=CreateModel(preferencesStore:new FileUserPreferencesStore(path));attachmentRecovery.Connect(new PreferencesRuntime(),caps);Pump();
         Check(Feature(attachmentRecovery,"generation.item").SelectedSight?.Id=="scope","missing attachment ID survives save for future recovery");attachmentRecovery.ClosePreferences();
 
         // Real bindings can send transient nulls while ItemsSource changes. Preserve pending IDs offline.
         if(!codeOnly){
         app!.Resources=(ResourceDictionary)Application.LoadComponent(new Uri("/HowToFishTrainer;component/themes/theme.xaml",UriKind.Relative));
-        var boundVm=new MainViewModel(preferencesStore:new FileUserPreferencesStore(path));Feature(boundVm,"generation.item");
+        var boundVm=CreateModel(preferencesStore:new FileUserPreferencesStore(path));Feature(boundVm,"generation.item");
         using var license=new HowToFishTrainer.App.Licensing.LicenseService(temporary,"1.1.37");
         var window=new MainWindow(license) {DataContext=boundVm,ShowActivated=false,ShowInTaskbar=false,IsHitTestVisible=false,Left=-20000,Top=-20000};
         ((DispatcherTimer)typeof(MainWindow).GetField("_timer",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(window)!).Stop();
@@ -422,7 +484,7 @@ static class PreferencesVerification
         pointNameEditor.Text="last keystroke without blur";
         Check(boundVm.PointName=="last keystroke without blur","point name commits each keystroke without losing focus");
         boundVm.ClosePreferences();window.Close();
-        var nameRestored=new MainViewModel(preferencesStore:new FileUserPreferencesStore(path));
+        var nameRestored=CreateModel(preferencesStore:new FileUserPreferencesStore(path));
         Check(nameRestored.PointName=="last keystroke without blur","last focused text edit survives close");nameRestored.ClosePreferences();
         var productionStore=new CountingPreferencesStore();
         var productionWindow=new MainWindow(license,productionStore) {ShowActivated=false,ShowInTaskbar=false,IsHitTestVisible=false,Left=-20000,Top=-20000};
@@ -435,17 +497,17 @@ static class PreferencesVerification
         }
 
         var malformed=TrainerUserPreferences.Parse("{\"schemaVersion\":1,\"general\":{\"soundEnabled\":false},\"aimAssist\":{\"strength\":\"bad\",\"angle\":99,\"distance\":45.25},\"features\":{\"player.spin.lock\":{\"spinSpeed\":99},\"invalid\":5},\"crosshair\":{\"size\":-5,\"color\":\"unknown\"}}");
-        var partial=new MainViewModel(preferencesStore:new CountingPreferencesStore {Json=malformed.ToJson()});
+        var partial=CreateModel(preferencesStore:new CountingPreferencesStore {Json=malformed.ToJson()});
         Check(!partial.SoundEnabled&&partial.AimAssist.Strength==60&&partial.AimAssist.AcquireAngle==8&&partial.AimAssist.MaximumDistance==45.25,"bad individual fields do not discard valid neighbors");
         Check(Feature(partial,"player.spin.lock").SpinSpeedText=="4"&&partial.Crosshair.Size==16&&partial.Crosshair.Color=="白色","corrupt range/choice falls back without clamping");partial.ClosePreferences();
-        var counter=new CountingPreferencesStore();var delayed=new MainViewModel(preferencesStore:counter);
+        var counter=new CountingPreferencesStore();var delayed=CreateModel(preferencesStore:counter);
         delayed.PointName="a";Pump(80);delayed.PointName="ab";Pump(80);delayed.PointName="abc";
         Check(counter.Saves==0,"autosave debounces quick edits");Pump(570);
         Check(counter.Saves==1&&TrainerUserPreferences.Parse(counter.Json).Teleport.Text("pointName")=="abc","autosave fires after 500 ms idle");
         delayed.PointName="close immediately";delayed.ClosePreferences();
         Check(counter.Saves==2&&TrainerUserPreferences.Parse(counter.Json).Teleport.Text("pointName")=="close immediately","close flushes before debounce deadline");
         delayed.PointName="after close";Pump(550);Check(counter.Saves==2,"close detaches observers and stops timer");
-        var failure=new CountingPreferencesStore {Fail=true};var failing=new MainViewModel(preferencesStore:failure);failing.SoundEnabled=false;
+        var failure=new CountingPreferencesStore {Fail=true};var failing=CreateModel(preferencesStore:failure);failing.SoundEnabled=false;
         Check(!failing.FlushPreferences()&&failing.ModeStatus.Contains("参数保存失败"),"write failure is visible and nonfatal");failure.Fail=false;
         Check(failing.FlushPreferences()&&failure.Saves==1&&!failing.ModeStatus.Contains("参数保存失败"),"dirty state can retry after write failure");failing.ClosePreferences();
 
@@ -483,7 +545,7 @@ static class PreferencesVerification
         Check(!headRuntime.Commands.Last().Arguments.GetProperty("leadEnabled").GetBoolean(),"lead changes during pending apply queue latest configuration");
         headRuntime.Complete();Pump();head.Disconnect();
         var legacyAimStore=new CountingPreferencesStore{Json="{\"schemaVersion\":1,\"aimAssist\":{\"trigger\":\"always\"}}"};
-        var migratedAim=new MainViewModel(preferencesStore:legacyAimStore);
+        var migratedAim=CreateModel(preferencesStore:legacyAimStore);
         Check(migratedAim.AimAssist.SelectedTrigger.Value=="ads"&&migratedAim.AimAssist.TriggerModes.Count==1&&!migratedAim.AimAssist.Enabled,"legacy always preference migrates to ADS-only without activation");migratedAim.ClosePreferences();
         string json=JsonSerializer.Serialize(new{passed=true,checks=Checks.Count,failures=0,tests=Checks,test_directory=temporary,game_writes_performed=false,fixture_only=true,code_only=codeOnly,ui_bindings_tested=!codeOnly,assembly_sha256=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(typeof(MainViewModel).Assembly.Location))).ToLowerInvariant()},new JsonSerializerOptions{WriteIndented=true});
         File.WriteAllText(Path.Combine(root,"verification",codeOnly?"function-audit/preferences-results.json":"preferences-results.json"),json);

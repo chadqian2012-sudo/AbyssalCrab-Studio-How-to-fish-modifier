@@ -2,6 +2,8 @@ namespace HowToFishTrainer.App;
 
 public sealed record FeatureToggleState(bool Enabled, string Status, string StateLabel, bool IsSuccessful)
 {
+    public bool IsBusy { get; init; }
+    public bool MagicTargetTeammates { get; init; }
     public string SpinSpeedText { get; init; } = "4";
     public double AppliedSpinSpeed { get; init; } = 4d;
     public bool SpinAutoJump { get; init; }

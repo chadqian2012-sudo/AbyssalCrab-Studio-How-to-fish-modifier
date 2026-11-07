@@ -113,7 +113,7 @@ public sealed partial class MainViewModel
             members.DropScope = Scope("dropScope", members.DropScope); members.RareScope = Scope("rareScope", members.RareScope);
             members.SearchText = m.Text("search") ?? members.SearchText;
             SelectedPage = Pages.FirstOrDefault(page => page.Category == p.General.Text("page")) ?? SelectedPage;
-            RefreshFeatures();
+            RebuildFeatureModels();
             // Session switch intentions are restored only by an explicit user command.
     }
 
@@ -138,7 +138,7 @@ public sealed partial class MainViewModel
     private void CaptureFeatureParameters()
     {
         if (_restoringPreferences) return;
-        foreach (var feature in Features)
+        foreach (var feature in AllFeatures)
         {
             _preferences.Features[feature.Descriptor.Id] = feature.CaptureParameters();
             _parameterDrafts[feature.Descriptor.Id] = feature.CaptureParameterDrafts();

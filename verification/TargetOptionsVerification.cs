@@ -15,9 +15,13 @@ sealed class OptionsRuntime : IGameRuntimeClient
 {
     public readonly List<FeatureCommand> Commands = new();
     public bool Reject, Throw;
+    public TaskCompletionSource<RuntimeCommandResult>? PendingMagic;
+    public TaskCompletionSource<RuntimeCommandResult>? PendingProof;
     public ValueTask<RuntimeCommandResult> ExecuteAsync(FeatureCommand command, CancellationToken token)
     {
         Commands.Add(command);
+        if (command.FeatureId == "combat.silent_aim" && PendingMagic != null) return new(PendingMagic.Task);
+        if (command.FeatureId == "features.proofs" && PendingProof != null) return new(PendingProof.Task);
         if (Throw && command.FeatureId.StartsWith("combat.")) throw new IOException("fixture disconnected");
         object data = command.FeatureId switch {
             "catalog.items" => new { items = Array.Empty<object>() },
@@ -108,13 +112,81 @@ static class TargetOptionsVerification
         var legacy=new MainViewModel(preferencesStore:new OptionsStore(),experiencePath:Path.Combine(args[0],"experience-c.json"));
         Check(!legacy.AimAssist.TargetTeammates && !Magic(legacy).MagicTargetTeammates, "Missing legacy fields default to exclude teammates"); legacy.ClosePreferences();
 
+        foreach (bool throws in new[]{false,true})
+        {
+            var delayed=new OptionsRuntime();var preferences=new OptionsStore();
+            var paging=new MainViewModel(preferencesStore:preferences,experiencePath:Path.Combine(args[0],"paging-"+throws+".json"));
+            paging.Connect(delayed,caps);Pump();var oldCard=Magic(paging);
+            oldCard.Enabled=true;oldCard.MagicTargetTeammates=true;Pump();
+            delayed.PendingMagic=new();oldCard.MagicTargetTeammates=false;
+            paging.SelectedPage=paging.Pages.First(p=>p!=paging.SelectedPage);
+            var currentCard=Magic(paging);currentCard.MagicDistanceInput.Text="bad";
+            bool remainedBusy=currentCard.IsBusy&&!currentCard.CanInteract;
+            if(throws)delayed.PendingMagic.SetException(new IOException("delayed rejection"));
+            else delayed.PendingMagic.SetResult(new RuntimeCommandResult(false,"delayed rejection",null,null,false));
+            delayed.PendingMagic=null;Pump();
+            Check(currentCard.MagicTargetTeammates&&!currentCard.IsBusy&&currentCard.CanInteract,
+                "Delayed failure restores the confirmed teammate selection on the current card: "+throws);
+            Check(remainedBusy,"Page rebuild keeps pending magic operation unavailable: "+throws);
+            Check(currentCard.MagicDistanceInput.Text=="bad","Rollback preserves a newer numeric draft: "+throws);
+            currentCard.MagicTargetTeammates=false;Pump();
+            Check(!Team(delayed.Last("combat.silent_aim")),"Unchecking after failed page transition still sends false: "+throws);
+            currentCard.Enabled=false;currentCard.MagicTargetTeammates=true;Pump();
+            paging.SelectedPage=paging.Pages.First(p=>p!=paging.SelectedPage);
+            Check(Magic(paging).MagicTargetTeammates,"An off-state selection for the next enable survives rebuilding: "+throws);
+            paging.CloseExperience();paging.ClosePreferences();
+        }
+
+        {
+            var delayed=new OptionsRuntime();var preferences=new OptionsStore();
+            var paging=new MainViewModel(preferencesStore:preferences,experiencePath:Path.Combine(args[0],"away.json"));
+            paging.Connect(delayed,caps);Pump();var oldCard=Magic(paging);oldCard.Enabled=true;oldCard.MagicTargetTeammates=true;
+            delayed.PendingMagic=new();oldCard.MagicTargetTeammates=false;
+            paging.SelectedPage=paging.Pages.First(p=>p!=paging.SelectedPage);
+            delayed.PendingMagic.SetResult(new RuntimeCommandResult(false,"delayed rejection",null,null,false));delayed.PendingMagic=null;Pump();
+            paging.CloseExperience();paging.ClosePreferences();
+            Check(TrainerUserPreferences.Parse(preferences.Json).Features["combat.silent_aim"].Boolean("targetTeammates")==true,
+                "Rollback while its category is hidden updates the parameter file before close");
+        }
+
+        {
+            var delayed=new OptionsRuntime();var paging=new MainViewModel(preferencesStore:new OptionsStore(),experiencePath:Path.Combine(args[0],"proof.json"));
+            paging.Connect(delayed,caps);Pump();var cardBefore=Magic(paging);cardBefore.Enabled=true;cardBefore.MagicTargetTeammates=true;
+            delayed.PendingProof=new();var proof=paging.RefreshRuntimeProofsAsync();
+            delayed.PendingMagic=new();cardBefore.MagicTargetTeammates=false;
+            var data=JsonSerializer.SerializeToElement(new[]{new{featureId="combat.silent_aim",state="applied",reason="old proof"}});
+            delayed.PendingProof.SetResult(new RuntimeCommandResult(true,"old proof",data,data,false));delayed.PendingProof=null;Pump();
+            paging.SelectedPage=paging.Pages.First(p=>p!=paging.SelectedPage);var pendingCard=Magic(paging);
+            Check(proof.IsCompleted&&pendingCard.IsBusy&&!pendingCard.CanInteract,"A proof reply cannot finish a pending teammate operation after rebuilding");
+            delayed.PendingMagic.SetResult(new RuntimeCommandResult(true,"applied",null,null,false));delayed.PendingMagic=null;Pump();
+            Check(!pendingCard.IsBusy&&!pendingCard.MagicTargetTeammates&&pendingCard.CanInteract,"Only the actual operation reply releases the new card");
+            paging.CloseExperience();paging.ClosePreferences();
+        }
+
+        foreach(bool throws in new[]{false,true})
+        {
+            var first=new OptionsRuntime();var paging=new MainViewModel(preferencesStore:new OptionsStore(),experiencePath:Path.Combine(args[0],"reconnect-"+throws+".json"));
+            paging.Connect(first,caps);Pump();var firstCard=Magic(paging);firstCard.Enabled=true;firstCard.MagicTargetTeammates=true;
+            paging.SuspendConnection();var replay=new TaskCompletionSource<RuntimeCommandResult>();var delayed=new OptionsRuntime{PendingMagic=replay};
+            paging.Connect(delayed,caps);Pump();var currentCard=Magic(paging);
+            delayed.PendingMagic=new();currentCard.MagicTargetTeammates=false;
+            if(throws)replay.SetException(new IOException("old reconnect failure"));
+            else replay.SetResult(new RuntimeCommandResult(true,"old reconnect reply",null,null,false));Pump();
+            paging.SelectedPage=paging.Pages.First(p=>p!=paging.SelectedPage);currentCard=Magic(paging);
+            Check(currentCard.IsBusy&&!currentCard.CanInteract,"An older reconnect reply cannot release a newer teammate request: "+throws);
+            delayed.PendingMagic.SetResult(new RuntimeCommandResult(true,"applied",null,null,false));delayed.PendingMagic=null;Pump();
+            Check(currentCard.Enabled&&!currentCard.IsBusy&&!currentCard.MagicTargetTeammates,"The latest teammate result survives an older reconnect reply: "+throws);
+            paging.CloseExperience();paging.ClosePreferences();
+        }
+
         double radius; bool shortForm;
         Check(MagicRangePolicy.Project(30,90,2000,1000,out radius,out shortForm) && Math.Abs(radius-288.6751346)<.0001 && !shortForm, "Circle projection matches perspective half-angle math");
         MagicRangePolicy.Project(8,60,1920,1080,out double hip,out _); MagicRangePolicy.Project(8,30,1920,1080,out double ads,out _);
         Check(ads>hip*2 && ads<hip*2.2, "ADS narrower FOV expands the projected circle");
         Check(MagicRangePolicy.Project(180,60,1920,1080,out radius,out shortForm)&&shortForm&&radius==1080*.46, "Full-sphere angle uses explicit abbreviated view");
         Check(!MagicRangePolicy.Project(double.NaN,60,1920,1080,out _,out _)&&!MagicRangePolicy.Project(8,0,1920,1080,out _,out _)&&!MagicRangePolicy.Project(8,60,0,1080,out _,out _), "Invalid camera inputs hide range drawing");
-        File.WriteAllText(Path.Combine(args[0],"results.json"),JsonSerializer.Serialize(new{passed=true,checks=Checks.Count,tests=Checks,fixtureOnly=true,gameInjected=false},new JsonSerializerOptions{WriteIndented=true}));
+        File.WriteAllText(Path.Combine(args[0],"results.json"),JsonSerializer.Serialize(new{passed=true,checks=Checks.Count,tests=Checks,fixtureOnly=true,gameInjected=false,
+            applicationSha256=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(typeof(MainViewModel).Assembly.Location))).ToLowerInvariant()},new JsonSerializerOptions{WriteIndented=true}));
         Console.WriteLine("Target options verification: "+Checks.Count+" checks passed"); return 0;
     }
 }

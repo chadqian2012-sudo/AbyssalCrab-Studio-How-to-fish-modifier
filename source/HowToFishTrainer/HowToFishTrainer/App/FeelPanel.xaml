@@ -24,7 +24,12 @@
       <TextBlock Text="角色手感与常用参数" FontSize="17" FontWeight="SemiBold"/>
       <TextBlock Text="拖动滑块或输入小数，点击应用后生效。重置只恢复输入默认值。" Style="{StaticResource Muted}" FontSize="10" Margin="0,4,0,10"/>
       <ItemsControl ItemsSource="{Binding FeelFeatures}">
-        <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="3"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+        <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid>
+          <UniformGrid.Style><Style TargetType="UniformGrid">
+            <Setter Property="Columns" Value="3"/>
+            <Style.Triggers><DataTrigger Binding="{Binding IsCompact, RelativeSource={RelativeSource AncestorType={x:Type app:TrainerContentView}}}" Value="True"><Setter Property="Columns" Value="1"/></DataTrigger></Style.Triggers>
+          </Style></UniformGrid.Style>
+        </UniformGrid></ItemsPanelTemplate></ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate>
           <DataTemplate>
             <Border Background="{DynamicResource FieldBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="12" Padding="11" Margin="0,0,10,6">

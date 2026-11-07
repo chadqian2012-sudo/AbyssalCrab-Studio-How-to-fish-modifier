@@ -1,5 +1,19 @@
 # 恢复上次会话 / Restore last session
 
+## 退出与切换分类时的错误已修复（2026-11-04）
+
+r17c 修复紧急停用等待结果时退出，仍保存停用前开关的问题。现在会先撤销这些开关的下次恢复意图；只有游戏确认停用后才显示成功。
+
+魔法子弹取消“锁定队友”后切换分类，若请求失败，当前卡片和保存文件都会恢复已确认的选择。请求未结束时，切换分类不能绕过等待状态。旧的重连或状态读取结果也不能提前解开当前操作。数字草稿和关闭状态下为下次开启选择的参数继续保留。
+
+实际打包程序的 8 组离线检查共 551 项全部通过，比 r16b 新增 28 项。默认版与压缩版内容一致；界面资源、游戏内 Runtime 和 Harmony 与 r16b 一致。旧版反例失败，修复后的相同场景通过。
+
+游戏内效果和人工界面验收仍未完成，原有 55 项待办没有勾选。优先实测：紧急停用后快速退出、取消锁队友后切换分类、恢复会话后的两个独立队友选项，以及追踪范围圈。
+
+In r17c, emergency stop revokes saved switch intentions before awaiting the game response, so closing immediately cannot preserve an obsolete enable request. Success still requires an actual receipt. Magic-bullet teammate selection and busy state survive page rebuilding; rejection or exceptions restore the confirmed selection without overwriting numeric drafts. Older reconnect and proof replies cannot release a newer operation. A redundant toggle notification was removed from the trigger-mode editor.
+
+All 551 offline assertions passed against the final packaged assemblies, with 28 checks added since r16b. Default and compressed payloads match. UI resources, Runtime and Harmony are unchanged from r16b. Live gameplay and manual UI verification remain pending across the existing 55-task ledger.
+
 连接游戏世界后，在“预设与快捷入口”中点击“恢复上次会话”。新版至少连接一次并正常退出后才有开关快照；旧版没有记录的开关不能追溯。启动及连接均保持功能关闭，普通“恢复参数”预设的行为不变。
 
 参数仍保存到现有 `user-preferences.json`，使用稳定功能 ID 和参数名。新增的 `session` 字段保存持续开关意图，不保存运行时成员 ID。参数变化合并保存，断开及关闭清理前保留快照，启动时另取独立副本，避免本次编辑或自动保存污染上次会话。

@@ -187,6 +187,22 @@ static class PresetBoundaryVerification
                 &&vm.ModeStatus=="fixture current connection"&&currentRuntime.Commands.Count==sent,
                 "A late old emergency success cannot disable a new manual toggle or change the new connection");Close(vm);
         }
+        foreach(bool emergency in new[]{false,true})
+        {
+            var r=new PresetBoundaryRuntime{HoldFeature="combat.silent_aim"};var vm=Create(r);
+            var descriptor=FeatureRegistry.Find("combat.silent_aim")!;
+            vm.SelectedPage=vm.Pages.Single(p=>p.Category==MainViewModel.DisplayCategory(descriptor.Id,descriptor.Category));
+            var old=vm.Features.Single(f=>f.Descriptor.Id==descriptor.Id);old.Enabled=true;Pump();
+            Check(old.IsBusy,"Cancellation fixture holds an ordinary toggle request: "+emergency);
+            var clear=new TaskCompletionSource<RuntimeCommandResult>();r.Clears.Enqueue(clear);
+            Select(vm,"clear rejected",51);var pending=emergency?Emergency(vm,r):vm.ApplySelectedPresetAsync();
+            clear.SetResult(PresetBoundaryRuntime.Result(false));Pump();
+            var current=vm.Features.Single(f=>f.Descriptor.Id==descriptor.Id);
+            Check(pending.IsCompleted&&!current.IsBusy&&current.CanInteract,
+                "A rejected clear releases obsolete feature busy states: "+emergency);
+            r.Pending.Dequeue().SetResult(PresetBoundaryRuntime.Result());Pump();
+            Check(!current.IsBusy&&current.CanInteract,"An obsolete toggle result cannot leave controls busy: "+emergency);Close(vm);
+        }
         File.WriteAllText(Path.Combine(Root,"results.json"),JsonSerializer.Serialize(new{passed=Failed.Count==0,checks=Passed.Count+Failed.Count,passedChecks=Passed,failedChecks=Failed,
             fixtureOnly=true,gameInjected=false,applicationSha256=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(typeof(MainViewModel).Assembly.Location))).ToLowerInvariant()},new JsonSerializerOptions{WriteIndented=true}));
         Console.WriteLine($"Preset boundaries: {Passed.Count} passed, {Failed.Count} failed");foreach(var f in Failed)Console.WriteLine("FAILED: "+f);return Failed.Count==0?0:1;
