@@ -174,6 +174,14 @@ public sealed class SlotMachineControlViewModel : INotifyPropertyChanged
 		NotifyCommands();
 	}
 
+    internal void CancelPendingOperation()
+    {
+        if (!_busy) return;
+        Interlocked.Increment(ref _connectionEpoch);
+        _busy = false;
+        NotifyCommands();
+    }
+
 	public async Task RefreshAsync()
 	{
 		IGameRuntimeClient runtime = _runtime;

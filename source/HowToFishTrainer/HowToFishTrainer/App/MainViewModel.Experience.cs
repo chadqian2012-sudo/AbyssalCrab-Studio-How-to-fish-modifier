@@ -88,7 +88,7 @@ public sealed partial class MainViewModel
     public ObservableCollection<ParameterPreset> Presets { get; } = new();
     public ParameterPreset? SelectedPreset { get => _selectedPreset; set => Set(ref _selectedPreset,value); }
     public string PresetName { get => _presetName; set => Set(ref _presetName,value ?? ""); }
-    public string ExperienceStatus { get => _experienceStatus; private set => Set(ref _experienceStatus,value); }
+    public string ExperienceStatus { get => _experienceStore.Warning ?? _experienceStatus; private set => Set(ref _experienceStatus,value); }
     public bool PresetBusy { get => _presetBusy; private set { if(Set(ref _presetBusy,value)){OnPropertyChanged(nameof(CanRestoreLastSession));OnPropertyChanged(nameof(CanEditParameters));OnPropertyChanged(nameof(CanPositionAction));OnPropertyChanged(nameof(CanLoadSelectedIsland));foreach(var f in AllFeatures)f.RefreshExperienceAvailability();} } }
     public bool CanEditParameters => !PresetBusy;
     private int _presetApplyVersion;
@@ -189,7 +189,6 @@ public sealed partial class MainViewModel
         FunEventsPage.CleanupRequested+=()=>AutoRefill=false;
         AimAssist.PropertyChanged+=(_,e)=>{if(e.PropertyName==nameof(AimAssist.Enabled)){if(DiagnosticOnly&&AimAssist.Enabled)AimAssist.Enabled=false; OnPropertyChanged(nameof(ActiveFeaturesText));}};
         Crosshair.PropertyChanged+=(_,e)=>{if(e.PropertyName==nameof(Crosshair.Enabled))OnPropertyChanged(nameof(ActiveFeaturesText));};
-        if(_experienceStore.Warning!=null)ExperienceStatus=_experienceStore.Warning;
         foreach(var feature in AllFeatures)AttachExperience(feature);
     }
     private void AttachExperience(FeatureItemViewModel feature)
@@ -210,7 +209,8 @@ public sealed partial class MainViewModel
     {
         _experienceSaveTimer?.Stop(); if(!_experienceDirty)return true;
         try{_experienceStore.Save(_experience);_experienceDirty=false;return true;}
-        catch(Exception e){ExperienceStatus="体验设置保存失败 · "+e.Message;return false;}
+        catch(Exception){return false;}
+        finally{OnPropertyChanged(nameof(ExperienceStatus));OnPropertyChanged(nameof(OverlayStatus));}
     }
     public void CloseExperience(){if(_closedExperience)return;if(_runtime!=null){_preferencesDirty=true;FlushPreferences();}InvalidatePresetApply();StopExperienceAutomation();FlushExperience();_closedExperience=true;OnPropertyChanged(nameof(CanRestoreLastSession)); if(_experienceSaveTimer!=null){_experienceSaveTimer.Stop();_experienceSaveTimer.Tick-=SaveExperienceTick;}}
     private void SavePreset()
@@ -221,7 +221,7 @@ public sealed partial class MainViewModel
         if(old==null&&Presets.Count>=50){ExperienceStatus="最多保存 50 套预设";return;}
         var preset=new ParameterPreset(name,CapturePreferences().ToJson());
         if(old!=null){ReplaceOverlayReference(new("preset",old.Name),new("preset",name));_experience.Presets.Remove(old);Presets.Remove(old);}
-        _experience.Presets.Add(preset);Presets.Add(preset);SelectedPreset=preset;ActivePresetName=name;ScheduleExperienceSave();RefreshOverlayItems();ExperienceStatus="预设已保存 · "+name;
+        _experience.Presets.Add(preset);Presets.Add(preset);SelectedPreset=preset;ActivePresetName=name;ScheduleExperienceSave();ExperienceStatus="预设已保存 · "+name;
     }
     public Task ApplySelectedPresetAsync() => ApplySavedPreferencesAsync(SelectedPreset?.Parameters, SelectedPreset?.Name ?? "", false);
     private async Task ApplySavedPreferencesAsync(string? json, string name, bool restoreSession)
@@ -367,7 +367,7 @@ public sealed partial class MainViewModel
             staged.Add(new(group,name,x,y,z));imported++;
             if(e.TryGetProperty("decoration",out var meta)&&meta.ValueKind==JsonValueKind.Object){var d=JsonSerializer.Deserialize<PointDecoration>(meta.GetRawText());if(d!=null&&d.Note?.Length<=500&&PointColors.Contains(d.Color)&&PointIcons.Contains(d.Icon))decorations.Add(d with{Group=group,Name=name});}
         }
-        _settings.Save(staged);TeleportPoints.Clear();foreach(var p in staged)TeleportPoints.Add(p);_experience.Points=decorations;ScheduleExperienceSave();PointMetadataChanged();RefreshTeleportGroups();RefreshTeleportFilter();PositionStatus=$"已导入 {imported} 个新坐标，同名坐标保留原值";return imported;
+        _settings.Save(staged);foreach(var p in staged.Skip(staged.Count-imported))TeleportPoints.Add(p);_experience.Points=decorations;ScheduleExperienceSave();PointMetadataChanged();RefreshTeleportGroups();RefreshTeleportFilter();PositionStatus=$"已导入 {imported} 个新坐标，同名坐标保留原值";return imported;
     }
     private async Task RememberSafePositionAsync()
     {
@@ -376,7 +376,19 @@ public sealed partial class MainViewModel
             if(result.Succeeded&&result.Applied is JsonElement p&&p.ValueKind==JsonValueKind.Object){double x=p.GetProperty("x").GetDouble(),y=p.GetProperty("y").GetDouble(),z=p.GetProperty("z").GetDouble();if(!new[]{x,y,z}.All(d=>double.IsFinite(d)&&Math.Abs(d)<=100000))throw new InvalidDataException("位置无效");_safePosition=new("临时","本次安全位置",x,y,z);PositionStatus="本机安全位置已记录，仅在当前世界有效";}else PositionStatus=result.Message;
         }catch(Exception e){if(IsCurrentPositionContext(runtime,epoch,context))PositionStatus="记录安全位置失败 · "+e.Message;}
     }
-    internal void StopExperienceAutomation(){AutoRefill=false;CombatFeedback.ResetSession();_autoGeneration++;_experienceWorkVersion++;_experienceWorkBusy=false;_spinStopVersion++;_spinStopPending=false;_spinWasEnabled=false;_curveAppliedSpeed=null;}
+    internal void StopExperienceAutomation()
+    {
+        FunEventsPage.SlotMachine.CancelPendingOperation();
+        AutoRefill = false;
+        CombatFeedback.ResetSession();
+        _autoGeneration++;
+        _experienceWorkVersion++;
+        _experienceWorkBusy = false;
+        _spinStopVersion++;
+        _spinStopPending = false;
+        _spinWasEnabled = false;
+        _curveAppliedSpeed = null;
+    }
     private void ResetPendingSessionWork(){_positionContextEpoch++;_islandLoadBusy=false;Volatile.Write(ref _proofRefreshBusy,0);_positionActionBusy=false;_deathSampleBusy=false;OnPropertyChanged(nameof(CanPositionAction));OnPropertyChanged(nameof(CanLoadSelectedIsland));}
     internal void ResetExperienceWorld(){InvalidatePresetApply();StopExperienceAutomation();CombatFeedback.ResetSession();ResetPendingSessionWork();_safePosition=null;_lastLivingPosition=_deathPosition=null;_lastSampleAlive=false;TrackDeathPosition=false;DeathPositionStatus="世界已切换，临时位置已清空";CombatDiagnostics="世界已切换，等待读取新会话";}
     public void UpdateExperienceSession(JsonElement? raw)

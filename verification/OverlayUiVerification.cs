@@ -26,9 +26,11 @@ sealed class OverlayUiPreferenceStore : IUserPreferencesStore
 sealed class OverlayUiRuntime : IGameRuntimeClient
 {
     public readonly List<string> Calls = new();
+    public TaskCompletionSource<RuntimeCommandResult>? PendingClear;
     public ValueTask<RuntimeCommandResult> ExecuteAsync(FeatureCommand command, CancellationToken token)
     {
         Calls.Add(command.FeatureId);
+        if (command.FeatureId == "locks.disable_all" && PendingClear != null) return new(PendingClear.Task);
         object result = new { applied = true };
         if (command.FeatureId == "catalog.items") result = new { items = new object[] {
             new { id = 11, name = "测试步枪", fish = false, kind = "枪械", weapon = new { damage = 9 }, attachments = new { sights = new[] { new { id = "scope", name = "瞄准镜" } }, barrels = Array.Empty<object>(), ammo = Array.Empty<object>(), extendedMag = true, laser = true }, skins = Array.Empty<object>() },
@@ -197,11 +199,29 @@ static class OverlayUiVerification
         vm.OverlayPanelName = "排版检查 · " + new string('长', 30); vm.CreateOverlayPanelCommand.Execute(null); tabs.SelectedIndex = 0;
         Render(content, Path.Combine(output, "empty-panel-620.png"), 620, 680);
         Check(Find<TextBlock>(content).Any(t => t.Text == "把常用操作放在这里" && t.ActualHeight > 0) && Find<Button>(content).Any(b => Equals(b.Content, "添加快捷项") && b.ActualHeight > 0), "Empty shortcut panel shows its explanation and add action at 620");
-        var longPoint = new TrainerTeleportPoint("排版检查", "海岸营地 · " + new string('长', 40), 1, 2, 3);
+        var longPoint = new TrainerTeleportPoint(new string('组', 80), new string('长', 80), 1, 2, 3);
         vm.TeleportPoints.Add(longPoint); vm.AddTeleportToOverlayCommand.Execute(longPoint);
         Render(content, Path.Combine(output, "long-shortcut-620.png"), 620, 680);
         var longTitle = Find<TextBlock>(content).Single(t => t.Text == longPoint.Name);
         Check(longTitle.ActualHeight >= longTitle.FontSize * 2 && longTitle.ActualWidth < 620, "Long shortcut title wraps inside the 620 panel");
+        tabs.SelectedIndex = 2;
+        Render(content, Path.Combine(output, "long-teleport-620.png"), 620, 680);
+        var pointName = Find<TextBlock>(content).Single(t => t.Text == longPoint.Name);
+        var pointGroup = Find<TextBlock>(content).Single(t => t.Text == longPoint.Group);
+        var pointButton = Find<Button>(content).Single(b => ReferenceEquals(b.DataContext, longPoint) && Equals(b.Content, "传送"));
+        Check(pointName.ActualHeight >= pointName.FontSize * 2 && pointGroup.ActualHeight >= pointGroup.FontSize * 2 &&
+            Equals(pointName.ToolTip, longPoint.Name) && Equals(pointGroup.ToolTip, longPoint.Group) &&
+            pointName.TranslatePoint(new Point(pointName.ActualWidth, 0), content).X <= pointButton.TranslatePoint(new Point(), content).X &&
+            pointButton.TranslatePoint(new Point(pointButton.ActualWidth, 0), content).X < 620,
+            "620 saved-point list wraps full 80-character names and groups beside a reachable action");
+        vm.PresetName = new string('预', 40); vm.SavePresetCommand.Execute(null); tabs.SelectedIndex = 3;
+        Render(content, Path.Combine(output, "long-preset-620.png"), 620, 680);
+        var presetName = Find<TextBlock>(content).Single(t => t.Text == vm.PresetName);
+        var presetButton = Find<Button>(content).Single(b => ReferenceEquals(b.DataContext, vm.SelectedPreset) && Equals(b.Content, "恢复参数"));
+        Check(presetName.ActualHeight >= presetName.FontSize * 2 && Equals(presetName.ToolTip, vm.PresetName) &&
+            presetName.TranslatePoint(new Point(presetName.ActualWidth, 0), content).X <= presetButton.TranslatePoint(new Point(), content).X &&
+            presetButton.TranslatePoint(new Point(presetButton.ActualWidth, 0), content).X < 620,
+            "620 preset list wraps a full 40-character name beside a reachable restore action");
         vm.SelectedOverlayPanel = populatedPanel; tabs.SelectedIndex = 1;
         vm.SelectedPage = vm.Pages.First(p => p.Category == "鱼类生成");
         Render(content, Path.Combine(output, "fish-overlay.png"));
@@ -212,17 +232,264 @@ static class OverlayUiVerification
         fishRadio.IsChecked = true; Pump();
         var fishOwner = (FeatureItemViewModel)fishRadio.DataContext;
         Check(fishOwner.DeadFish && !fishOwner.AliveFish && Find<RadioButton>(secondView).First(r => Equals(r.Content, "死鱼")).IsChecked == true, "Fish selection is synchronized without cross-view radio grouping");
+        int callsBeforeSearch = runtime.Calls.Count;
+        vm.OverlayPanelName = "搜索快捷检查"; vm.CreateOverlayPanelCommand.Execute(null); tabs.SelectedIndex = 0;
+        Render(content, Path.Combine(output, "search-closed-620.png"), 620, 680);
+        var searchArea = (FrameworkElement)overlay.FindName("SearchArea");
+        var featureSearch = (TextBox)overlay.FindName("FeatureSearch");
+        var featureSearchResults = (ComboBox)overlay.FindName("FeatureSearchResults");
+        var searchHint = (TextBlock)overlay.FindName("SearchHint");
+        var mainExperienceBar = Find<ExperienceBar>(secondView).Single();
+        var mainFeatureSearch = (TextBox)mainExperienceBar.FindName("FeatureSearch");
+        var mainExperienceExpander = Find<Expander>(mainExperienceBar).Single();
+        var activeSummary = (Expander)overlay.FindName("ActiveSummary");
+        double closedSearchHeight = tabs.ActualHeight;
+        Check(searchArea.Visibility == Visibility.Collapsed && !activeSummary.IsExpanded, "Search and active-feature details start collapsed");
+        Find<Button>(content).Single(b => Equals(b.Content, "搜索")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        vm.SelectedOverlayFeatureChoice = vm.OverlayFeatureChoices.Single(choice => choice.Id == "player.health.lock");
+        featureSearch.Text = "移动"; Pump();
+        var searchHit = vm.SearchResults.Single(hit => hit.Id == "player.move.multiplier");
+        featureSearchResults.SelectedItem = searchHit;
+        Render(content, Path.Combine(output, "search-results-620.png"), 620, 680);
+        Check(searchArea.Visibility == Visibility.Visible && featureSearch.ActualWidth > 100 && Equals(featureSearchResults.SelectedItem, searchHit) &&
+            vm.FeatureQuery == "移动" && featureSearch.Text == "移动" && mainFeatureSearch.Text == "移动",
+            "Header search opens a usable 620-wide search field with the shared selected result");
+        Check(searchHint.Text == "从列表选择结果，可打开分类或加入当前面板。", "Matching search explains how to select a result");
+        var addSearch = Find<Button>(searchArea).Single(b => Equals(b.Content, "加入面板"));
+        addSearch.Command!.Execute(addSearch.CommandParameter); Pump();
+        Check(vm.SelectedOverlayPanel!.Items.Count == 1 && ReferenceEquals(vm.SelectedOverlayPanel.Items.Single().Feature, feature),
+            "Search add action reuses the existing feature owner in the selected shortcut panel");
+        var openSearch = Find<Button>(searchArea).Single(b => Equals(b.Content, "打开分类"));
+        openSearch.Command!.Execute(openSearch.CommandParameter); Pump();
+        Check(tabs.SelectedIndex == 1 && vm.SelectedPage.Category == "玩家" && ReferenceEquals(vm.AllFeatures.Single(f => f.Descriptor.Id == searchHit.Id), feature),
+            "Search open action selects the full-feature tab without replacing the shared feature");
+        mainExperienceExpander.IsExpanded = true;
+        Render(secondView, Path.Combine(output, "search-main-results.png"), 1400, 800);
+        foreach (var editor in new[] { featureSearch, mainFeatureSearch })
+        foreach (string query in new[] { "", "no-matching-feature-78364" })
+        {
+            editor.Text = "移动"; Pump(); featureSearchResults.SelectedItem = searchHit; Pump();
+            editor.Text = query; Pump();
+            string source = ReferenceEquals(editor, featureSearch) ? "overlay" : "main";
+            Render(content, Path.Combine(output, (source == "main" ? "main-input-" : "") + (query.Length == 0 ? "search-cleared-620.png" : "search-no-results-620.png")), 620, 680);
+            Check(vm.FeatureQuery == query && featureSearch.Text == query && mainFeatureSearch.Text == query,
+                "Editing " + source + " selected search preserves both inputs: expected=" + JsonSerializer.Serialize(query) +
+                ", model=" + JsonSerializer.Serialize(vm.FeatureQuery) + ", overlay=" + JsonSerializer.Serialize(featureSearch.Text) +
+                ", main=" + JsonSerializer.Serialize(mainFeatureSearch.Text));
+            Check(vm.SelectedSearchHit == null && !openSearch.IsEnabled && !addSearch.IsEnabled && vm.SelectedOverlayPanel!.Items.Count == 1 && vm.SelectedOverlayFeatureChoice?.Id == "player.health.lock",
+                (query.Length == 0 ? "Clearing " : "Unmatched ") + source + " search clears selection and disables both actions without adding the settings-page selection");
+            Check(searchHint.Text == (query.Length == 0 ? "输入功能名称、说明、分类或 ID 开始搜索。" : "没有匹配的功能，请换个关键词。"),
+                source + " search distinguishes an empty query from no matching result");
+        }
+        mainExperienceExpander.IsExpanded = false;
+        tabs.SelectedIndex = 0;
+        Find<Button>(searchArea).Single(b => Equals(b.ToolTip, "收起搜索")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Render(content, Path.Combine(output, "search-hidden-620.png"), 620, 680);
+        Check(searchArea.Visibility == Visibility.Collapsed && Math.Abs(tabs.ActualHeight - closedSearchHeight) < 1,
+            "Closing search returns its vertical space to the tab content");
+        activeSummary.IsExpanded = true;
+        Render(content, Path.Combine(output, "active-summary-620.png"), 620, 680);
+        Check(vm.ActiveFeaturesText == "持续功能均已关闭" && Find<TextBlock>(activeSummary).Any(t => t.Text == vm.ActiveFeaturesText && t.ActualHeight > 0),
+            "Expanded active-feature summary displays the shared all-disabled state");
+        Check(runtime.Calls.Count == callsBeforeSearch, "Searching, adding a shortcut, opening its page and expanding the summary dispatch no runtime commands");
+        activeSummary.IsExpanded = false; vm.SelectedOverlayPanel = populatedPanel;
         var writes = runtime.Calls.Skip(callsBeforeRender).Where(id => !new[] { "players.catalog", "players.inspect", "catalog.items", "catalog.islands", "features.proofs", "fun.event.catalog", "fun.event.availability", "casino.status" }.Contains(id)).ToArray();
         Check(writes.Length == 0, "Building and navigating overlay sends no gameplay write commands");
+        vm.SelectedPage = vm.Pages.First(p => p.Category == "玩家");
+        feature.ValueInput.Text = "2.75";
+        vm.PresetName = "输入锁定检查"; vm.SavePresetCommand.Execute(null);
+        tabs.SelectedIndex = 0;
+        Render(content, Path.Combine(output, "preset-editors-ready.png"), 620, 680);
+        Render(secondView, Path.Combine(output, "preset-main-ready.png"), 1400, 800);
+        var shortcutEditor = Find<TextBox>(Find<NumericInputBox>(content).Single(n => ReferenceEquals(n.Input, feature.ValueInput))).Single();
+        var mainEditor = Find<TextBox>(Find<NumericInputBox>(secondView).Single(n => ReferenceEquals(n.Input, feature.ValueInput))).Single();
+        Check(shortcutEditor.IsEnabled && mainEditor.IsEnabled, "Shortcut and full-page inputs are editable before preset loading");
+        var clear = new TaskCompletionSource<RuntimeCommandResult>(); runtime.PendingClear = clear;
+        var loading = vm.LoadOverlayPresetAsync("输入锁定检查"); Pump();
+        Check(vm.PresetBusy && !loading.IsCompleted && !shortcutEditor.IsEnabled && !mainEditor.IsEnabled,
+            "Pending preset clear disables both views of the shared numeric input");
+        Render(content, Path.Combine(output, "preset-busy-620.png"), 620, 680);
+        var presetActions = Find<Button>(content).Where(b => b.DataContext is OverlayShortcutViewModel { Kind: "preset" } && Equals(b.Content, "恢复参数")).ToArray();
+        Check(presetActions.Length > 0 && presetActions.All(b => !b.IsEnabled) && Find<TextBlock>(content).Any(t => t.DataContext is OverlayShortcutViewModel { Kind: "preset" } && t.Text == "正在处理参数，请稍候"),
+            "Pending preset loading disables shortcut restore actions and explains the busy state");
+        runtime.PendingClear = null;
+        var cleared = JsonSerializer.SerializeToElement(new { applied = true });
+        clear.SetResult(new RuntimeCommandResult(true, "fixture clear", cleared, cleared, false)); Pump();
+        Render(content, Path.Combine(output, "preset-editors-restored.png"), 620, 680);
+        Render(secondView, Path.Combine(output, "preset-main-restored.png"), 1400, 800);
+        feature = vm.AllFeatures.Single(f => f.Descriptor.Id == "player.move.multiplier");
+        shortcutEditor = Find<TextBox>(Find<NumericInputBox>(content).Single(n => ReferenceEquals(n.Input, feature.ValueInput))).Single();
+        mainEditor = Find<TextBox>(Find<NumericInputBox>(secondView).Single(n => ReferenceEquals(n.Input, feature.ValueInput))).Single();
+        Check(loading.IsCompletedSuccessfully && !vm.PresetBusy && shortcutEditor.IsEnabled && mainEditor.IsEnabled && feature.ValueInput.Text == "2.75",
+            "Completed preset loading restores both editors with the saved value");
+        clear = new TaskCompletionSource<RuntimeCommandResult>(); runtime.PendingClear = clear;
+        loading = vm.LoadOverlayPresetAsync("输入锁定检查"); Pump();
+        vm.ResetWorldContext();
+        Render(content, Path.Combine(output, "preset-cancelled-editors.png"), 620, 680);
+        Render(secondView, Path.Combine(output, "preset-cancelled-main.png"), 1400, 800);
+        feature = vm.AllFeatures.Single(f => f.Descriptor.Id == "player.move.multiplier");
+        shortcutEditor = Find<TextBox>(Find<NumericInputBox>(content).Single(n => ReferenceEquals(n.Input, feature.ValueInput))).Single();
+        mainEditor = Find<TextBox>(Find<NumericInputBox>(secondView).Single(n => ReferenceEquals(n.Input, feature.ValueInput))).Single();
+        Check(!loading.IsCompleted && !vm.PresetBusy && shortcutEditor.IsEnabled && mainEditor.IsEnabled,
+            "World change restores both editors before the cancelled preset reply arrives");
+        shortcutEditor.Text = "-"; Pump();
+        runtime.PendingClear = null;
+        clear.SetResult(new RuntimeCommandResult(true, "late fixture clear", cleared, cleared, false)); Pump();
+        Check(loading.IsCompletedSuccessfully && shortcutEditor.Text == "-" && mainEditor.Text == "-" && feature.ValueInput.Text == "-" && feature.ValueInput.LastValidValue == 2.75,
+            "Late cancelled preset reply preserves the new shared unfinished numeric draft");
         var nativeKeys = typeof(StatusWidget).Assembly.GetType("HowToFishTrainer.App.NativeHotkeys")!;
         var parse = nativeKeys.GetMethod("TryParse", BindingFlags.Static | BindingFlags.NonPublic)!;
         bool Parses(string key) { object[] parameters = { key, 0u, 0u }; return (bool)parse.Invoke(null, parameters)!; }
-        Check(Parses("Home") && Parses("F8") && Parses("Ctrl+Home"), "Supported hotkey strings parse");
-        Check(!Parses("Ctrl+Shift+F12") && !Parses("Ctrl+Ctrl+Home") && !Parses("Escape") && !Parses("Ctrl++Home") && !Parses("74"), "Reserved and invalid hotkeys are rejected");
+        Check(Parses("Home") && Parses("F8") && Parses("Ctrl+Home") && Parses("OemComma"), "Supported hotkey strings including the named comma key parse");
+        Check(!Parses("Ctrl+Shift+F12") && !Parses("Ctrl+Ctrl+Home") && !Parses("Escape") && !Parses("Ctrl++Home") && !Parses("74") && !Parses("Home, End") && !Parses("F1, F2"), "Reserved and invalid hotkeys including comma-combined enum names are rejected");
+        vm.Disconnect(); tabs.SelectedIndex = 0;
+        content.UpdateLayout(); Pump();
+        var teleportAction = Find<Button>(content).Single(b => b.DataContext is OverlayShortcutViewModel { Kind: "teleport" } && Equals(b.Content, "传送"));
+        ((FrameworkElement)((FrameworkElement)teleportAction.Parent).Parent).BringIntoView(); Pump();
+        Render(content, Path.Combine(output, "offline-shortcuts-620.png"), 620, 680);
+        Check(!teleportAction.IsEnabled && Find<TextBlock>(content).Any(t => t.DataContext is OverlayShortcutViewModel { Kind: "teleport" } && t.Text == "当前会话不可传送"),
+            "Disconnected shortcut teleport is disabled with a current-session explanation");
+        var magicAction = Find<Button>(content).Single(b => b.DataContext is OverlayShortcutViewModel shortcut && shortcut.SourceFeature?.Descriptor.Id == "combat.silent_aim" && Equals(b.Content, "打开设置"));
+        Check(((OverlayShortcutViewModel)magicAction.DataContext).SourceFeature?.IsAvailable == false && magicAction.IsEnabled && Find<TextBlock>(content).Any(t => t.DataContext == magicAction.DataContext && t.Text == "暂不可用 · 可查看设置"),
+            "Unavailable complex feature still allows opening its settings and explains that distinction");
+        vm.TeleportPoints.Remove(point);
+        content.UpdateLayout(); Pump();
+        teleportAction = Find<Button>(content).Single(b => b.DataContext is OverlayShortcutViewModel { Kind: "teleport", IsAvailable: false } && Equals(b.Content, "传送"));
+        ((FrameworkElement)((FrameworkElement)teleportAction.Parent).Parent).BringIntoView(); Pump();
+        Render(content, Path.Combine(output, "invalid-shortcut-620.png"), 620, 680);
+        Check(!teleportAction.IsEnabled && Find<TextBlock>(content).Any(t => t.DataContext == teleportAction.DataContext && t.Text == "已失效，请重新添加"),
+            "Missing saved-point reference disables its main action and shows how to repair it");
+        Find<Button>(content).Single(b => Equals(b.Content, "搜索")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        activeSummary.IsExpanded = true;
+        foreach (int shortWidth in new[] { 620, 600 })
+        {
+            Render(content, Path.Combine(output, "short-search-summary-" + shortWidth + ".png"), shortWidth, 380);
+            var shortcutItems = Find<ItemsControl>(content).Single(c => ReferenceEquals(c.ItemsSource, vm.SelectedOverlayPanel!.Items));
+            DependencyObject scrollParent = shortcutItems;
+            while (scrollParent is not ScrollViewer) scrollParent = VisualTreeHelper.GetParent(scrollParent);
+            var shortcutScroll = (ScrollViewer)scrollParent;
+            Check(shortcutScroll.ViewportHeight > 0 && shortcutScroll.ActualHeight > 0,
+                shortWidth + " by 380 retains a positive shortcut viewport with search and summary expanded: " + shortcutScroll.ViewportHeight);
+            var shortAction = Find<Button>(content).Single(b => b.DataContext is OverlayShortcutViewModel item && item.SourceFeature?.Descriptor.Id == "combat.silent_aim" && Equals(b.Content, "打开设置"));
+            shortAction.BringIntoView(); Pump();
+            Render(content, Path.Combine(output, "short-action-reachable-" + shortWidth + ".png"), shortWidth, 380);
+            var shortViewport = Find<ScrollContentPresenter>(shortcutScroll).First();
+            Point shortPosition = shortAction.TranslatePoint(new Point(), shortViewport);
+            Check(shortAction.ActualHeight > 0 && shortPosition.Y >= -1 && shortPosition.Y + shortAction.ActualHeight <= shortViewport.ActualHeight + 1,
+                shortWidth + " by 380 can scroll to a complete shortcut action with search and summary expanded");
+        }
+        vm.OverlayStatus = "设置未保存到磁盘\n无法访问路径 D:\\用户设置\\" + new string('长', 120) + "\\experience.json\n请检查权限后重试。\n更改尚未写入磁盘。";
+        Render(content, Path.Combine(output, "short-long-status-600.png"), 600, 380);
+        var finalAction = Find<Button>(content).Single(b => b.DataContext is OverlayShortcutViewModel item && item.SourceFeature?.Descriptor.Id == "combat.silent_aim" && Equals(b.Content, "打开设置"));
+        finalAction.BringIntoView(); Pump();
+        Render(content, Path.Combine(output, "short-long-status-action-600.png"), 600, 380);
+        var finalViewport = Find<ScrollContentPresenter>(content).Single(v => Find<ItemsControl>(v).Any(c => ReferenceEquals(c.ItemsSource, vm.SelectedOverlayPanel!.Items)));
+        Point finalPosition = finalAction.TranslatePoint(new Point(), finalViewport);
+        var feedback = Find<TextBlock>(content).Single(t => t.Text == vm.OverlayStatus);
+        Check(finalAction.ActualHeight > 0 && finalPosition.Y >= -1 && finalPosition.Y + finalAction.ActualHeight <= finalViewport.ActualHeight + 1 && feedback.ActualHeight <= 16 && Equals(feedback.ToolTip, vm.OverlayStatus),
+            "600 by 380 keeps a complete shortcut action reachable with a multiline error and long path while retaining full feedback in its tooltip: " + finalViewport.ActualHeight);
+        foreach (int compactTab in new[] { 2, 3 })
+        {
+            tabs.SelectedIndex = compactTab;
+            string statusText = "操作失败\n无法访问配置：" + new string('长', 100) + "\n请检查后重试。\n详细错误保留。";
+            typeof(MainViewModel).GetProperty(compactTab == 2 ? "PositionStatus" : "ExperienceStatus")!.SetValue(vm, statusText);
+            Render(content, Path.Combine(output, "short-page-" + compactTab + "-600.png"), 600, 380);
+            var pageScroll = (ScrollViewer)((TabItem)tabs.SelectedItem).Content;
+            var outerViewport = Find<ScrollContentPresenter>(pageScroll).First();
+            var list = Find<ListBox>(pageScroll).Single();
+            var listViewport = Find<ScrollContentPresenter>(list).Single();
+            var action = Find<Button>(list).First(b => Equals(b.Content, compactTab == 2 ? "传送" : "恢复参数"));
+            action.BringIntoView(); Pump();
+            Render(content, Path.Combine(output, "short-page-action-" + compactTab + "-600.png"), 600, 380);
+            Point actionInList = action.TranslatePoint(new Point(), listViewport), actionInPage = action.TranslatePoint(new Point(), outerViewport);
+            Check(listViewport.ActualHeight >= 40 && listViewport.ActualHeight < 240 && action.ActualHeight > 0 &&
+                actionInList.Y >= -1 && actionInList.Y + action.ActualHeight <= listViewport.ActualHeight + 1 &&
+                actionInPage.Y >= -1 && actionInPage.Y + action.ActualHeight <= outerViewport.ActualHeight + 1,
+                "600 by 380 tab " + compactTab + " scrolls a complete list action into both finite viewports with search and multiline status: " + listViewport.ActualHeight);
+            var footerAction = Find<Button>(pageScroll).Single(b => Equals(b.Content, compactTab == 2 ? "将选中传送点加入当前面板" : "删除预设"));
+            footerAction.BringIntoView(); Pump();
+            Render(content, Path.Combine(output, "short-page-footer-" + compactTab + "-600.png"), 600, 380);
+            Point footerPosition = footerAction.TranslatePoint(new Point(), outerViewport);
+            var status = Find<TextBlock>(pageScroll).Single(t => t.Text == statusText);
+            Check(footerAction.ActualHeight > 0 && footerPosition.Y >= -1 && footerPosition.Y + footerAction.ActualHeight <= outerViewport.ActualHeight + 1 && status.ActualHeight <= 32 && Equals(status.ToolTip, statusText),
+                "600 by 380 tab " + compactTab + " keeps its footer action reachable and full multiline feedback in the tooltip");
+            Render(content, Path.Combine(output, "normal-page-" + compactTab + "-620.png"), 620, 680);
+            Check(pageScroll.ScrollableHeight < 1 && listViewport.ActualHeight > 100,
+                "620 by 680 tab " + compactTab + " retains the full list without an extra outer scrollbar");
+        }
+        vm.OverlayPanelName = new string('长', 40); vm.RenameOverlayPanelCommand.Execute(null);
+        foreach (int panelTab in new[] { 0, 4 })
+        {
+            tabs.SelectedIndex = panelTab;
+            Render(content, Path.Combine(output, "long-panel-name-" + panelTab + "-600.png"), 600, 380);
+            var panelSelector = Find<ComboBox>(content).Single(c => ReferenceEquals(c.ItemsSource, vm.OverlayPanels));
+            panelSelector.BringIntoView(); Pump();
+            Render(content, Path.Combine(output, "long-panel-selector-" + panelTab + "-600.png"), 600, 380);
+            Check(Equals(panelSelector.ToolTip, vm.SelectedOverlayPanel!.Name) && panelSelector.ActualWidth > 100 && panelSelector.Focusable && panelSelector.IsTabStop,
+                "600 by 380 tab " + panelTab + " preserves the full 40-character selected panel name and a keyboard-focusable selector");
+        }
+        var settingsScroll = (ScrollViewer)((TabItem)tabs.SelectedItem).Content;
+        var settingsViewport = Find<ScrollContentPresenter>(settingsScroll).First();
+        var hotkeyEditor = Find<TextBox>(settingsScroll).Single(t => System.Windows.Automation.AutomationProperties.GetName(t) == "展开或收起快捷键");
+        hotkeyEditor.BringIntoView(); Pump();
+        Render(content, Path.Combine(output, "short-settings-hotkey-600.png"), 600, 380);
+        Point hotkeyPosition = hotkeyEditor.TranslatePoint(new Point(), settingsViewport);
+        Check(hotkeyEditor.IsEnabled && hotkeyEditor.Focusable && hotkeyEditor.IsTabStop && hotkeyEditor.ActualWidth >= 150 && hotkeyPosition.Y >= -1 && hotkeyPosition.Y + hotkeyEditor.ActualHeight <= settingsViewport.ActualHeight + 1,
+            "600 by 380 settings scrolls the keyboard-focusable hotkey editor completely into view");
+        Check(featureSearch.Focusable && featureSearch.IsTabStop && featureSearchResults.Focusable && featureSearchResults.IsTabStop,
+            "Separate search input and result selector remain in keyboard tab navigation");
+        Check(!Parses("Ctrl+F"), "Overlay toggle cannot reserve its local search shortcut Ctrl+F");
+        tabs.SelectedIndex = 1;
+        vm.SelectedPage = vm.Pages.First(p => p.Category == "玩家");
+        feature = vm.AllFeatures.Single(f => f.Descriptor.Id == "player.move.multiplier");
+        typeof(MainViewModel).GetProperty("ExperienceStatus")!.SetValue(vm, "就绪");
+        Find<Button>(searchArea).Single(b => Equals(b.ToolTip, "收起搜索")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        var allFeaturesScroll = (ScrollViewer)((TabItem)tabs.SelectedItem).Content;
+        var allFeaturesViewport = Find<ScrollContentPresenter>(allFeaturesScroll).First();
+        var overlayExperience = Find<ExperienceBar>(overlayView).Single();
+        Find<Expander>(overlayExperience).Single().IsExpanded = true;
+        Render(content, Path.Combine(output, "expanded-experience-600-680.png"), 600, 680);
+        Check(allFeaturesScroll.ScrollableHeight < 1, "600 by 680 full-feature page adds no outer scrollbar with the experience controls expanded");
+        foreach (bool headerSearchOpen in new[] { false, true })
+        {
+            if (headerSearchOpen) Find<Button>(content).Single(b => Equals(b.Content, "搜索")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Render(content, Path.Combine(output, "short-all-features-" + headerSearchOpen + ".png"), 600, 380);
+            var overlayFeatureSearch = (TextBox)overlayExperience.FindName("FeatureSearch");
+            overlayFeatureSearch.BringIntoView(); Pump();
+            Render(content, Path.Combine(output, "short-experience-search-" + headerSearchOpen + ".png"), 600, 380);
+            Point searchPosition = overlayFeatureSearch.TranslatePoint(new Point(), allFeaturesViewport);
+            Check(overlayFeatureSearch.ActualWidth > 100 && overlayFeatureSearch.ActualHeight > 0 && searchPosition.Y >= -1 && searchPosition.Y + overlayFeatureSearch.ActualHeight <= allFeaturesViewport.ActualHeight + 1,
+                "600 by 380 full-feature page scrolls its experience search input into view with header search " + headerSearchOpen);
+            var feelEditor = Find<NumericInputBox>(overlayView).Single(n => ReferenceEquals(n.Input, feature.ValueInput));
+            var feelTextbox = Find<TextBox>(feelEditor).Single();
+            feelTextbox.BringIntoView(); Pump();
+            Render(content, Path.Combine(output, "short-feature-editor-" + headerSearchOpen + ".png"), 600, 380);
+            Point editorInPage = feelTextbox.TranslatePoint(new Point(), allFeaturesViewport);
+            var bodyViewport = Find<ScrollContentPresenter>(pageViewport).First();
+            Point editorInBody = feelTextbox.TranslatePoint(new Point(), bodyViewport);
+            Check(feelTextbox.ActualHeight > 0 && editorInBody.Y >= -1 && editorInBody.Y + feelTextbox.ActualHeight <= bodyViewport.ActualHeight + 1 &&
+                editorInPage.Y >= -1 && editorInPage.Y + feelTextbox.ActualHeight <= allFeaturesViewport.ActualHeight + 1,
+                "600 by 380 full-feature page scrolls a numeric editor into both finite viewports with header search " + headerSearchOpen);
+        }
+        string longExperienceStatus = "预设恢复失败\n无法访问配置：" + new string('长', 200) + "\n请检查后重试。\n详细错误保留。";
+        typeof(MainViewModel).GetProperty("ExperienceStatus")!.SetValue(vm, longExperienceStatus);
+        Render(content, Path.Combine(output, "short-experience-long-status.png"), 600, 380);
+        var longStatusEditor = Find<TextBox>(Find<NumericInputBox>(overlayView).Single(n => ReferenceEquals(n.Input, feature.ValueInput))).Single();
+        longStatusEditor.BringIntoView(); Pump();
+        Render(content, Path.Combine(output, "short-experience-long-status-editor.png"), 600, 380);
+        var longStatusBodyViewport = Find<ScrollContentPresenter>(pageViewport).First();
+        Point longStatusEditorInBody = longStatusEditor.TranslatePoint(new Point(), longStatusBodyViewport), longStatusEditorInPage = longStatusEditor.TranslatePoint(new Point(), allFeaturesViewport);
+        Console.WriteLine("Expanded experience with multiline status: body viewport=" + longStatusBodyViewport.ActualHeight + ", editor height=" + longStatusEditor.ActualHeight);
+        Check(longStatusEditor.ActualHeight > 0 && longStatusEditorInBody.Y >= -1 && longStatusEditorInBody.Y + longStatusEditor.ActualHeight <= longStatusBodyViewport.ActualHeight + 1 &&
+            longStatusEditorInPage.Y >= -1 && longStatusEditorInPage.Y + longStatusEditor.ActualHeight <= allFeaturesViewport.ActualHeight + 1,
+            "600 by 380 full-feature page preserves a completely reachable numeric editor after a multiline experience error");
+        var longStatusText = Find<TextBlock>(overlayExperience).Single(t => t.Text == longExperienceStatus);
+        Check(longStatusText.ActualHeight <= 32 && Equals(longStatusText.ToolTip, longExperienceStatus),
+            "Experience feedback keeps a compact height and retains the complete multiline error in its tooltip");
         listener.Flush(); string bindingErrors = errors.ToString(); File.WriteAllText(Path.Combine(output, "binding-errors.txt"), bindingErrors);
         Check(string.IsNullOrWhiteSpace(bindingErrors), "No WPF binding errors during all overlay and feature-page rendering");
-        vm.Disconnect(); vm.CloseExperience(); vm.ClosePreferences(); main.Close();
-        File.WriteAllText(Path.Combine(output, "ui-verification.json"), JsonSerializer.Serialize(new { verificationVersion = "20261106-overlay-ui-v4", appAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(StatusWidget).Assembly.Location))), runnerAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(OverlayUiVerification).Assembly.Location))), checks = Checks, images = Images, realGameOpened = false, desktopInputSent = false, formalPreferencesUsed = false }, new JsonSerializerOptions { WriteIndented = true }));
+        vm.CloseExperience(); vm.ClosePreferences(); main.Close();
+        File.WriteAllText(Path.Combine(output, "ui-verification.json"), JsonSerializer.Serialize(new { verificationVersion = "20261107-overlay-ui-v9", appAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(StatusWidget).Assembly.Location))), runnerAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(OverlayUiVerification).Assembly.Location))), checks = Checks, images = Images, realGameOpened = false, desktopInputSent = false, formalPreferencesUsed = false }, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine("PASS " + Checks.Count + " UI checks; " + Images.Count + " rendered images");
         return 0;
     }
