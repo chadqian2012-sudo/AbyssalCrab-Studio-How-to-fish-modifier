@@ -1,5 +1,37 @@
 # 当前交付验证范围 | Current Verification Scope
 
+## r22b 的迟到开启回归已修复 | r22b regression verification
+
+新增测试在旧 r22 上复现了 GitHub PR #1 指出的老虎机迟到开启问题。修正后，包内程序通过 106 项会话恢复、86 项参数及原有 240 项行为检查，合计 432 项。紧停成功、失败、抛错、普通预设、切世界、退出和失败后手动重试均有对应断言。取消放在既有停止入口，由老虎机已有连接代数撤销未完成操作；保留连接和已确认的开关，未增加重连或读回命令。
+
+New assertions reproduced the outstanding PR #1 slot-machine race against r22. The corrected packaged application passed 106 session, 86 preference and 240 existing behavior assertions (432 total), including successful, failed and throwing clears, presets, world changes, closing and manual retry. Cancellation belongs to the existing stop owner and slot-machine epoch; it retains the connection and confirmed switch without extra reconnects or proof reads.
+
+最终包也通过94项离屏UI检查，生成95张图，无绑定错误；两包450个有效文件内容一致。悬浮窗轮询、拖动、缩放和展开复用同一次位置/DPI 读取。每轮轮询的重复读取由两次减为一次，这是调用路径核对，未测量真实帧率。UI 使用既有离屏检查；实机热键、DPI、焦点与游戏行为仍在原 60 项人工验收中。本轮没有启动可见软件窗口或操作游戏。
+
+The final package also passed 94 off-screen UI checks with 95 renders and no binding errors; both variants have 450 byte-identical active files. Overlay polling, dragging, resizing and expansion reuse their current geometry/DPI read. Polling performs one query instead of two; this is a source-path count, not a measured frame-rate claim. Existing off-screen UI checks are reused. Actual hotkeys, DPI, focus and gameplay remain within the 60 open manual acceptance items. No visible app window or game input was used.
+
+### r22b 证据附录 | Evidence appendix
+
+`build/verification-r22b-final/` contains the final packaged reports; `build/merge-slot-repro/before/` preserves the failing r22 result. Bundle/branding comparisons are under `build/package-audit-r22b/`. The local delivery includes the same reports and hashes.
+
+## r22 最终包通过离线检查，桌面快捷方式已更新
+
+2026-11-07：主代理使用最终默认包内的程序运行 240 项行为检查：悬浮面板 61、预设边界 42、数字绑定 7、体验功能 130，全部通过。本轮先用 r21 复现了 4 项失败；新增检查使用真实主窗口数据对象和未显示的 WPF 列表、文本控件，验证选择及状态通知。没有操作游戏或可见桌面。
+
+On 2026-11-07, the primary agent ran 240 assertions against the final default-package application: overlay 61, preset boundaries 42, numeric binding 7 and experience features 130. All passed. Four regression cases had first failed against r21. New cases use the actual main view model and non-displayed WPF lists and text controls to verify selection and binding notifications without game or desktop input.
+
+导入传送点现在仅追加新点。重复导入保留选择、旧快捷卡对象及坐标草稿；混合导入保留旧坐标并保存新点。保存错误改由已有设置存储器的警告字段记录，正常操作结果不再被错误文字覆盖。恢复写入后清除警告，两个状态区收到更新；失败期间载入预设，恢复后显示新预设结果。预设完成时不再把显示用的保存警告复制成操作结果。
+
+Teleport imports now append only new points. Duplicate imports retain selection, shortcut objects and coordinate drafts; mixed imports preserve old coordinates and persist additions. Save errors use the existing settings store's warning field instead of replacing operation feedback. Successful retries clear the warning and notify both status areas. Preset completion copies the operation result, so a temporary save warning cannot remain as the result after recovery.
+
+界面子代理使用最终包内程序重跑 94 项离屏检查，全部通过，生成 95 张图，绑定错误记录为空。小窗口传送点、预设和全部功能页均能滚动到操作区。600×380 下同时打开搜索及“预设与快捷入口”，搜索框和数字编辑仍可到达；多行状态限制高度并保留全文工具提示。较高窗口不增加多余外层滚动条。`Ctrl+F` 保留给面板搜索。界面和行为报告记录的应用哈希一致。
+
+The UI subagent reran all 94 off-screen checks against the final packaged application. All passed, with 95 renders and no binding errors. Short teleport, preset and full-feature pages can scroll to their controls. At 600×380, search and numeric editors remain reachable with search and the preset shortcut area expanded. Multiline status height is bounded and full tooltips remain available; taller windows avoid an extra outer scrollbar. `Ctrl+F` remains panel search. UI and behavior reports identify the same application hash.
+
+默认和压缩包的 450 个有效文件逐字节一致，两包品牌检查通过；Runtime 和 Harmony 保留原内容。主代理已按用户要求将桌面现有快捷方式更新至 r22，读回目标、图标、空参数及文件哈希均符合预期。旧快捷方式已备份，r17c 程序哈希不变；r21 保留为上一候选。没有因此启动程序或游戏。真实热键、焦点、滚动手感和游戏表现仍待人工验收；原有 60 项均未勾选。
+
+The default and compressed packages contain 450 byte-identical active files and pass branding checks; Runtime and Harmony retain their previous contents. As requested, the primary agent updated the existing desktop shortcut to r22 and verified its target, icon, empty arguments and file hash. The previous shortcut is backed up, the r17c executable hash is unchanged, and r21 remains the previous candidate. This operation did not launch the application or game. Real hotkeys, focus, scrolling and game behavior remain manual acceptance work; all 60 existing items stay open.
+
 ## r21 最终包通过离线检查，真实操作仍待验收
 
 2026-11-06：主代理使用最终默认包内的程序运行 233 项行为检查：悬浮面板 54、预设边界 42、数字绑定 7、体验功能 130，全部通过。同一包内程序通过 76 项界面检查，生成 73 张离屏图，绑定错误记录为空。短窗口检查覆盖 620×380 和 600×380：搜索与摘要同时展开后，快捷区仍可滚动；长名称、搜索提示和多行错误也已检查。
@@ -138,3 +170,15 @@ Full verification logs and machine reports remain in the original delivery direc
 - 实际应用程序集 SHA-256 / Tested application SHA-256: `35cb1513fd2a8e0dcf14dc8191dda4b5cfee4bc95e8cdaa78021c91a52efe9fd`.
 
 生成的报告和图像随本地候选交付保存，不提交到源码历史。Generated reports and images are retained with the local candidate, not committed to source history.
+
+## r22 证据附录 | r22 evidence appendix
+
+- 修复前的 57/61 与修复后的 61/61 / Before and after behavior results: `build/r22-state-repro/before/results.json`, `build/r22-state-fixed/results/results.json`.
+- 包内行为结果 / Packaged behavior results: `build/verification-r22-final/overlay/results.json`, `presets/results.json` and the numeric/experience results under the same directory.
+- 包内最终界面检查 / Final packaged UI results: `build/ui-r22-packaged/ui-verification.json` (v9), `binding-errors.txt` and 95 rendered PNGs.
+- 两包内容和品牌 / Payload and branding: `build/package-audit-r22/package-payload-equivalence.json` and each variant's `branding-results.json`.
+- 已通过行为检查的包内应用 SHA-256 / Behavior-tested packaged application SHA-256: `c8fd9de5f09774de29fb73d0debc36d2226ed4308f2025ac04646fac6b933c51`.
+- 修复前应用 SHA-256 / Before-fix application SHA-256: `35cb1513fd2a8e0dcf14dc8191dda4b5cfee4bc95e8cdaa78021c91a52efe9fd`.
+- 桌面更新记录及旧快捷方式 / Desktop update record and previous shortcut: the delivery directory's `verification/desktop-delivery.json` and `verification/AbyssalCrab Studio-before-r22.lnk`.
+
+包内界面及桌面更新已有对应记录；这些证据不代表真实游戏验收。Packaged UI and desktop changes have their corresponding records; these results do not establish live-game acceptance.

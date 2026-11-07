@@ -388,10 +388,108 @@ static class OverlayUiVerification
         var feedback = Find<TextBlock>(content).Single(t => t.Text == vm.OverlayStatus);
         Check(finalAction.ActualHeight > 0 && finalPosition.Y >= -1 && finalPosition.Y + finalAction.ActualHeight <= finalViewport.ActualHeight + 1 && feedback.ActualHeight <= 16 && Equals(feedback.ToolTip, vm.OverlayStatus),
             "600 by 380 keeps a complete shortcut action reachable with a multiline error and long path while retaining full feedback in its tooltip: " + finalViewport.ActualHeight);
+        foreach (int compactTab in new[] { 2, 3 })
+        {
+            tabs.SelectedIndex = compactTab;
+            string statusText = "操作失败\n无法访问配置：" + new string('长', 100) + "\n请检查后重试。\n详细错误保留。";
+            typeof(MainViewModel).GetProperty(compactTab == 2 ? "PositionStatus" : "ExperienceStatus")!.SetValue(vm, statusText);
+            Render(content, Path.Combine(output, "short-page-" + compactTab + "-600.png"), 600, 380);
+            var pageScroll = (ScrollViewer)((TabItem)tabs.SelectedItem).Content;
+            var outerViewport = Find<ScrollContentPresenter>(pageScroll).First();
+            var list = Find<ListBox>(pageScroll).Single();
+            var listViewport = Find<ScrollContentPresenter>(list).Single();
+            var action = Find<Button>(list).First(b => Equals(b.Content, compactTab == 2 ? "传送" : "恢复参数"));
+            action.BringIntoView(); Pump();
+            Render(content, Path.Combine(output, "short-page-action-" + compactTab + "-600.png"), 600, 380);
+            Point actionInList = action.TranslatePoint(new Point(), listViewport), actionInPage = action.TranslatePoint(new Point(), outerViewport);
+            Check(listViewport.ActualHeight >= 40 && listViewport.ActualHeight < 240 && action.ActualHeight > 0 &&
+                actionInList.Y >= -1 && actionInList.Y + action.ActualHeight <= listViewport.ActualHeight + 1 &&
+                actionInPage.Y >= -1 && actionInPage.Y + action.ActualHeight <= outerViewport.ActualHeight + 1,
+                "600 by 380 tab " + compactTab + " scrolls a complete list action into both finite viewports with search and multiline status: " + listViewport.ActualHeight);
+            var footerAction = Find<Button>(pageScroll).Single(b => Equals(b.Content, compactTab == 2 ? "将选中传送点加入当前面板" : "删除预设"));
+            footerAction.BringIntoView(); Pump();
+            Render(content, Path.Combine(output, "short-page-footer-" + compactTab + "-600.png"), 600, 380);
+            Point footerPosition = footerAction.TranslatePoint(new Point(), outerViewport);
+            var status = Find<TextBlock>(pageScroll).Single(t => t.Text == statusText);
+            Check(footerAction.ActualHeight > 0 && footerPosition.Y >= -1 && footerPosition.Y + footerAction.ActualHeight <= outerViewport.ActualHeight + 1 && status.ActualHeight <= 32 && Equals(status.ToolTip, statusText),
+                "600 by 380 tab " + compactTab + " keeps its footer action reachable and full multiline feedback in the tooltip");
+            Render(content, Path.Combine(output, "normal-page-" + compactTab + "-620.png"), 620, 680);
+            Check(pageScroll.ScrollableHeight < 1 && listViewport.ActualHeight > 100,
+                "620 by 680 tab " + compactTab + " retains the full list without an extra outer scrollbar");
+        }
+        vm.OverlayPanelName = new string('长', 40); vm.RenameOverlayPanelCommand.Execute(null);
+        foreach (int panelTab in new[] { 0, 4 })
+        {
+            tabs.SelectedIndex = panelTab;
+            Render(content, Path.Combine(output, "long-panel-name-" + panelTab + "-600.png"), 600, 380);
+            var panelSelector = Find<ComboBox>(content).Single(c => ReferenceEquals(c.ItemsSource, vm.OverlayPanels));
+            panelSelector.BringIntoView(); Pump();
+            Render(content, Path.Combine(output, "long-panel-selector-" + panelTab + "-600.png"), 600, 380);
+            Check(Equals(panelSelector.ToolTip, vm.SelectedOverlayPanel!.Name) && panelSelector.ActualWidth > 100 && panelSelector.Focusable && panelSelector.IsTabStop,
+                "600 by 380 tab " + panelTab + " preserves the full 40-character selected panel name and a keyboard-focusable selector");
+        }
+        var settingsScroll = (ScrollViewer)((TabItem)tabs.SelectedItem).Content;
+        var settingsViewport = Find<ScrollContentPresenter>(settingsScroll).First();
+        var hotkeyEditor = Find<TextBox>(settingsScroll).Single(t => System.Windows.Automation.AutomationProperties.GetName(t) == "展开或收起快捷键");
+        hotkeyEditor.BringIntoView(); Pump();
+        Render(content, Path.Combine(output, "short-settings-hotkey-600.png"), 600, 380);
+        Point hotkeyPosition = hotkeyEditor.TranslatePoint(new Point(), settingsViewport);
+        Check(hotkeyEditor.IsEnabled && hotkeyEditor.Focusable && hotkeyEditor.IsTabStop && hotkeyEditor.ActualWidth >= 150 && hotkeyPosition.Y >= -1 && hotkeyPosition.Y + hotkeyEditor.ActualHeight <= settingsViewport.ActualHeight + 1,
+            "600 by 380 settings scrolls the keyboard-focusable hotkey editor completely into view");
+        Check(featureSearch.Focusable && featureSearch.IsTabStop && featureSearchResults.Focusable && featureSearchResults.IsTabStop,
+            "Separate search input and result selector remain in keyboard tab navigation");
+        Check(!Parses("Ctrl+F"), "Overlay toggle cannot reserve its local search shortcut Ctrl+F");
+        tabs.SelectedIndex = 1;
+        vm.SelectedPage = vm.Pages.First(p => p.Category == "玩家");
+        feature = vm.AllFeatures.Single(f => f.Descriptor.Id == "player.move.multiplier");
+        typeof(MainViewModel).GetProperty("ExperienceStatus")!.SetValue(vm, "就绪");
+        Find<Button>(searchArea).Single(b => Equals(b.ToolTip, "收起搜索")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        var allFeaturesScroll = (ScrollViewer)((TabItem)tabs.SelectedItem).Content;
+        var allFeaturesViewport = Find<ScrollContentPresenter>(allFeaturesScroll).First();
+        var overlayExperience = Find<ExperienceBar>(overlayView).Single();
+        Find<Expander>(overlayExperience).Single().IsExpanded = true;
+        Render(content, Path.Combine(output, "expanded-experience-600-680.png"), 600, 680);
+        Check(allFeaturesScroll.ScrollableHeight < 1, "600 by 680 full-feature page adds no outer scrollbar with the experience controls expanded");
+        foreach (bool headerSearchOpen in new[] { false, true })
+        {
+            if (headerSearchOpen) Find<Button>(content).Single(b => Equals(b.Content, "搜索")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Render(content, Path.Combine(output, "short-all-features-" + headerSearchOpen + ".png"), 600, 380);
+            var overlayFeatureSearch = (TextBox)overlayExperience.FindName("FeatureSearch");
+            overlayFeatureSearch.BringIntoView(); Pump();
+            Render(content, Path.Combine(output, "short-experience-search-" + headerSearchOpen + ".png"), 600, 380);
+            Point searchPosition = overlayFeatureSearch.TranslatePoint(new Point(), allFeaturesViewport);
+            Check(overlayFeatureSearch.ActualWidth > 100 && overlayFeatureSearch.ActualHeight > 0 && searchPosition.Y >= -1 && searchPosition.Y + overlayFeatureSearch.ActualHeight <= allFeaturesViewport.ActualHeight + 1,
+                "600 by 380 full-feature page scrolls its experience search input into view with header search " + headerSearchOpen);
+            var feelEditor = Find<NumericInputBox>(overlayView).Single(n => ReferenceEquals(n.Input, feature.ValueInput));
+            var feelTextbox = Find<TextBox>(feelEditor).Single();
+            feelTextbox.BringIntoView(); Pump();
+            Render(content, Path.Combine(output, "short-feature-editor-" + headerSearchOpen + ".png"), 600, 380);
+            Point editorInPage = feelTextbox.TranslatePoint(new Point(), allFeaturesViewport);
+            var bodyViewport = Find<ScrollContentPresenter>(pageViewport).First();
+            Point editorInBody = feelTextbox.TranslatePoint(new Point(), bodyViewport);
+            Check(feelTextbox.ActualHeight > 0 && editorInBody.Y >= -1 && editorInBody.Y + feelTextbox.ActualHeight <= bodyViewport.ActualHeight + 1 &&
+                editorInPage.Y >= -1 && editorInPage.Y + feelTextbox.ActualHeight <= allFeaturesViewport.ActualHeight + 1,
+                "600 by 380 full-feature page scrolls a numeric editor into both finite viewports with header search " + headerSearchOpen);
+        }
+        string longExperienceStatus = "预设恢复失败\n无法访问配置：" + new string('长', 200) + "\n请检查后重试。\n详细错误保留。";
+        typeof(MainViewModel).GetProperty("ExperienceStatus")!.SetValue(vm, longExperienceStatus);
+        Render(content, Path.Combine(output, "short-experience-long-status.png"), 600, 380);
+        var longStatusEditor = Find<TextBox>(Find<NumericInputBox>(overlayView).Single(n => ReferenceEquals(n.Input, feature.ValueInput))).Single();
+        longStatusEditor.BringIntoView(); Pump();
+        Render(content, Path.Combine(output, "short-experience-long-status-editor.png"), 600, 380);
+        var longStatusBodyViewport = Find<ScrollContentPresenter>(pageViewport).First();
+        Point longStatusEditorInBody = longStatusEditor.TranslatePoint(new Point(), longStatusBodyViewport), longStatusEditorInPage = longStatusEditor.TranslatePoint(new Point(), allFeaturesViewport);
+        Console.WriteLine("Expanded experience with multiline status: body viewport=" + longStatusBodyViewport.ActualHeight + ", editor height=" + longStatusEditor.ActualHeight);
+        Check(longStatusEditor.ActualHeight > 0 && longStatusEditorInBody.Y >= -1 && longStatusEditorInBody.Y + longStatusEditor.ActualHeight <= longStatusBodyViewport.ActualHeight + 1 &&
+            longStatusEditorInPage.Y >= -1 && longStatusEditorInPage.Y + longStatusEditor.ActualHeight <= allFeaturesViewport.ActualHeight + 1,
+            "600 by 380 full-feature page preserves a completely reachable numeric editor after a multiline experience error");
+        var longStatusText = Find<TextBlock>(overlayExperience).Single(t => t.Text == longExperienceStatus);
+        Check(longStatusText.ActualHeight <= 32 && Equals(longStatusText.ToolTip, longExperienceStatus),
+            "Experience feedback keeps a compact height and retains the complete multiline error in its tooltip");
         listener.Flush(); string bindingErrors = errors.ToString(); File.WriteAllText(Path.Combine(output, "binding-errors.txt"), bindingErrors);
         Check(string.IsNullOrWhiteSpace(bindingErrors), "No WPF binding errors during all overlay and feature-page rendering");
         vm.CloseExperience(); vm.ClosePreferences(); main.Close();
-        File.WriteAllText(Path.Combine(output, "ui-verification.json"), JsonSerializer.Serialize(new { verificationVersion = "20261106-overlay-ui-v8", appAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(StatusWidget).Assembly.Location))), runnerAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(OverlayUiVerification).Assembly.Location))), checks = Checks, images = Images, realGameOpened = false, desktopInputSent = false, formalPreferencesUsed = false }, new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(Path.Combine(output, "ui-verification.json"), JsonSerializer.Serialize(new { verificationVersion = "20261107-overlay-ui-v9", appAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(StatusWidget).Assembly.Location))), runnerAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(OverlayUiVerification).Assembly.Location))), checks = Checks, images = Images, realGameOpened = false, desktopInputSent = false, formalPreferencesUsed = false }, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine("PASS " + Checks.Count + " UI checks; " + Images.Count + " rendered images");
         return 0;
     }

@@ -105,11 +105,15 @@ public sealed class ExperienceSettingsStore
     public void Save(ExperienceSettings value)
     {
         if (_path == null) return;
-        if (_unsupported) throw new IOException("体验设置版本较新，未覆盖原文件");
-        var text = JsonSerializer.Serialize(value, JsonOptions);
-        Parse(text);
-        AtomicLocalFile.Write(_path, text, previous => { Parse(previous); });
-        Warning = null;
+        try
+        {
+            if (_unsupported) throw new IOException("体验设置版本较新，未覆盖原文件");
+            var text = JsonSerializer.Serialize(value, JsonOptions);
+            Parse(text);
+            AtomicLocalFile.Write(_path, text, previous => { Parse(previous); });
+            Warning = null;
+        }
+        catch (Exception e) { Warning = "体验设置保存失败 · " + e.Message; throw; }
     }
 }
 

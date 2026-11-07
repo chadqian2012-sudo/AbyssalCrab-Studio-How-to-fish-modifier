@@ -19,7 +19,7 @@ internal static class NativeHotkeys
 		}
 		if (!Enum.TryParse<Key>(parts[^1], true, out var key) || !Enum.IsDefined(key) || key is Key.None or Key.Escape or Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin) return false;
 		virtualKey = (uint)KeyInterop.VirtualKeyFromKey(key);
-		return virtualKey > 0 && !(virtualKey == 123 && modifiers == 6);
+		return virtualKey > 0 && !(virtualKey == 123 && modifiers == 6) && !(key == Key.F && modifiers == 2);
 	}
 
 	[DllImport("user32.dll", SetLastError = true)]

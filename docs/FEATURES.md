@@ -1,6 +1,6 @@
 # 功能指南 | Feature Guide
 
-## r21 小窗口仍能滚动到快捷操作 | Shared game panel
+## r22 小窗口保留操作空间与当前设置 | Shared game panel
 
 在主窗口勾选“游戏悬浮窗”，切回已连接的游戏窗口后显示 AC 按钮。拖动按钮调整位置，点击或按 `Home` 展开；“收起”或 `Esc` 返回游戏。设置中可改成 `F8`、`Ctrl+Home` 等快捷键。`Ctrl+Shift+F12` 保留为紧急停用，面板顶部也有同一操作的按钮。
 
@@ -18,6 +18,10 @@ Custom panels mix features, complete pages, saved local-player teleports, and na
 
 In short panels, the continuous-feature summary shares the shortcut scroll area, so controls remain reachable after expansion. The footer has a fixed single-line height; long or multiline errors cannot expand it, and the tooltip retains the full text. Long point, group and preset names wrap.
 
+r22 的传送点和参数预设页保留列表的可见高度，内容较多时从外层滚动到全部按钮。“全部功能”页在小窗口展开“预设与快捷入口”后，也能滚动到搜索框和下方功能卡；较高窗口不额外出现外层滚动条。页面长状态限制高度，悬停可查看全文，避免多行错误挤掉编辑区域。快捷面板选择框和列表也可悬停查看完整面板名称。
+
+In r22, teleport and preset pages keep a finite visible list area and let the outer page scroll to all buttons. In short windows, the full-feature page can also scroll to its search field and feature cards after the preset shortcut area expands; taller windows do not gain an unnecessary outer scrollbar. Status height is bounded so multiline errors cannot consume the editors, while tooltips retain the full message. Panel selectors and lists also expose complete panel names through tooltips.
+
 悬浮窗展开后，点击顶部搜索按钮或按 `Ctrl+F`。可按名称、说明、分类或 ID 搜索，选择结果后点击“打开分类”或“加入面板”。打开分类不会自动滚动并高亮具体卡片，也不会执行该功能；复杂功能进入其完整设置分类。主窗口与悬浮窗都用独立输入框填写搜索文字，再从结果列表选择。没有匹配结果时保留文字，方便继续修改；清空搜索或没有匹配结果时，两按钮不可用。搜索下方会提示未输入、已找到结果或没有匹配。`Ctrl+F` 只在展开面板收到按键时处理，不占用全局快捷键。
 
 While the panel is expanded, use the search button or `Ctrl+F`. Search by name, description, category or ID, select a result, then open its category or add it to the selected panel. Opening a category does not execute the feature or scroll to and highlight a particular card; complex features lead to their full settings category. Both windows use a separate text field and result selector. Unmatched text stays visible for further editing; both buttons are disabled for an empty search or no matching result. The hint distinguishes empty input, matching results and no matches. `Ctrl+F` is local to the expanded panel, not a global hotkey.
@@ -26,9 +30,9 @@ While the panel is expanded, use the search button or `Ctrl+F`. Search by name, 
 
 Shortcut status comes from the original feature state. Teleport entries report when the current session cannot teleport; pending operations and deleted references have separate messages. An idle operation is not treated as proof of a connection. Complex-feature settings remain accessible while execution is unavailable. Expand the continuous-feature summary on the shortcut tab to inspect the app's recorded switches; this is not proof of live-game effects. Both windows prevent parameter editing while a preset load is pending and allow it again when the operation ends.
 
-热键使用单个按键，可用 `+` 加修饰键，例如 `Ctrl+Home`。`Home,End` 等逗号组合无效，不会被注册成另一个按键。快捷面板或位置设置保存失败时，悬浮窗底部会显示失败原因；未写入的设置保留在内存，后续保存可重试。
+热键使用单个按键，可用 `+` 加修饰键，例如 `Ctrl+Home`。`Home,End` 等逗号组合无效，不会被注册成另一个按键。`Ctrl+F` 保留给面板内搜索，不能设为展开热键。快捷面板或位置设置保存失败时，状态区会显示失败原因；未写入的设置保留在内存，后续保存可重试。保存恢复后，错误提示清除，显示最新操作结果；失败期间载入预设也不会让旧保存错误永久残留。
 
-Use one hotkey with optional `+` modifiers, such as `Ctrl+Home`. Comma combinations such as `Home,End` are invalid and are not registered as another key. If panel or position settings cannot be saved, the overlay footer reports the failure; pending settings remain in memory for a later save attempt.
+Use one hotkey with optional `+` modifiers, such as `Ctrl+Home`. Comma combinations such as `Home,End` are invalid and are not registered as another key. `Ctrl+F` is reserved for panel search and cannot become the expansion hotkey. If panel or position settings cannot be saved, the status areas report the failure and pending settings remain in memory. A successful retry clears the warning and shows the latest operation result, including when a preset was loaded while saving was unavailable.
 
 窄窗改用单列时，参数仍由同一对象保存。放大窗口会恢复原来的多列布局。展开采用短暂淡入和轻微缩放，遵循减少动态效果设置；收起和紧急停用不等待动画。
 
@@ -71,6 +75,10 @@ Item and fish catalogs support favorites, recent generations, and configuration 
 传送点支持分组、备注、收藏、颜色、图标及 JSON 导入/导出。导入文件最多 4 MB、2,000 个点，并在应用前校验全部内容。安全位置或死亡前位置只会填入编辑框，仍需用户手动确认传送。临时位置仅在当前会话有效，切换世界后清除。死亡前采样默认关闭；开启后每两秒进行只读采样，记录可能与倒地位置相差一个采样间隔。
 
 Teleport points support groups, notes, favorites, colors, icons, and JSON import/export. Imports are limited to 4 MB and 2,000 points, and all content is validated before changes are applied. A safe or pre-death location only fills the editor; the user must initiate teleport manually. Temporary locations are session-only and cleared on world changes. Pre-death sampling is off by default; when enabled, read-only samples are taken every two seconds, so a saved point can differ from the actual downed position by one sampling interval.
+
+导入采用合并：同组同名的旧坐标保持原值，只追加新点。重复导入不会取消当前选择、重建已有快捷卡或清除未完成的坐标草稿。
+
+Imports merge points: an existing group/name retains its saved coordinates, and only new points are appended. Importing duplicates does not clear the current selection, rebuild existing shortcut objects or discard unfinished coordinate drafts.
 
 ## 角色手感和趣味事件 | Player Feel and Fun Events
 
