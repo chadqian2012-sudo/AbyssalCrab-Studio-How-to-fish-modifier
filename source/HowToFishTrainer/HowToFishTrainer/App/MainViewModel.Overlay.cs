@@ -79,7 +79,7 @@ public sealed partial class MainViewModel
         }
     }
     public string OverlayPanelName { get => _overlayPanelName; set => Set(ref _overlayPanelName, value ?? ""); }
-    public string OverlayStatus { get => _overlayStatus; set => Set(ref _overlayStatus, value ?? ""); }
+    public string OverlayStatus { get => _experienceStore.Warning ?? _overlayStatus; set => Set(ref _overlayStatus, value ?? ""); }
     public string OverlayHotkey
     {
         get => _experience.OverlayHotkey;
@@ -253,6 +253,6 @@ public sealed partial class MainViewModel
         int version = _presetApplyVersion, epoch = _connectionEpoch, context = _positionContextEpoch;
         await operation;
         if (version == _presetApplyVersion && epoch == _connectionEpoch && context == _positionContextEpoch)
-            OverlayStatus = ExperienceStatus;
+            OverlayStatus = _experienceStatus;
     }
 }

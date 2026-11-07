@@ -5,6 +5,9 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Threading;
 using HowToFishTrainer.App;
 using HowToFishTrainer.Core;
@@ -90,7 +93,7 @@ static class OverlayVerification
     {
         Root = Path.GetFullPath(args[0]); Directory.CreateDirectory(Root);
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
-        try { SharedFeatures(); SearchShortcuts(); PanelsAndPersistence(); TeleportBoundaries(); PresetAndEmergency(); SettingsSaveFailure(); SettingsMigration(); }
+        try { SharedFeatures(); SearchShortcuts(); PanelsAndPersistence(); TeleportBoundaries(); TeleportImports(); PresetAndEmergency(); SettingsSaveFailure(); SettingsMigration(); }
         catch (Exception e) { Failed.Add("Unhandled: " + e); }
         File.WriteAllText(Path.Combine(Root, "results.json"), JsonSerializer.Serialize(new {
             passed = Failed.Count == 0, checks = Passed.Count + Failed.Count, passedChecks = Passed, failedChecks = Failed,
@@ -254,6 +257,39 @@ static class OverlayVerification
         Check(current.Commands.Count == sent, "Missing shortcut point sends no runtime commands"); Close(vm);
     }
 
+    static void TeleportImports()
+    {
+        var runtime = new OverlayFixtureRuntime(); var vm = Create(runtime, out var store, out string path);
+        var point = AddPoint(vm); vm.SelectedTeleportPoint = point; vm.AddTeleportToOverlayCommand.Execute(point);
+        var shortcut = vm.SelectedOverlayPanel!.Items.Single();
+        var list = new ListBox { ItemsSource = vm.TeleportPoints };
+        list.SetBinding(Selector.SelectedItemProperty, new Binding(nameof(vm.SelectedTeleportPoint)) { Source = vm, Mode = BindingMode.TwoWay });
+        Pump();
+        Check(ReferenceEquals(list.SelectedItem, point), "Import regression starts with the saved point selected through the real WPF binding");
+        vm.CurrentYInput.Text = "-";
+        int changes = 0; bool onlyAdds = true;
+        vm.TeleportPoints.CollectionChanged += (_, args) => { changes++; onlyAdds &= args.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Add; };
+        int imported = vm.ImportTeleportPoints(vm.ExportTeleportPoints()); Pump();
+        Check(imported == 0 && changes == 0 && ReferenceEquals(vm.SelectedTeleportPoint, point) && ReferenceEquals(list.SelectedItem, point)
+            && ReferenceEquals(vm.SelectedOverlayPanel.Items.Single(), shortcut) && vm.CurrentYInput.Text == "-",
+            "Duplicate teleport import preserves selection, existing shortcut objects and unfinished coordinate drafts without collection changes");
+        string addition = JsonSerializer.Serialize(new { version = 1, points = new[] {
+            new { group = point.Group, name = point.Name, x = 999.0, y = 999.0, z = 999.0 },
+            new { group = point.Group, name = "Harbor", x = 40.25, y = 50.5, z = 60.75 }
+        } });
+        changes = 0; onlyAdds = true;
+        imported = vm.ImportTeleportPoints(addition); Pump();
+        Check(imported == 1 && changes == 1 && onlyAdds && vm.TeleportPoints.Count == 2 && ReferenceEquals(vm.TeleportPoints[0], point)
+            && ReferenceEquals(vm.SelectedTeleportPoint, point) && ReferenceEquals(list.SelectedItem, point) && vm.CurrentYInput.Text == "-",
+            "Mixed teleport import appends only the new point while preserving the existing point, selection and draft");
+        var restarted = new MainViewModel(new SilentToggleSound(), preferencesStore: store, experiencePath: path);
+        Check(restarted.TeleportPoints.Count == 2 && restarted.TeleportPoints.Select(p => (p.Group, p.Name, p.X, p.Y, p.Z))
+            .SequenceEqual(vm.TeleportPoints.Select(p => (p.Group, p.Name, p.X, p.Y, p.Z))),
+            "Merged teleport points persist with original duplicate coordinates and the new point's exact values");
+        BindingOperations.ClearAllBindings(list); list.ItemsSource = null;
+        Close(restarted); Close(vm);
+    }
+
     static void PresetAndEmergency()
     {
         var runtime = new OverlayFixtureRuntime(); var vm = Create(runtime, out _, out _);
@@ -286,12 +322,37 @@ static class OverlayVerification
     {
         var runtime = new OverlayFixtureRuntime(); var vm = Create(runtime, out _, out string path);
         vm.FlushExperience(); File.Delete(path); Directory.CreateDirectory(path);
+        vm.PresetName = "Save retry"; vm.SavePresetCommand.Execute(null);
         vm.OverlayPanelName = "Unsaved panel"; vm.CreateOverlayPanelCommand.Execute(null);
+        string previousExperience = vm.ExperienceStatus, previousOverlay = vm.OverlayStatus;
+        var experienceText = new TextBlock(); var overlayText = new TextBlock();
+        experienceText.SetBinding(TextBlock.TextProperty, new Binding(nameof(vm.ExperienceStatus)) { Source = vm });
+        overlayText.SetBinding(TextBlock.TextProperty, new Binding(nameof(vm.OverlayStatus)) { Source = vm });
         Check(!vm.FlushExperience() && vm.ExperienceStatus.Contains("保存失败") && vm.OverlayStatus == vm.ExperienceStatus,
             "Failed experience save replaces optimistic overlay feedback with the same actionable error");
+        Pump();
+        Check(experienceText.Text == vm.ExperienceStatus && overlayText.Text == vm.OverlayStatus,
+            "Experience-save failure notifies both bound WPF status displays");
         Directory.Delete(path);
         Check(vm.FlushExperience() && ExperienceSettingsStore.Parse(File.ReadAllText(path)).OverlayPanels.Any(panel => panel.Name == "Unsaved panel"),
             "Failed experience save retains dirty settings so the next flush persists the pending panel");
+        Pump();
+        Check(vm.ExperienceStatus == previousExperience && vm.OverlayStatus == previousOverlay
+            && !experienceText.Text.Contains("保存失败") && !overlayText.Text.Contains("保存失败")
+            && experienceText.Text == previousExperience && overlayText.Text == previousOverlay,
+            "Successful save retry restores the prior operation feedback and notifies both bound WPF status displays");
+        File.Delete(path); Directory.CreateDirectory(path);
+        vm.OverlayPanelName = "Second pending panel"; vm.CreateOverlayPanelCommand.Execute(null);
+        bool saveFailed = !vm.FlushExperience();
+        Await(vm.LoadOverlayPresetAsync("Save retry"));
+        bool warningVisible = vm.ExperienceStatus.Contains("保存失败") && vm.OverlayStatus.Contains("保存失败");
+        Directory.Delete(path);
+        bool recovered = vm.FlushExperience(); Pump();
+        const string restored = "已恢复「Save retry」参数 · 持续功能请手动开启";
+        Check(saveFailed && warningVisible && recovered && vm.ExperienceStatus == restored && vm.OverlayStatus == restored
+            && experienceText.Text == restored && overlayText.Text == restored,
+            "Preset loading during a failed save retains the warning until recovery, then both displays show the new preset result");
+        BindingOperations.ClearAllBindings(experienceText); BindingOperations.ClearAllBindings(overlayText);
         Close(vm);
     }
 

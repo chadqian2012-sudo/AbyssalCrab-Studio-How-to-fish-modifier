@@ -191,7 +191,7 @@ public sealed partial class StatusWidget : Window, IDisposable
         if (!enabled) { _failedHotkey = null; return; }
         if (_registeredHotkey != null || _failedHotkey == requested) return;
         if (!NativeHotkeys.TryParse(requested, out uint modifiers, out uint key))
-        { _failedHotkey = requested; _vm.OverlayStatus = "快捷键无效，请填写 Home、F8 或 Ctrl+Home；紧急停用组合键不可占用"; return; }
+        { _failedHotkey = requested; _vm.OverlayStatus = "快捷键无效，请填写 Home、F8 或 Ctrl+Home；Ctrl+F 用于搜索，Ctrl+Shift+F12 用于紧急停用"; return; }
         if (!NativeHotkeys.RegisterHotKey(_handle, OverlayHotkeyId, modifiers | 0x4000u, key))
         { _failedHotkey = requested; _vm.OverlayStatus = "快捷键已被占用，请在设置中更换；仍可点击悬浮按钮"; return; }
         _registeredHotkey = requested;
