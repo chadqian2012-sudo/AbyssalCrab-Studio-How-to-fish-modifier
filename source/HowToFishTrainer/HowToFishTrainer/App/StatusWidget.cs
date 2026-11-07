@@ -83,15 +83,14 @@ public sealed partial class StatusWidget : Window, IDisposable
     private void Tick(object? sender, EventArgs e)
     {
         if (_disposed) return;
-        bool visible = _vm.WidgetVisible && TryGameClient(out _, out _, out _) && IsRelevantForeground();
-        if (!visible)
+        if (!_vm.WidgetVisible || !TryGameClient(out var rect, out var origin, out double scale) || !IsRelevantForeground())
         {
             SyncHotkey(false); SetExpanded(false, false); _dragElement?.ReleaseMouseCapture();
             if (IsVisible) Hide();
             return;
         }
         if (!IsVisible) Show();
-        PlaceInsideGame(); SyncHotkey(true);
+        PlaceInsideGame(rect, origin, scale); SyncHotkey(true);
     }
     private bool TryGameClient(out NativeRect rect, out NativePoint origin, out double scale)
     {
@@ -131,9 +130,8 @@ public sealed partial class StatusWidget : Window, IDisposable
         }
         return false;
     }
-    private void PlaceInsideGame()
+    private void PlaceInsideGame(NativeRect rect, NativePoint origin, double scale)
     {
-        if (!TryGameClient(out var rect, out var origin, out double scale)) return;
         double availableWidth = rect.Right / scale, availableHeight = rect.Bottom / scale;
         double width = _expanded ? Math.Clamp(_vm.WidgetWidth, Math.Min(600, availableWidth), availableWidth) : Math.Min(LauncherSize, availableWidth);
         double height = _expanded ? Math.Clamp(_vm.WidgetHeight, Math.Min(380, availableHeight), availableHeight) : Math.Min(LauncherSize, availableHeight);
@@ -152,14 +150,16 @@ public sealed partial class StatusWidget : Window, IDisposable
     private void SetExpanded(bool expanded, bool returnFocus)
     {
         if (_expanded == expanded) return;
-        if (expanded && !TryGameClient(out _, out _, out _)) { _vm.OverlayStatus = "进入游戏窗口后可展开游戏面板"; return; }
+        bool hasGameClient = TryGameClient(out var rect, out var origin, out double dpiScale);
+        if (expanded && !hasGameClient) { _vm.OverlayStatus = "进入游戏窗口后可展开游戏面板"; return; }
         bool wasActive = IsActive;
         _expanded = expanded;
         int animationVersion = ++_expandAnimationVersion;
         StopExpansionAnimation();
         Launcher.Visibility = expanded ? Visibility.Collapsed : Visibility.Visible;
         ExpandedSurface.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
-        UpdateActivationStyle(); PlaceInsideGame();
+        UpdateActivationStyle();
+        if (hasGameClient) PlaceInsideGame(rect, origin, dpiScale);
         if (expanded)
         {
             if (!IsVisible) Show(); Activate();
@@ -208,14 +208,14 @@ public sealed partial class StatusWidget : Window, IDisposable
     }
     private void Drag_MouseMove(object sender, MouseEventArgs e)
     {
-        if (!_pointerDown || e.LeftButton != MouseButtonState.Pressed || !TryGameClient(out var rect, out _, out double scale)) return;
+        if (!_pointerDown || e.LeftButton != MouseButtonState.Pressed || !TryGameClient(out var rect, out var origin, out double scale)) return;
         Point point = PointToScreen(e.GetPosition(this));
         double dx = (point.X - _dragStart.X) / scale, dy = (point.Y - _dragStart.Y) / scale;
         if (!_dragged && Math.Abs(dx) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(dy) < SystemParameters.MinimumVerticalDragDistance) return;
         _dragged = true;
         _vm.WidgetLeft = Math.Clamp(_dragLeft + dx, 0, Math.Max(0, rect.Right / scale - Width));
         _vm.WidgetTop = Math.Clamp(_dragTop + dy, 0, Math.Max(0, rect.Bottom / scale - Height));
-        PlaceInsideGame(); e.Handled = true;
+        PlaceInsideGame(rect, origin, scale); e.Handled = true;
     }
     private void Drag_MouseUp(object sender, MouseButtonEventArgs e)
     {
@@ -228,10 +228,10 @@ public sealed partial class StatusWidget : Window, IDisposable
     { if (ReferenceEquals(e.OriginalSource, _dragElement)) { _pointerDown = false; _dragElement = null; } }
     private void Resize_DragDelta(object sender, DragDeltaEventArgs e)
     {
-        if (!_expanded || !TryGameClient(out var rect, out _, out double scale)) return;
+        if (!_expanded || !TryGameClient(out var rect, out var origin, out double scale)) return;
         _vm.WidgetWidth = Math.Clamp(Width + e.HorizontalChange, Math.Min(600, rect.Right / scale), rect.Right / scale);
         _vm.WidgetHeight = Math.Clamp(Height + e.VerticalChange, Math.Min(380, rect.Bottom / scale), rect.Bottom / scale);
-        PlaceInsideGame();
+        PlaceInsideGame(rect, origin, scale);
     }
     private void Navigate(string category) { OverlayTabs.SelectedIndex = category == "@presets" ? 3 : 1; SetExpanded(true, false); }
     private void HandleKey(object sender, KeyEventArgs e)

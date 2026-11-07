@@ -376,7 +376,19 @@ public sealed partial class MainViewModel
             if(result.Succeeded&&result.Applied is JsonElement p&&p.ValueKind==JsonValueKind.Object){double x=p.GetProperty("x").GetDouble(),y=p.GetProperty("y").GetDouble(),z=p.GetProperty("z").GetDouble();if(!new[]{x,y,z}.All(d=>double.IsFinite(d)&&Math.Abs(d)<=100000))throw new InvalidDataException("位置无效");_safePosition=new("临时","本次安全位置",x,y,z);PositionStatus="本机安全位置已记录，仅在当前世界有效";}else PositionStatus=result.Message;
         }catch(Exception e){if(IsCurrentPositionContext(runtime,epoch,context))PositionStatus="记录安全位置失败 · "+e.Message;}
     }
-    internal void StopExperienceAutomation(){AutoRefill=false;CombatFeedback.ResetSession();_autoGeneration++;_experienceWorkVersion++;_experienceWorkBusy=false;_spinStopVersion++;_spinStopPending=false;_spinWasEnabled=false;_curveAppliedSpeed=null;}
+    internal void StopExperienceAutomation()
+    {
+        FunEventsPage.SlotMachine.CancelPendingOperation();
+        AutoRefill = false;
+        CombatFeedback.ResetSession();
+        _autoGeneration++;
+        _experienceWorkVersion++;
+        _experienceWorkBusy = false;
+        _spinStopVersion++;
+        _spinStopPending = false;
+        _spinWasEnabled = false;
+        _curveAppliedSpeed = null;
+    }
     private void ResetPendingSessionWork(){_positionContextEpoch++;_islandLoadBusy=false;Volatile.Write(ref _proofRefreshBusy,0);_positionActionBusy=false;_deathSampleBusy=false;OnPropertyChanged(nameof(CanPositionAction));OnPropertyChanged(nameof(CanLoadSelectedIsland));}
     internal void ResetExperienceWorld(){InvalidatePresetApply();StopExperienceAutomation();CombatFeedback.ResetSession();ResetPendingSessionWork();_safePosition=null;_lastLivingPosition=_deathPosition=null;_lastSampleAlive=false;TrackDeathPosition=false;DeathPositionStatus="世界已切换，临时位置已清空";CombatDiagnostics="世界已切换，等待读取新会话";}
     public void UpdateExperienceSession(JsonElement? raw)

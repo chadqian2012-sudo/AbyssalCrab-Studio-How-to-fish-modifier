@@ -270,6 +270,48 @@ static class PreferencesVerification
             "Applying a normal parameter preset does not replay its captured continuous switches");CloseSession(preset);
         var copy=seed.Copy();copy.Session.Put("toggle:player.health.lock",false);
         Check(seed.Session.Boolean("toggle:player.health.lock")==true&&TrainerUserPreferences.Parse(seed.ToJson()).Session.Boolean("snapshot")==true,"Session dictionaries are copied deeply and round-trip under schema version one");
+        foreach (string transition in new[] { "emergency", "failed clear", "throwing clear", "world", "close", "preset" })
+        {
+            var savedSlot = Saved(false); savedSlot.Session.Put("slotMachine", true);
+            var vm = Connected(savedSlot, out var heldRuntime, out _);
+            var slot = vm.FunEventsPage.SlotMachine;
+            vm.PresetName = "Clear slot"; vm.SavePresetCommand.Execute(null);
+            bool alreadyEnabled = transition == "failed clear";
+            if (alreadyEnabled) AwaitSession((Task)Invoke(slot, "ApplyAsync"));
+            heldRuntime.HoldFeature = "fun.slot_machine.rarity";
+            Task apply = transition == "preset" || alreadyEnabled ? (Task)Invoke(slot, "ApplyAsync") : vm.RestoreLastSessionAsync();
+            Pump();
+            Check(!apply.IsCompleted && heldRuntime.Pending.Count == 1, "Slot rarity write is pending before " + transition);
+            heldRuntime.HoldFeature = "locks.disable_all";
+            Task clear = Task.CompletedTask;
+            if (transition == "world") vm.ResetWorldContext();
+            else if (transition == "close") CloseSession(vm);
+            else if (transition == "preset") clear = vm.ApplySelectedPresetAsync();
+            else
+            {
+                if (transition == "throwing clear") heldRuntime.ThrowFeature = "locks.disable_all";
+                clear = vm.EmergencyDisableAsync();
+            }
+            if (transition is "emergency" or "failed clear" or "preset")
+                Check(!clear.IsCompleted && heldRuntime.Pending.Count == 2, "The clear request is in flight before the rarity reply: " + transition);
+            int sent = heldRuntime.Commands.Count;
+            heldRuntime.Complete(); AwaitSession(apply);
+            Check(!heldRuntime.Commands.Skip(sent).Any(c => c.FeatureId == "fishing.skin_jackpot" && c.Arguments.GetProperty("enabled").GetBoolean()),
+                "A delayed rarity reply cannot send a jackpot enable after " + transition);
+            if (!clear.IsCompleted) heldRuntime.Complete(transition != "failed clear");
+            AwaitSession(clear);
+            if (transition != "close")
+            {
+                Check(slot.Enabled == alreadyEnabled && slot.CanConfigure && !vm.PresetBusy, "Available slot controls retain the last confirmed switch state after " + transition);
+                if (transition is "failed clear" or "throwing clear")
+                {
+                    Check(vm.ModeStatus.Contains("失败"), "The failed emergency clear remains visible: " + transition);
+                    AwaitSession((Task)Invoke(slot, "ApplyAsync"));
+                    Check(slot.Enabled, "Manual slot activation can be retried after " + transition);
+                }
+                CloseSession(vm);
+            }
+        }
         {
             var closing=Connected(Saved(),out var pendingRuntime,out var closingStore);
             AwaitSession(closing.RestoreLastSessionAsync());closing.FlushPreferences();

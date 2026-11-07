@@ -1,5 +1,19 @@
 # 当前交付验证范围 | Current Verification Scope
 
+## r22b 的迟到开启回归已修复 | r22b regression verification
+
+新增测试在旧 r22 上复现了 GitHub PR #1 指出的老虎机迟到开启问题。修正后，包内程序通过 106 项会话恢复、86 项参数及原有 240 项行为检查，合计 432 项。紧停成功、失败、抛错、普通预设、切世界、退出和失败后手动重试均有对应断言。取消放在既有停止入口，由老虎机已有连接代数撤销未完成操作；保留连接和已确认的开关，未增加重连或读回命令。
+
+New assertions reproduced the outstanding PR #1 slot-machine race against r22. The corrected packaged application passed 106 session, 86 preference and 240 existing behavior assertions (432 total), including successful, failed and throwing clears, presets, world changes, closing and manual retry. Cancellation belongs to the existing stop owner and slot-machine epoch; it retains the connection and confirmed switch without extra reconnects or proof reads.
+
+最终包也通过94项离屏UI检查，生成95张图，无绑定错误；两包450个有效文件内容一致。悬浮窗轮询、拖动、缩放和展开复用同一次位置/DPI 读取。每轮轮询的重复读取由两次减为一次，这是调用路径核对，未测量真实帧率。UI 使用既有离屏检查；实机热键、DPI、焦点与游戏行为仍在原 60 项人工验收中。本轮没有启动可见软件窗口或操作游戏。
+
+The final package also passed 94 off-screen UI checks with 95 renders and no binding errors; both variants have 450 byte-identical active files. Overlay polling, dragging, resizing and expansion reuse their current geometry/DPI read. Polling performs one query instead of two; this is a source-path count, not a measured frame-rate claim. Existing off-screen UI checks are reused. Actual hotkeys, DPI, focus and gameplay remain within the 60 open manual acceptance items. No visible app window or game input was used.
+
+### r22b 证据附录 | Evidence appendix
+
+`build/verification-r22b-final/` contains the final packaged reports; `build/merge-slot-repro/before/` preserves the failing r22 result. Bundle/branding comparisons are under `build/package-audit-r22b/`. The local delivery includes the same reports and hashes.
+
 ## r22 最终包通过离线检查，桌面快捷方式已更新
 
 2026-11-07：主代理使用最终默认包内的程序运行 240 项行为检查：悬浮面板 61、预设边界 42、数字绑定 7、体验功能 130，全部通过。本轮先用 r21 复现了 4 项失败；新增检查使用真实主窗口数据对象和未显示的 WPF 列表、文本控件，验证选择及状态通知。没有操作游戏或可见桌面。
