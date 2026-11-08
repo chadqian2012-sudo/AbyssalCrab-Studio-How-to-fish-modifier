@@ -1,6 +1,20 @@
 # 当前交付验证范围 | Current Verification Scope
 
-## r22b 的迟到开启回归已修复 | r22b regression verification
+## r23 两种候选包的内容一致，游戏画面待验收 | r23 package verification
+
+2026-11-08，默认版和压缩版解出的 450 个文件逐项相同。两份主程序都嵌入经核对的新 Runtime 和 Harmony。以下检查直接使用候选运行时或从成品提取的应用程序集。
+
+- **运行时 55 项通过。** 执行候选 DLL 内的几何裁剪代码，并静态核对队友筛选、双开关生命周期、独立距离命令、模型替换和边界回退。与 r22b 逐方法比对，1129 个原方法保持，16 个改变，31 个新增。
+- **应用行为 573 项通过。** 包括原有 432 项行为检查、60 项目标选项与距离设置检查、81 项手记操作检查。各套检查加载的主程序与最终包提取件哈希一致。
+- **离屏界面 116 项通过。** 生成 112 张图。主窗和悬浮窗共用同一个距离输入，小数、越界草稿、应用按钮及小窗口滚动均已检查。
+
+Both bundles produced 450 identical payloads, including the new embedded Runtime and Harmony. The 55 runtime checks exercise pure clipping math and inspect generated code. Comparison with r22b found 1129 unchanged methods, 16 changed and 31 added. The extracted application passed 573 behavior checks and 116 off-screen UI checks, generating 112 images.
+
+本轮没有运行或注入游戏。首次测试须重启游戏。C-15 记录了骨骼与框的贴合、原生准心对齐、挡墙后和多人显示、失焦清理，以及同场 24、64、128 个实体时的帧耗时。共 61 项人工验收仍待完成。
+
+No game process was launched or injected. Restart the game before first use. C-15 covers camera and skeleton alignment, occluded targets, multiplayer, focus transitions, and live frame cost at 24, 64 and 128 entities. All 61 manual items remain open.
+
+## 历史 r22b 的迟到开启回归已修复 | Historical r22b regression verification
 
 新增测试在旧 r22 上复现了 GitHub PR #1 指出的老虎机迟到开启问题。修正后，包内程序通过 106 项会话恢复、86 项参数及原有 240 项行为检查，合计 432 项。紧停成功、失败、抛错、普通预设、切世界、退出和失败后手动重试均有对应断言。取消放在既有停止入口，由老虎机已有连接代数撤销未完成操作；保留连接和已确认的开关，未增加重连或读回命令。
 
@@ -14,7 +28,7 @@ The final package also passed 94 off-screen UI checks with 95 renders and no bin
 
 `build/verification-r22b-final/` contains the final packaged reports; `build/merge-slot-repro/before/` preserves the failing r22 result. Bundle/branding comparisons are under `build/package-audit-r22b/`. The local delivery includes the same reports and hashes.
 
-## r22 最终包通过离线检查，桌面快捷方式已更新
+## 历史 r22 最终包通过离线检查，桌面快捷方式已更新
 
 2026-11-07：主代理使用最终默认包内的程序运行 240 项行为检查：悬浮面板 61、预设边界 42、数字绑定 7、体验功能 130，全部通过。本轮先用 r21 复现了 4 项失败；新增检查使用真实主窗口数据对象和未显示的 WPF 列表、文本控件，验证选择及状态通知。没有操作游戏或可见桌面。
 
@@ -32,7 +46,7 @@ The UI subagent reran all 94 off-screen checks against the final packaged applic
 
 The default and compressed packages contain 450 byte-identical active files and pass branding checks; Runtime and Harmony retain their previous contents. As requested, the primary agent updated the existing desktop shortcut to r22 and verified its target, icon, empty arguments and file hash. The previous shortcut is backed up, the r17c executable hash is unchanged, and r21 remains the previous candidate. This operation did not launch the application or game. Real hotkeys, focus, scrolling and game behavior remain manual acceptance work; all 60 existing items stay open.
 
-## r21 最终包通过离线检查，真实操作仍待验收
+## 历史 r21 最终包通过离线检查，真实操作仍待验收
 
 2026-11-06：主代理使用最终默认包内的程序运行 233 项行为检查：悬浮面板 54、预设边界 42、数字绑定 7、体验功能 130，全部通过。同一包内程序通过 76 项界面检查，生成 73 张离屏图，绑定错误记录为空。短窗口检查覆盖 620×380 和 600×380：搜索与摘要同时展开后，快捷区仍可滚动；长名称、搜索提示和多行错误也已检查。
 
@@ -54,7 +68,7 @@ Both package variants contain 450 byte-identical active files and pass branding 
 
 The desktop remains on r17c, with r20-final retained as the previous candidate. No game or desktop input was sent. A possible placement mismatch between game and overlay DPI modes remains an unverified code-level concern and received no speculative patch. It joins real hotkey, focus, save-feedback and short-window operation in O-01 through O-05; all 60 manual/live acceptance items remain open.
 
-## r20 两种候选包通过离线核验，真实操作仍待验收
+## 历史 r20 两种候选包通过离线核验，真实操作仍待验收
 
 2026-11-06：主代理使用最终默认包提取的应用程序集重新执行 101 项行为检查：悬浮面板 52、预设与重连边界 42、数字绑定 7，全部通过。包内程序集另通过 64 项界面检查，生成 65 张离屏图，WPF 绑定错误文件为空。各报告中的应用哈希与最终包一致；这些是本轮实际重跑结果，没有将 r19 的旧记录计入。
 
@@ -77,7 +91,7 @@ Runtime 和 r19 相同；桌面仍为 r17c，r19 保留作前一候选。真实�
 Runtime is unchanged from r19. The desktop remains on r17c, with r19 kept as the previous candidate. Real keyboard/IME search, hotkeys and focus, status presentation and preset editing across both windows remain in O-01 through O-05; the existing 60 manual/live acceptance items retain their status. No desktop or game input was sent; off-screen renders are not live-game acceptance.
 
 
-## r19 的小窗布局与共享操作通过离线检查
+## 历史 r19 的小窗布局与共享操作通过离线检查
 
 2026-11-06：从最终默认包提取的应用程序集通过 93 项既有行为检查：悬浮面板 44、预设与重连边界 42、数字绑定 7。更新后的界面验证通过 40 项检查，生成 47 张离屏图，未出现 WPF 绑定错误。检查包括全部十一类窄窗页面、宽窗列数、末尾分类可达、滚动时选中背景立即跟随、无效数字草稿跨尺寸保留、空面板、长名称、复杂页底部及多分类目录可达。检查读取的程序集哈希与实际包一致。
 
@@ -152,7 +166,7 @@ The latest review-fix delivery did not repeat in-game injection, generation, tel
 
 Full verification logs and machine reports remain in the original delivery directory's `verification/` folder. They are bulky generated artifacts and are excluded from the source repository by default.
 
-## r20 证据附录 | r20 evidence appendix
+## 历史 r20 证据附录 | r20 evidence appendix
 
 - 包内行为结果 / Packaged behavior results: `build/verification-r20-final/overlay/results.json`, `build/verification-r20-final/presets/results.json`, and the numeric runner's `results.json` under `build/verification-r20-final/numeric/`.
 - 界面及包一致性 / UI and payload comparison: `build/verification-r20-final/ui/ui-verification.json`, `binding-errors.txt`, `build/package-audit-r20/package-payload-equivalence.json`, and each variant's `branding-results.json`.
@@ -160,7 +174,7 @@ Full verification logs and machine reports remain in the original delivery direc
 
 报告和图像随本地候选交付保存，不将生成物提交到源码历史。This generated evidence is retained with the local candidate delivery, not committed to source history.
 
-## r21 证据附录 | r21 evidence appendix
+## 历史 r21 证据附录 | r21 evidence appendix
 
 - 包内行为结果 / Packaged behavior results: `build/verification-r21-final/overlay/results.json`, `presets/results.json`, and the numeric/experience runner results under the same directory.
 - 包内界面检查 / Packaged UI check: `build/verification-r21-final/ui/ui-verification.json` (v8), `binding-errors.txt` and 73 rendered PNGs.
@@ -171,7 +185,7 @@ Full verification logs and machine reports remain in the original delivery direc
 
 生成的报告和图像随本地候选交付保存，不提交到源码历史。Generated reports and images are retained with the local candidate, not committed to source history.
 
-## r22 证据附录 | r22 evidence appendix
+## 历史 r22 证据附录 | r22 evidence appendix
 
 - 修复前的 57/61 与修复后的 61/61 / Before and after behavior results: `build/r22-state-repro/before/results.json`, `build/r22-state-fixed/results/results.json`.
 - 包内行为结果 / Packaged behavior results: `build/verification-r22-final/overlay/results.json`, `presets/results.json` and the numeric/experience results under the same directory.
@@ -182,3 +196,15 @@ Full verification logs and machine reports remain in the original delivery direc
 - 桌面更新记录及旧快捷方式 / Desktop update record and previous shortcut: the delivery directory's `verification/desktop-delivery.json` and `verification/AbyssalCrab Studio-before-r22.lnk`.
 
 包内界面及桌面更新已有对应记录；这些证据不代表真实游戏验收。Packaged UI and desktop changes have their corresponding records; these results do not establish live-game acceptance.
+
+## r23 证据附录 | Evidence appendix
+
+- Runtime: `build/staging/entity-overlay/runtime-audit.json`, `build/staging/entity-overlay/verification/entity-overlay-verification.json`.
+- Package comparison: `build/package-audit-r23/package-payload-equivalence.json`.
+- Behavior and off-screen UI: `build/behavior-r23/behavior-manifest.json`, `build/ui-r23-packaged/ui-verification.json`.
+- Application SHA-256: `69fc1a5f3dd02411f0e6a11a6e3981604be2d17719a9a9d62d9c3bf75ca38c9e`.
+- Runtime SHA-256: `36d5f71f02f9dd21ffcd37aaf7f0266732c6783c84b86802d6186ffc37db56ee`.
+- Parent r22b Runtime SHA-256: `b5bf1fb7fa166ec4c500d03231594862af4784d01805497446d425f99206f210`.
+- Game assembly SHA-256: `e3ec0befacc5269efdecb279f0ae72155fcde3ebaeed07e361aa15e6f7fc84b1`.
+- single-file SHA-256: `9594a7ed8894086c73996c919f989c6e017832df8914f4e24aad4ebb27998f9c`.
+- compressed-single-file SHA-256: `bcab66c459d6b92711960d370bc159b5b84175169721f5a8954863d0bfbbff68`.

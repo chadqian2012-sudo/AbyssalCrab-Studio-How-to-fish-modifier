@@ -8,7 +8,17 @@ AbyssalCrab Studio 是一款面向《How to Fish》的 Windows 桌面助手。�
 
 AbyssalCrab Studio is a Windows desktop assistant for *How to Fish*. It uses a WPF interface and an in-game runtime bridge for player, fishing, combat, teleport, item, and fun-event controls. The application has 11 feature categories, with search, parameter presets, favorites, recent generation settings, teleport-point management, aim-assist options, and a status widget.
 
-## r22b 修正停用后的迟到开启 | Stop pending slot-machine operations
+## r23 候选新增共享实体标注，实机验收仍待完成 | r23 entity-overlay candidate
+
+2026-11-08：武器战斗新增一张共享“实体标注”卡。辅助瞄准或魔法子弹开启时，标注显示距离内所有可攻击活体和有效队友，墙后仍显示。红框始终保留；有可用骨骼时叠加骨骼，并从当前准心投影位置连线到目标。准心连线宽 1 像素，不透明度为 55%。显示距离默认 200 米，可独立调整为 1–1000 米小数，不改变两个功能的攻击距离或锁定队友开关。
+
+On 2026-11-08, the r23 candidate adds one shared **Entity overlay** card to combat settings. While aim assist or magic bullets are enabled, it marks all attackable living entities and valid teammates within the display distance, including targets behind walls. The red box remains visible; available bones are drawn over it, with a line from the current projected aiming point to the target. Aim-to-target lines use 1-pixel width and 55% opacity. Display distance defaults to 200 m and accepts decimals from 1–1000 m, independently of attack range and teammate-targeting switches.
+
+默认版和压缩版已解包核对，450 个文件逐项一致。成品通过 55 项运行时检查、573 项应用行为检查和 116 项离屏界面检查。本轮没有启动游戏。首次试用请重启游戏，按 C-15 检查骨骼、多人显示和高密度场景性能。桌面继续使用 r22b。[功能指南](docs/FEATURES.md) · [验证记录](docs/VERIFICATION.md)
+
+Both packages contain 450 identical payload files. Offline checks passed for the candidate runtime (55 checks), packaged application behavior (573), and off-screen UI (116). Restart the game before trying the candidate. In-game rendering, multiplayer and performance at higher entity counts remain open under C-15. The desktop continues to use r22b.
+
+## r22b 历史记录：修正停用后的迟到开启 | r22b history
 
 2026-11-07：紧急停用、预设切换、切换世界和退出现在先撤销老虎机尚未完成的操作，避免迟到的档位回复追加开启命令；清锁失败仍保留连接和已确认状态。悬浮窗定位复用本次读取的位置及 DPI，轮询和拖动等路径不再立即重复查询。最终包通过 432 项离线行为检查；实际热键和游戏效果仍待人工验收。
 
@@ -16,9 +26,9 @@ The r22b patch cancels pending slot-machine work through the existing stop owner
 
 ## r22 交付记录 | r22 delivery history
 
-当前分支为 **r22 候选（2026-11-07）**。重复导入传送点保留选择与草稿；保存恢复后清除旧错误。小窗口的传送点、预设及全部功能页可滚动到操作项，长状态限制高度并保留全文提示。`Ctrl+F` 保留给面板搜索。玻璃主题、动画、共享参数与 Runtime 保留。最终包通过 240 项行为检查和 94 项界面检查，生成 95 张离屏图，绑定错误记录为空。两种包的 450 个有效文件内容一致。桌面快捷方式已按用户要求更新至 r22；真实游戏验收未进行。见 [功能指南](docs/FEATURES.md) 与 [验证说明](docs/VERIFICATION.md)。
+历史候选 **r22（2026-11-07）**。重复导入传送点保留选择与草稿；保存恢复后清除旧错误。小窗口的传送点、预设及全部功能页可滚动到操作项，长状态限制高度并保留全文提示。`Ctrl+F` 保留给面板搜索。玻璃主题、动画、共享参数与 Runtime 保留。最终包通过 240 项行为检查和 94 项界面检查，生成 95 张离屏图，绑定错误记录为空。两种包的 450 个有效文件内容一致。桌面快捷方式已按用户要求更新至 r22；真实游戏验收未进行。见 [功能指南](docs/FEATURES.md) 与 [验证说明](docs/VERIFICATION.md)。
 
-Current branch: **r22 candidate (2026-11-07)**. Duplicate teleport imports preserve selection and drafts, while successful save retries clear old warnings. Short teleport, preset and full-feature pages scroll to their controls; status height is bounded with full-text tooltips. `Ctrl+F` remains panel search. Glass styling, animation, shared parameters and Runtime are retained. The final package passed 240 behavior assertions and 94 UI checks with 95 off-screen renders and no binding errors. Both package variants contain 450 byte-identical active files. The desktop shortcut now points to r22 as requested; live-game acceptance remains pending. See [usage](docs/FEATURES.md) and [verification](docs/VERIFICATION.md).
+Historical candidate: **r22 (2026-11-07)**. Duplicate teleport imports preserve selection and drafts, while successful save retries clear old warnings. Short teleport, preset and full-feature pages scroll to their controls; status height is bounded with full-text tooltips. `Ctrl+F` remains panel search. Glass styling, animation, shared parameters and Runtime are retained. The final package passed 240 behavior assertions and 94 UI checks with 95 off-screen renders and no binding errors. Both package variants contain 450 byte-identical active files. The desktop shortcut now points to r22 as requested; live-game acceptance remains pending. See [usage](docs/FEATURES.md) and [verification](docs/VERIFICATION.md).
 
 上一候选 **r21（2026-11-06）** 修正了搜索、持续功能摘要和长提示挤占小窗口操作区的问题。其最终包通过 233 项行为检查和 76 项离屏界面检查。该记录仅对应 r21，不算作 r22 的包内核验。
 

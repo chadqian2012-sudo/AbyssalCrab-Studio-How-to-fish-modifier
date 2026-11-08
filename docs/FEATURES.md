@@ -1,5 +1,23 @@
 # 功能指南 | Feature Guide
 
+## r23 实体标注共享显示参数，攻击筛选保持独立 | Entity overlay shares display settings
+
+武器战斗中的“实体标注”卡由主窗口和悬浮页共用。辅助瞄准或魔法子弹至少一项开启时，显示距离内的所有可攻击活体和有效队友都可标注，墙后仍显示；是否显示队友不受两项“锁定队友”攻击开关控制。两项功能都关闭后隐藏标注。
+
+The main window and floating page share one **Entity overlay** card. While either aim assist or magic bullets are enabled, all attackable living entities and valid teammates within the display distance are marked, including targets behind walls. Displaying teammates is independent of both teammate-targeting switches. Turning both combat features off hides the marks.
+
+每个目标始终有红框；有可用骨骼时叠加骨骼，不替换红框。从当前准心投影位置到目标的连线宽 1 像素，不透明度为 55%。只有真实可用的骨骼才绘制连线，不虚构缺失骨骼。标注距离默认 200 米，允许 1–1000 米小数，与辅助瞄准和魔法子弹各自的攻击距离独立。
+
+Every marked target retains a red box, with available bones overlaid rather than replacing it. Lines from the current projected aiming point to the target use 1-pixel strokes at 55% opacity. Missing bones are not invented. Display distance defaults to 200 m and accepts decimals from 1–1000 m, independently of the two attack-distance settings.
+
+编辑距离后点击“应用显示距离”，只更新绘制参数，不重发瞄准开关。无效数字草稿保留且不能单独提交；开启原有瞄准功能仍使用共享的最后有效距离，不因标注草稿无效而失败。成功提示显示本次回包确认的距离，不是持续读取游戏状态。预设与显式恢复上次会话会恢复该参数；启动或恢复参数本身不会开启瞄准功能。
+
+**Apply display distance** updates rendering only and sends no combat-toggle request. Invalid drafts remain editable and cannot be submitted separately; enabling either combat feature uses the shared last valid distance, so an invalid display draft does not block it. Success reports the distance confirmed by that request, not continuous live-state monitoring. Presets and explicit session restoration include this setting; startup and parameter restoration do not themselves enable aiming.
+
+配置沿用现有参数文件的 `General.entityOverlayDistance`，保存最后有效值，不改变文件版本。两个原有战斗配置请求带上可选 `entityOverlayDistance`；独立应用使用 `view.entity_overlay.configure {distance}`。重连及失败仍沿用原有处理规则。实机画面、遮挡与负载表现待 C-15 验收。
+
+The existing preference schema stores the last valid value in `General.entityOverlayDistance`. Both combat configuration requests carry optional `entityOverlayDistance`; independent apply uses `view.entity_overlay.configure {distance}`. Existing reconnect and failure rules remain in effect. Actual rendering, occlusion behavior and load still require C-15 manual acceptance.
+
 ## r22 小窗口保留操作空间与当前设置 | Shared game panel
 
 在主窗口勾选“游戏悬浮窗”，切回已连接的游戏窗口后显示 AC 按钮。拖动按钮调整位置，点击或按 `Home` 展开；“收起”或 `Esc` 返回游戏。设置中可改成 `F8`、`Ctrl+Home` 等快捷键。`Ctrl+Shift+F12` 保留为紧急停用，面板顶部也有同一操作的按钮。
