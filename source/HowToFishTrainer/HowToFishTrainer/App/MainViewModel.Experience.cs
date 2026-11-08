@@ -89,7 +89,7 @@ public sealed partial class MainViewModel
     public ParameterPreset? SelectedPreset { get => _selectedPreset; set => Set(ref _selectedPreset,value); }
     public string PresetName { get => _presetName; set => Set(ref _presetName,value ?? ""); }
     public string ExperienceStatus { get => _experienceStore.Warning ?? _experienceStatus; private set => Set(ref _experienceStatus,value); }
-    public bool PresetBusy { get => _presetBusy; private set { if(Set(ref _presetBusy,value)){OnPropertyChanged(nameof(CanRestoreLastSession));OnPropertyChanged(nameof(CanEditParameters));OnPropertyChanged(nameof(CanPositionAction));OnPropertyChanged(nameof(CanLoadSelectedIsland));foreach(var f in AllFeatures)f.RefreshExperienceAvailability();} } }
+    public bool PresetBusy { get => _presetBusy; private set { if(Set(ref _presetBusy,value)){OnPropertyChanged(nameof(CanRestoreLastSession));OnPropertyChanged(nameof(CanEditParameters));OnPropertyChanged(nameof(CanApplyEntityOverlay));OnPropertyChanged(nameof(CanPositionAction));OnPropertyChanged(nameof(CanLoadSelectedIsland));foreach(var f in AllFeatures)f.RefreshExperienceAvailability();} } }
     public bool CanEditParameters => !PresetBusy;
     private int _presetApplyVersion;
     private void InvalidatePresetApply()

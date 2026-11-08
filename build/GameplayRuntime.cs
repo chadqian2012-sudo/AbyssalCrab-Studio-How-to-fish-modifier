@@ -87,6 +87,7 @@ namespace AbyssalCrab.Runtime
         }
         public static bool Validate(string id, JObject args)
         {
+            if (id == "combat.silent_aim" && args["entityOverlayDistance"] != null) MagicRangePolicy.CheckedDistance(args["entityOverlayDistance"]);
             if (id == "player.move.multiplier" || id == "player.sprint.multiplier" || id == "player.jump.multiplier")
             { Require(args, "value", .25, GameplayPolicy.Maximum(id), false); return true; }
             if (id != "combat.silent_aim" && id != "player.air_dash.lock") return false;
@@ -113,8 +114,9 @@ namespace AbyssalCrab.Runtime
             if (id == "combat.aim_assist") _head = args.Value<bool?>("headLockEnabled") ?? false;
             if (id == "combat.silent_aim")
             {
+                if(args["entityOverlayDistance"] != null) MagicRangeRenderer.ConfigureDistance(host, MagicRangePolicy.CheckedDistance(args["entityOverlayDistance"]));
                 if(args.Value<bool?>("enabled")==false)
-                { GameplayTargeting.ConfigureTeammates(false); MagicRangeRenderer.Stop(); return result; }
+                { GameplayTargeting.ConfigureTeammates(false); MagicRangeRenderer.Refresh(host); return result; }
                 _angle = args.Value<float?>("angle") ?? 8; _distance = args.Value<float?>("distance") ?? 35;
                 _strength = args.Value<float?>("strength") ?? 100; _trigger = args.Value<string>("trigger") ?? "fire";
                 GameplayTargeting.ConfigureTeammates(args.Value<bool?>("targetTeammates") ?? false);
@@ -123,7 +125,7 @@ namespace AbyssalCrab.Runtime
             return result;
         }
         public static void Restore(TrainerBridgeHost host, string id)
-        { if (id == "combat.silent_aim") { ClearProjectiles(); GameplayTargeting.ConfigureTeammates(false); MagicRangeRenderer.Stop(); } if (id == "player.air_dash.lock") StopDash(); }
+        { if (id == "combat.silent_aim") { ClearProjectiles(); GameplayTargeting.ConfigureTeammates(false); MagicRangeRenderer.Refresh(host); } if (id == "player.air_dash.lock") StopDash(); }
         public static void Reset(TrainerBridgeHost host)
         { ClearProjectiles(); StopDash(); GameplayTargeting.Reset(); MagicRangeRenderer.Stop(); _host = null; _head = false; _explosion = null;_nextDashWarning=_nextShotWarning=0;_lastDashError=_lastShotError=null; }
         private static void ClearProjectiles() { Shots.Clear(); Expired.Clear(); _nextPrune = 0; }

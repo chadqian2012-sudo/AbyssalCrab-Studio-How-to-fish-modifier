@@ -933,6 +933,22 @@
                   </Grid>
                 </Border>
                 <Border Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="18" Margin="0,0,0,12" Visibility="{Binding IsCombatPage, Converter={StaticResource BoolToVisibility}}">
+                  <StackPanel>
+                    <TextBlock Text="实体标注" FontSize="17" FontWeight="SemiBold"/>
+                    <TextBlock Text="辅助瞄准或魔法子弹开启时显示；两者关闭后隐藏。所有可攻击活体和有效队友均显示，墙后可见；始终显示红框，并绘制骨骼与连线。" Style="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,7,0,0"/>
+                    <Grid Margin="0,13,0,0">
+                      <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                      <StackPanel Margin="0,0,12,0">
+                        <TextBlock Text="显示距离 1–1000m，支持小数" Style="{StaticResource Caption}"/>
+                        <app:NumericInputBox Margin="0,5,0,0" Input="{Binding EntityOverlayDistanceInput}"/>
+                      </StackPanel>
+                      <Button Grid.Column="1" Content="应用显示距离" Style="{StaticResource PrimaryButton}" Padding="20,9" VerticalAlignment="Bottom" Command="{Binding ApplyEntityOverlayCommand}" IsEnabled="{Binding CanApplyEntityOverlay}"/>
+                    </Grid>
+                    <TextBlock Text="{Binding EntityOverlayStatus}" Style="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,9,0,0"/>
+                    <TextBlock Text="显示距离与两个功能的攻击距离独立；此处只更新标注，不切换瞄准功能，也不改变锁定队友选项。" Style="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,5,0,0"/>
+                  </StackPanel>
+                </Border>
+                <Border Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="18" Margin="0,0,0,12" Visibility="{Binding IsCombatPage, Converter={StaticResource BoolToVisibility}}">
                   <StackPanel DataContext="{Binding Crosshair}">
                     <Grid>
                       <Grid.ColumnDefinitions>

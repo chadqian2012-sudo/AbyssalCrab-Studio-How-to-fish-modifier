@@ -26,66 +26,76 @@ internal static class PatchTargetOptions
     public static void Main(string[] args)
     {
         string baseline = args[0], helper = args[1], output = args[2], game = args[3];
-        if (Hash(baseline) != "f4ca19d5a62f6ecfe967d608fbb6255c200e40f6756b2eaba675e44e30669f53") throw new Exception("Unexpected r11 runtime");
+        const string parentHash = "b5bf1fb7fa166ec4c500d03231594862af4784d01805497446d425f99206f210";
+        if (Hash(baseline) != parentHash) throw new Exception("Unexpected r22b Runtime");
         if (Hash(game) != "e3ec0befacc5269efdecb279f0ae72155fcde3ebaeed07e361aa15e6f7fc84b1") throw new Exception("Unexpected game build");
         using var module = ModuleDefMD.Load(baseline);
+        using var source = ModuleDefMD.Load(helper);
         var before = module.GetTypes().SelectMany(t => t.Methods).ToDictionary(m => m.FullName, Body);
-        string prefix = "AbyssalCrab.Runtime.";
-        string[] replace = { prefix + "GameplayTargeting", prefix + "PredictiveAimRuntime", prefix + "GameplayRuntime" };
-        string[] addedTypes = { prefix + "MagicRangePolicy", prefix + "MagicRangeRenderer" };
-        foreach (string name in addedTypes)
+        const string prefix = "AbyssalCrab.Runtime.";
+        string[] newTypes = { "EntityAimFrame", "EntityOverlayProjection", "EntityOverlayGeometry", "EntityOverlayVisual" };
+        string[] replacements = { "MagicRangePolicy", "GameplayTargeting", "PredictiveAimRuntime", "GameplayRuntime", "CombatBridgeRuntime", "MagicRangeRenderer" };
+        foreach (string shortName in newTypes.Concat(replacements))
         {
+            string name = prefix + shortName;
+            var old = module.GetTypes().SingleOrDefault(t => t.FullName == name);
+            var fields = old?.Fields.ToDictionary(f => f.Name.String, f => f.FieldSig.Type.FullName);
+            if (old != null) module.Types.Remove(old);
             var added = PatchSpin.Clone(module, helper, name);
-            // Clone was designed for static helpers and defaults the base to Object.
-            // The renderer must retain MonoBehaviour for AddComponent and Unity messages.
-            if (name.EndsWith("MagicRangeRenderer"))
-                added.BaseType = module.GetTypes().Single(t => t.FullName == prefix + "CombatFeedbackRenderer").BaseType;
+            var original = source.GetTypes().Single(t => t.FullName == name);
+            added.BaseType = original.IsValueType ? module.CorLibTypes.GetTypeRef("System", "ValueType") : new Importer(module).Import(original.BaseType);
+            if (fields != null) foreach (var field in fields)
+                if (added.Fields.Single(f => f.Name == field.Key).FieldSig.Type.FullName != field.Value)
+                    throw new Exception("Existing field contract changed: " + name + "." + field.Key);
         }
-        foreach (string name in replace)
-        {
-            var old = module.GetTypes().Single(t => t.FullName == name);
-            var fields = old.Fields.ToDictionary(f => f.Name.String, f => f.FieldSig.Type.FullName);
-            module.Types.Remove(old);
-            var added = PatchSpin.Clone(module, helper, name);
-            foreach (var f in fields)
-                if (added.Fields.Single(x => x.Name == f.Key).FieldSig.Type.FullName != f.Value) throw new Exception("Field changed: " + name + "." + f.Key);
-        }
-        var all = replace.Concat(addedTypes).ToHashSet();
+        var all = newTypes.Concat(replacements).Select(n => prefix + n).ToHashSet();
         var methods = module.GetTypes().Where(t => all.Contains(t.FullName)).SelectMany(t => t.Methods).ToDictionary(m => m.FullName);
         var fieldsMap = module.GetTypes().Where(t => all.Contains(t.FullName)).SelectMany(t => t.Fields).ToDictionary(f => f.FullName);
         foreach (var method in module.GetTypes().SelectMany(t => t.Methods).Where(m => m.HasBody))
-            foreach (var i in method.Body.Instructions)
-                if (i.Operand is IField f && f.FieldSig != null && all.Contains(f.DeclaringType.FullName)) i.Operand = fieldsMap[f.FullName];
-                else if (i.Operand is IMethod m && m.MethodSig != null && all.Contains(m.DeclaringType.FullName)) i.Operand = methods[m.FullName];
+            foreach (var instruction in method.Body.Instructions)
+                if (instruction.Operand is IField field && field.FieldSig != null && all.Contains(field.DeclaringType.FullName)) instruction.Operand = fieldsMap[field.FullName];
+                else if (instruction.Operand is IMethod called && called.MethodSig != null && all.Contains(called.DeclaringType.FullName)) instruction.Operand = methods[called.FullName];
+        var readAim = module.GetTypes().Single(t => t.FullName == "HowToFishTrainer.Runtime.TrainerBridgeHost").Methods.Single(m => m.Name == "ReadAimProjection");
+        readAim.Body = new CilBody();
+        readAim.Body.Instructions.Add(Instruction.Create(OpCodes.Ldarg_0));
+        readAim.Body.Instructions.Add(Instruction.Create(OpCodes.Call, module.GetTypes().Single(t => t.FullName == prefix + "EntityOverlayProjection").Methods.Single(m => m.Name == "Read")));
+        readAim.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
         var identity = SHA256.HashData(File.ReadAllBytes(baseline).Concat(File.ReadAllBytes(helper)).Concat(File.ReadAllBytes(args[4])).ToArray());
-        module.Assembly.Name = "HowToFishTrainer.Runtime.V1_1_37.TargetOptions." + Convert.ToHexString(identity)[..16].ToLowerInvariant();
+        module.Assembly.Name = "HowToFishTrainer.Runtime.V1_1_37.EntityOverlay." + Convert.ToHexString(identity)[..16].ToLowerInvariant();
         module.Mvid = new Guid(identity.AsSpan(0, 16));
         module.Write(output);
         using var final = ModuleDefMD.Load(output);
         var after = final.GetTypes().SelectMany(t => t.Methods).ToDictionary(m => m.FullName, Body);
         var changed = new List<string>();
-        foreach (var m in before)
-        { if (!after.TryGetValue(m.Key, out var body)) throw new Exception("Method removed: " + m.Key); if (body != m.Value) changed.Add(m.Key); }
-        string[] allowed = {
-            prefix+"PredictiveAimRuntime::Validate(", prefix+"PredictiveAimRuntime::Configure(", prefix+"PredictiveAimRuntime::Reset(", prefix+"PredictiveAimRuntime::Alive(",
-            prefix+"GameplayTargeting::Point(", prefix+"GameplayTargeting::Reset(",
-            prefix+"GameplayRuntime::Validate(", prefix+"GameplayRuntime::Configured(", prefix+"GameplayRuntime::Restore(", prefix+"GameplayRuntime::Reset(" };
-        if (changed.Count != allowed.Length || allowed.Any(a => !changed.Any(c => c.Contains(a)))) throw new Exception("Unexpected method changes: " + string.Join(";", changed));
-        var addedMethods = after.Keys.Except(before.Keys).ToArray();
-        if (addedMethods.Any(m => !addedTypes.Any(t => m.Contains(t + "::")) && !m.Contains(prefix+"GameplayTargeting::ConfigureTeammates("))) throw new Exception("Unexpected added methods");
-        if (final.GetAssemblyRefs().Any(r => r.Name == "TargetOptionsRuntime")) throw new Exception("Helper dependency leaked");
-        string rendererBase = final.GetTypes().Single(t => t.FullName == prefix + "MagicRangeRenderer").BaseType.FullName;
-        if (rendererBase != "UnityEngine.MonoBehaviour") throw new Exception("Renderer is not a Unity component");
-        foreach (var type in new[] { "PredictiveAimRuntime", "GameplayTargeting" })
+        foreach (var method in before)
         {
-            var m = final.GetTypes().Single(t => t.FullName == prefix + type).Methods.Single(x => x.Name == (type == "GameplayTargeting" ? "Point" : "Alive"));
-            if (!m.Body.Instructions.Any(i => i.Operand is IField f && f.Name == "_targetTeammates") || m.Body.Instructions.Any(i => i.Operand is IMethod c && c.Name == "get_UseFriendlyFire"))
-                throw new Exception("Teammate gate missing or tied to friendly fire: " + m.FullName);
+            if (!after.TryGetValue(method.Key, out string body)) throw new Exception("Existing method removed: " + method.Key);
+            if (body != method.Value) changed.Add(method.Key);
         }
-        var report = new { passed=true, baselineRuntimeSha256="b8d32abe9a31b36c5b1b0dac214daba1f6dfc8506b4f3ca09249d86aa3f32580", parentRuntimeSha256=Hash(baseline),
-            runtimeSha256=Hash(output), gameAssemblySha256=Hash(game), retainedMethods=before.Count-changed.Count, changedMethods=changed, addedMethods,
-            rendererBaseType=rendererBase, gameInjected=false, gameAssetsWritten=false, experimentalRadarSlopeIncluded=false };
-        File.WriteAllText(Path.Combine(Path.GetDirectoryName(output)!, "runtime-audit.json"), JsonSerializer.Serialize(report,new JsonSerializerOptions{WriteIndented=true}));
-        Console.WriteLine($"Audited: {changed.Count} changed, {before.Count-changed.Count} retained, {addedMethods.Length} added; {Hash(output)}");
+        string[] allowed = {
+            prefix + "GameplayTargeting::.cctor(", prefix + "GameplayTargeting::Reset(", prefix + "GameplayTargeting::Refresh(", prefix + "GameplayTargeting::Point(",
+            prefix + "PredictiveAimRuntime::Validate(", prefix + "PredictiveAimRuntime::Configure(",
+            prefix + "GameplayRuntime::Validate(", prefix + "GameplayRuntime::Configured(", prefix + "GameplayRuntime::Restore(",
+            prefix + "CombatBridgeRuntime::TryHandle(", prefix + "MagicRangeRenderer::.ctor(", prefix + "MagicRangeRenderer::.cctor(",
+            prefix + "MagicRangeRenderer::Configure(", prefix + "MagicRangeRenderer::OnDestroy(", prefix + "MagicRangeRenderer::OnGUI(",
+            "HowToFishTrainer.Runtime.TrainerBridgeHost::ReadAimProjection(" };
+        if (changed.Any(name => !allowed.Any(name.Contains))) throw new Exception("Unrelated methods changed: " + string.Join(";", changed.Where(name => !allowed.Any(name.Contains))));
+        var addedMethods = after.Keys.Except(before.Keys).ToArray();
+        string[] extra = { prefix + "MagicRangePolicy::CheckedDistance(", prefix + "PredictiveAimRuntime::get_Enabled(",
+            prefix + "GameplayTargeting::get_DisplayTargets(", prefix + "GameplayTargeting::get_DisplayRevision(", prefix + "GameplayTargeting::PlayerCollider(", prefix + "GameplayTargeting::DisplayPoint(" };
+        if (addedMethods.Any(name => !newTypes.Any(t => name.Contains(prefix + t + "::")) && !name.Contains(prefix + "MagicRangeRenderer::") && !extra.Any(name.Contains)))
+            throw new Exception("Unexpected added method: " + string.Join(";", addedMethods));
+        if (final.GetAssemblyRefs().Any(r => r.Name == "EntityOverlayRuntime")) throw new Exception("Helper DLL dependency leaked");
+        if (final.GetTypes().Single(t => t.FullName == prefix + "MagicRangeRenderer").BaseType.FullName != "UnityEngine.MonoBehaviour" ||
+            !final.GetTypes().Single(t => t.FullName == prefix + "EntityAimFrame").IsValueType) throw new Exception("Required base type was not preserved");
+        foreach (var pair in new[] { ("GameplayTargeting", "Point"), ("PredictiveAimRuntime", "Alive") })
+        {
+            var gate = final.GetTypes().Single(t => t.FullName == prefix + pair.Item1).Methods.Single(m => m.Name == pair.Item2);
+            if (!gate.Body.Instructions.Any(i => i.Operand is IField f && f.Name == "_targetTeammates")) throw new Exception("Teammate targeting gate removed");
+        }
+        var report = new { passed = true, parentRuntimeSha256 = parentHash, runtimeSha256 = Hash(output), gameAssemblySha256 = Hash(game),
+            retainedMethods = before.Count - changed.Count, changedMethods = changed, addedMethods, noHelperDependency = true, gameInjected = false, gameAssetsWritten = false };
+        File.WriteAllText(Path.Combine(Path.GetDirectoryName(output)!, "runtime-audit.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+        Console.WriteLine($"Entity overlay audited: {changed.Count} changed, {before.Count - changed.Count} retained, {addedMethods.Length} new methods; {Hash(output)}");
     }
 }

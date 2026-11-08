@@ -17,20 +17,25 @@ sealed class OptionsRuntime : IGameRuntimeClient
     public bool Reject, Throw;
     public TaskCompletionSource<RuntimeCommandResult>? PendingMagic;
     public TaskCompletionSource<RuntimeCommandResult>? PendingProof;
+    public TaskCompletionSource<RuntimeCommandResult>? PendingOverlay;
+    public double? OverlayReadbackDistance;
     public ValueTask<RuntimeCommandResult> ExecuteAsync(FeatureCommand command, CancellationToken token)
     {
         Commands.Add(command);
         if (command.FeatureId == "combat.silent_aim" && PendingMagic != null) return new(PendingMagic.Task);
         if (command.FeatureId == "features.proofs" && PendingProof != null) return new(PendingProof.Task);
-        if (Throw && command.FeatureId.StartsWith("combat.")) throw new IOException("fixture disconnected");
+        if (command.FeatureId == "view.entity_overlay.configure" && PendingOverlay != null) return new(PendingOverlay.Task);
+        bool targeting = command.FeatureId.StartsWith("combat.") || command.FeatureId == "view.entity_overlay.configure";
+        if (Throw && targeting) throw new IOException("fixture disconnected");
         object data = command.FeatureId switch {
             "catalog.items" => new { items = Array.Empty<object>() },
             "catalog.islands" => new { islands = Array.Empty<object>() },
             "features.proofs" => new { features = Array.Empty<object>() },
+            "view.entity_overlay.configure" => new { distance = OverlayReadbackDistance ?? command.Arguments.GetProperty("distance").GetDouble() },
             _ => new { applied = true }
         };
         var json = JsonSerializer.SerializeToElement(data);
-        return ValueTask.FromResult(new RuntimeCommandResult(!Reject || !command.FeatureId.StartsWith("combat."), "fixture", json, json, false));
+        return ValueTask.FromResult(new RuntimeCommandResult(!Reject || !targeting, "fixture", json, json, false));
     }
     public FeatureCommand Last(string id) => Commands.Last(c => c.FeatureId == id);
 }
@@ -61,8 +66,10 @@ static class TargetOptionsVerification
         var runtime = new OptionsRuntime();
         var aim = new AimAssistViewModel();
         Check(!aim.TargetTeammates, "Aim excludes teammates by default");
+        Check(aim.EntityOverlayDistanceInput.Value==200, "Standalone aim retains the default 200 m display distance");
         aim.Connect(runtime,caps); aim.Enabled=true; Pump();
         Check(!Team(runtime.Last("combat.aim_assist")), "Aim enable explicitly sends false");
+        Check(runtime.Last("combat.aim_assist").Arguments.GetProperty("entityOverlayDistance").GetDouble()==200, "Aim enable includes the separate display distance");
         aim.TargetTeammates=true; Pump();
         Check(Team(runtime.Last("combat.aim_assist")), "Aim checked sends true immediately");
         aim.StrengthInput.Text="-"; aim.DistanceInput.Text="999";
@@ -100,17 +107,74 @@ static class TargetOptionsVerification
         var store=new OptionsStore();
         var vm=new MainViewModel(preferencesStore:store,experiencePath:Path.Combine(args[0],"experience-a.json"));
         vm.AimAssist.TargetTeammates=true; var card=Magic(vm); card.MagicTargetTeammates=false;
+        Check(ReferenceEquals(vm.EntityOverlayDistanceInput,vm.AimAssist.EntityOverlayDistanceInput)&&ReferenceEquals(vm.EntityOverlayDistanceInput,card.EntityOverlayDistanceInput), "Both combat owners use the one shared display-distance input");
+        vm.EntityOverlayDistanceInput.Text="240.5";vm.EntityOverlayDistanceInput.Text="-";
         vm.ClosePreferences();
         var restored=new MainViewModel(preferencesStore:store,experiencePath:Path.Combine(args[0],"experience-b.json"));
         Check(restored.AimAssist.TargetTeammates && !Magic(restored).MagicTargetTeammates, "Two teammate preferences persist independently");
+        Check(restored.EntityOverlayDistanceInput.Value==240.5&&TrainerUserPreferences.Parse(store.Json).General.Number("entityOverlayDistance")==240.5, "Invalid display draft persists its last valid decimal in the existing General dictionary");
         var restoredRuntime=new OptionsRuntime(); restored.Connect(restoredRuntime,caps); Pump();
         Check(!restored.AimAssist.Enabled && !Magic(restored).Enabled && !restoredRuntime.Commands.Any(c=>c.FeatureId is "combat.aim_assist" or "combat.silent_aim"), "Preference restore and connect send no combat enable command");
         card=Magic(restored); card.MagicTargetTeammates=true;
+        restored.EntityOverlayDistanceInput.Text="1001";
         restored.SelectedPage=restored.Pages.First(p=>p!=restored.SelectedPage);
         Check(Magic(restored).MagicTargetTeammates, "Magic teammate preference survives page rebuild");
+        card=Magic(restored);
+        Check(restored.EntityOverlayDistanceInput.Text=="1001"&&ReferenceEquals(card.EntityOverlayDistanceInput,restored.EntityOverlayDistanceInput), "Page rebuilding keeps the invalid display draft and shared instance");
+        int overlayBefore=restoredRuntime.Commands.Count;
+        restored.ApplyEntityOverlayCommand.Execute(null);Pump();
+        Check(!restored.CanApplyEntityOverlay&&restoredRuntime.Commands.Count==overlayBefore, "Invalid display draft cannot submit the independent configuration");
+        restored.AimAssist.Enabled=true;card.Enabled=true;Pump();
+        Check(restored.AimAssist.Enabled&&card.Enabled&&new[]{"combat.aim_assist","combat.silent_aim"}.All(id=>restoredRuntime.Last(id).Arguments.GetProperty("entityOverlayDistance").GetDouble()==240.5), "Invalid display draft does not prevent either combat owner from enabling with the last valid distance");
+        restored.EntityOverlayDistanceInput.Text="320.75";restoredRuntime.OverlayReadbackDistance=320.5;
+        int combatBefore=restoredRuntime.Commands.Count(c=>c.FeatureId.StartsWith("combat."));
+        restored.ApplyEntityOverlayAsync().GetAwaiter().GetResult();
+        Check(restoredRuntime.Last("view.entity_overlay.configure").Arguments.GetProperty("distance").GetDouble()==320.75&&restored.EntityOverlayStatus.Contains("320.5")&&restored.EntityOverlayDistanceInput.Text=="320.75", "Independent configuration sends the decimal draft, reports runtime readback and keeps the draft");
+        Check(restoredRuntime.Commands.Count(c=>c.FeatureId.StartsWith("combat."))==combatBefore&&restored.AimAssist.Enabled&&card.Enabled, "Display-only apply leaves both combat toggles untouched and sends no combat request");
+        restoredRuntime.Reject=true;restored.ApplyEntityOverlayAsync().GetAwaiter().GetResult();
+        Check(restored.EntityOverlayStatus.Contains("失败")&&restored.CanApplyEntityOverlay&&restored.EntityOverlayDistanceInput.Text=="320.75", "Rejected display-only apply reports failure and releases the controls without changing the draft");
+        restoredRuntime.Reject=false;restoredRuntime.Throw=true;restored.ApplyEntityOverlayAsync().GetAwaiter().GetResult();
+        Check(restored.EntityOverlayStatus.Contains("失败")&&restored.CanApplyEntityOverlay, "A thrown display-only request reports failure and releases the controls");
+        restoredRuntime.Throw=false;
+        restored.AimAssist.Enabled=false;card.Enabled=false;Pump();
         restored.ClosePreferences();
         var legacy=new MainViewModel(preferencesStore:new OptionsStore(),experiencePath:Path.Combine(args[0],"experience-c.json"));
+        Check(legacy.EntityOverlayDistanceInput.Value==200, "An older preference file keeps the default 200 m display distance");
         Check(!legacy.AimAssist.TargetTeammates && !Magic(legacy).MagicTargetTeammates, "Missing legacy fields default to exclude teammates"); legacy.ClosePreferences();
+
+        {
+            var preferences=new OptionsStore();var sourceRuntime=new OptionsRuntime();
+            var source=new MainViewModel(preferencesStore:preferences,experiencePath:Path.Combine(args[0],"overlay-session-source.json"));
+            source.Connect(sourceRuntime,caps);Pump();source.EntityOverlayDistanceInput.Text="415.5";
+            source.AimAssist.Enabled=true;Magic(source).Enabled=true;Pump();source.CloseExperience();source.ClosePreferences();
+            var session=new MainViewModel(preferencesStore:preferences,experiencePath:Path.Combine(args[0],"overlay-session-restore.json"));
+            var sessionRuntime=new OptionsRuntime();session.Connect(sessionRuntime,caps);Pump();session.EntityOverlayDistanceInput.Text="300";
+            session.RestoreLastSessionAsync().GetAwaiter().GetResult();Pump();
+            Check(session.EntityOverlayDistanceInput.Value==415.5&&new[]{"combat.aim_assist","combat.silent_aim"}.All(id=>sessionRuntime.Last(id).Arguments.GetProperty("entityOverlayDistance").GetDouble()==415.5), "Explicit session restoration restores the shared distance before enabling either combat owner");
+            session.PresetName="overlay-distance";session.SavePresetCommand.Execute(null);session.EntityOverlayDistanceInput.Text="600";
+            session.ApplySelectedPresetAsync().GetAwaiter().GetResult();Pump();
+            Check(session.EntityOverlayDistanceInput.Value==415.5&&!session.AimAssist.Enabled&&!Magic(session).Enabled, "Applying a parameter preset restores the shared distance while leaving combat features off");
+            session.CloseExperience();session.ClosePreferences();
+        }
+
+        {
+            var first=new OptionsRuntime{PendingOverlay=new()};
+            var paging=new MainViewModel(preferencesStore:new OptionsStore(),experiencePath:Path.Combine(args[0],"overlay-reconnect.json"));
+            paging.Connect(first,caps);Pump();paging.EntityOverlayDistanceInput.Text="450.5";
+            var oldApply=paging.ApplyEntityOverlayAsync();
+            Check(!oldApply.IsCompleted&&!paging.CanApplyEntityOverlay, "A pending display apply makes its shared button unavailable");
+            paging.SuspendConnection();var next=new OptionsRuntime{PendingOverlay=new()};paging.Connect(next,caps);Pump();
+            var newApply=paging.ApplyEntityOverlayAsync();paging.EntityOverlayDistanceInput.Text="bad";
+            var oldData=JsonSerializer.SerializeToElement(new{distance=450.5});
+            first.PendingOverlay.SetResult(new RuntimeCommandResult(true,"old",oldData,oldData,false));Pump();
+            Check(oldApply.IsCompleted&&!newApply.IsCompleted&&paging.EntityOverlayStatus=="已连接 · 显示距离待应用", "An old connection reply cannot publish a display distance into the new session");
+            var newData=JsonSerializer.SerializeToElement(new{distance=450.25});
+            next.PendingOverlay.SetResult(new RuntimeCommandResult(true,"new",newData,newData,false));Pump();
+            Check(newApply.IsCompleted&&paging.EntityOverlayStatus.Contains("450.25")&&paging.EntityOverlayDistanceInput.Text=="bad", "Only the current display reply updates confirmation and preserves a newer invalid draft");
+            paging.EntityOverlayDistanceInput.Text="500";
+            Check(paging.CanApplyEntityOverlay, "The current display completion releases busy state for the next valid edit");
+            paging.CloseExperience();paging.ClosePreferences();
+        }
 
         foreach (bool throws in new[]{false,true})
         {

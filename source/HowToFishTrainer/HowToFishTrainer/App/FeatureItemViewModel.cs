@@ -661,8 +661,9 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 
 	public event PropertyChangedEventHandler? PropertyChanged;
 
-	public FeatureItemViewModel(FeatureDescriptor descriptor, IGameRuntimeClient? runtime = null, CapabilitySet? capabilities = null, IReadOnlyList<CatalogOption>? options = null, FeatureToggleState? toggleState = null, Action<FeatureItemViewModel>? stateChanged = null, Action? playEnabledSound = null, ISponsorAccessGate? sponsorAccessGate = null, Action<string, string>? showFeatureNotice = null)
+	public FeatureItemViewModel(FeatureDescriptor descriptor, IGameRuntimeClient? runtime = null, CapabilitySet? capabilities = null, IReadOnlyList<CatalogOption>? options = null, FeatureToggleState? toggleState = null, Action<FeatureItemViewModel>? stateChanged = null, Action? playEnabledSound = null, ISponsorAccessGate? sponsorAccessGate = null, Action<string, string>? showFeatureNotice = null, NumericInput? entityOverlayDistanceInput = null)
 	{
+		EntityOverlayDistanceInput = entityOverlayDistanceInput ?? new NumericInput("显示距离（米）", 200, 1, 1000);
 		_showFeatureNotice = showFeatureNotice;
 		Descriptor = descriptor;
         foreach (var input in new[] { MagicAngleInput, MagicDistanceInput, MagicStrengthInput })

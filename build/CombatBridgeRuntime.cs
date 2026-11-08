@@ -36,6 +36,14 @@ namespace AbyssalCrab.Runtime
             string id = envelope.Value<string>("featureId");
             var args = envelope["arguments"] as JObject ?? new JObject();
             string correlation = envelope.Value<string>("correlationId");
+            if (id == "view.entity_overlay.configure")
+            {
+                Call(host, "ValidateAuthority", new object[] { id });
+                float distance = MagicRangePolicy.CheckedDistance(args["distance"]);
+                MagicRangeRenderer.ConfigureDistance(host, distance);
+                Call(host, "Reply", new object[] { correlation, true, "实体标注显示距离已应用", new JObject { ["distance"] = distance }, false, true });
+                return true;
+            }
             if (id == "combat.feedback.configure")
             {
                 CombatFeedbackRuntime.Configure(host, args);

@@ -9,8 +9,10 @@ namespace AbyssalCrab.Runtime
     public static class GameplayTargeting
     {
         private static readonly List<Component> Targets = new List<Component>(128);
+        private static readonly IReadOnlyList<Component> DisplayCatalog = Targets.AsReadOnly();
         private static float _nextRefresh;
         private static int _count = -1;
+        private static int _displayRevision;
         private static bool _targetTeammates;
         private static AccessTools.FieldRef<OtherPlayer,CapsuleCollider> _capsule;
         public static long SelectionScans;
@@ -34,15 +36,28 @@ namespace AbyssalCrab.Runtime
             return GameInfo.GetSpawnable((byte)arguments[0]);
         }
         public static void ConfigureTeammates(bool enabled) { _targetTeammates = enabled; }
-        public static void Reset() { Targets.Clear(); _nextRefresh = 0; _count = -1; SelectionScans=0; _targetTeammates=false; }
+        public static void Reset() { Targets.Clear(); _nextRefresh = 0; _count = -1; _displayRevision++; SelectionScans=0; _targetTeammates=false; }
         private static void Refresh()
         {
             if (Time.unscaledTime < _nextRefresh && _count == ItemManager.Items.Count) return;
-            _nextRefresh = Time.unscaledTime + .2f; _count = ItemManager.Items.Count; Targets.Clear();
+            _nextRefresh = Time.unscaledTime + .2f; _count = ItemManager.Items.Count; _displayRevision++; Targets.Clear();
             foreach (var item in ItemManager.Items.Values) if (item && item.Creature && !item.Creature.IsDead) Targets.Add(item.Creature);
             foreach (var p in PlayerManager.Players) if (p && p != Player.LocalPlayer) Targets.Add(p);
         }
+        public static IReadOnlyList<Component> DisplayTargets { get { Refresh(); return DisplayCatalog; } }
+        public static int DisplayRevision { get { return _displayRevision; } }
+        public static CapsuleCollider PlayerCollider(Player player)
+        {
+            if (!player || !player.Other) return null;
+            if (_capsule == null) _capsule = AccessTools.FieldRefAccess<OtherPlayer,CapsuleCollider>("_col");
+            return _capsule(player.Other);
+        }
         public static bool Point(Component target, out Vector3 point)
+        {
+            if (target is Player && !_targetTeammates) { point = default(Vector3); return false; }
+            return DisplayPoint(target, out point, true);
+        }
+        public static bool DisplayPoint(Component target, out Vector3 point, bool requirePlayerCollider)
         {
             point = default(Vector3);
             if (!target || !target.gameObject.activeInHierarchy) return false;
@@ -53,10 +68,12 @@ namespace AbyssalCrab.Runtime
                 point = c.Rig ? c.Rig.worldCenterOfMass : c.transform.position; return Finite(point);
             }
             var p = target as Player;
-            if (!_targetTeammates || !p || p == Player.LocalPlayer || p.IsDeinitializing || !p.Dying || p.Dying.IsDead || !p.Other) return false;
-            if (_capsule == null) _capsule = AccessTools.FieldRefAccess<OtherPlayer,CapsuleCollider>("_col");
-            var col = _capsule(p.Other); if (!col || !col.enabled || !col.gameObject.activeInHierarchy) return false;
-            point = col.bounds.center; return Finite(point);
+            if (!p || p == Player.LocalPlayer || p.IsDeinitializing || !p.Dying || p.Dying.IsDead || !p.Other) return false;
+            var col = PlayerCollider(p);
+            if (col && col.enabled && col.gameObject.activeInHierarchy) point = col.bounds.center;
+            else if (requirePlayerCollider) return false;
+            else point = p.transform.position;
+            return Finite(point);
         }
         private static bool Finite(Vector3 point) => !float.IsNaN(point.x) && !float.IsNaN(point.y) && !float.IsNaN(point.z)
             && !float.IsInfinity(point.x) && !float.IsInfinity(point.y) && !float.IsInfinity(point.z);

@@ -87,9 +87,12 @@ namespace AbyssalCrab.Runtime
             harmony.Patch(method,new HarmonyMethod(typeof(PredictiveAimRuntime).GetMethod("Prefix")));
         }
 
+        public static bool Enabled => _enabled && _host != null && _host.IsLockEnabled("combat.aim_assist");
+
         public static void Validate(string id,JObject args)
         {
             if(id!="combat.aim_assist")return;
+            if(args["entityOverlayDistance"] != null) MagicRangePolicy.CheckedDistance(args["entityOverlayDistance"]);
             foreach(string key in new[]{"leadEnabled","headLockEnabled","targetTeammates"})if(args[key]!=null&&args[key].Type!=JTokenType.Boolean)throw new ArgumentException(key+" 必须是布尔值");
         }
 
@@ -103,6 +106,8 @@ namespace AbyssalCrab.Runtime
             _acquireCos=Mathf.Cos(_angle*Mathf.Deg2Rad);_trackCos=Mathf.Cos(Mathf.Min(30f,Mathf.Max(_angle+4f,_angle*1.5f))*Mathf.Deg2Rad);
             _wasAds=false;_target=_silentTarget=null;_nextScan=_nextCatalog=0;_state=_enabled?"waiting-for-ads":"off";_failure=null;
             if(_enabled&&Player.LocalPlayer){Bind();RefreshCatalog(Time.unscaledTime,true);}
+            if(args["entityOverlayDistance"] != null) MagicRangeRenderer.ConfigureDistance(_host, MagicRangePolicy.CheckedDistance(args["entityOverlayDistance"]));
+            MagicRangeRenderer.Refresh(_host);
             return result;
         }
 
