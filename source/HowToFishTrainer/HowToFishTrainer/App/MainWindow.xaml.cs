@@ -426,11 +426,12 @@ public partial class MainWindow : Window, IComponentConnector
 		_refreshingMode = true;
 		try
 		{
+            string? inspectedGullRound = _viewModel.GullRoundForInspection;
             var snapshot = await bridge.InspectSessionAsync(CancellationToken.None);
             if (!IsCurrentBridge(bridge)) return;
 			await ApplySessionModeAsync(bridge, snapshot);
             if (!IsCurrentBridge(bridge)) return;
-            _viewModel.UpdateExperienceSession(bridge.LastInspection);
+            _viewModel.UpdateExperienceSession(bridge.LastInspection, inspectedGullRound);
 			await _viewModel.RefreshRuntimeProofsAsync();
 		}
 		catch (Exception innerException)

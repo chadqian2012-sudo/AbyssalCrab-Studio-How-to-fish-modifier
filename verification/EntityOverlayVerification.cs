@@ -126,6 +126,93 @@ static class EntityOverlayVerification
     static IEnumerable<IMethod> Calls(MethodDef method) => method.HasBody
         ? method.Body.Instructions.Select(i => i.Operand).OfType<IMethod>() : Enumerable.Empty<IMethod>();
     static bool StringLiteral(MethodDef method, string value) => method.HasBody && method.Body.Instructions.Any(i => i.OpCode == OpCodes.Ldstr && Equals(i.Operand, value));
+    static void GullChallenge(string candidate, string managed)
+    {
+        // Load type definitions from the installed game. Only managed score and ID arithmetic
+        // run here. Null dictionary values stand for unused bodies; no Unity object is constructed.
+        var context = new AssemblyLoadContext("gull-managed-round", isCollectible: true);
+        context.Resolving += (loader, name) => {
+            string path = Path.Combine(managed, name.Name + ".dll");
+            return File.Exists(path) ? loader.LoadFromAssemblyPath(Path.GetFullPath(path)) : null;
+        };
+        try
+        {
+            var type = context.LoadFromAssemblyPath(Path.GetFullPath(candidate)).GetType("AbyssalCrab.Runtime.GullChallengeRound", true);
+            var score = Activator.CreateInstance(type, new object[] { "fixture-round", null });
+            object Read(string name) => type.GetField(name).GetValue(score);
+            object Invoke(string method, params object[] args) => type.GetMethod(method).Invoke(score,args);
+            var birds = (System.Collections.IDictionary)Read("Birds");
+            birds.Add(12,null); birds.Add(24,null);
+            void Hit(int target,float time,bool kill) => Invoke("Record",target,time,kill);
+            Hit(12,8,true);
+            Check((bool)Invoke("get_Pending") && !(bool)Invoke("get_Active") && (int)Read("Hits") == 0,
+                "Before native wave registration no damage can score");
+            type.GetField("Started").SetValue(score,10f);
+            Hit(11,10.1f,true); Hit(12,9f,false); Hit(12,float.NaN,true); Hit(12,70f,true);
+            Check((int)Read("Hits") == 0 && (float)Read("FirstHit") < 0,
+                "Unregistered targets, pre-start damage and the exact time limit cannot score");
+            Hit(12,10.25f,false); Hit(12,11f,true); Hit(12,11f,true); Hit(24,69.9f,false);
+            Check((int)Read("Hits") == 3 && (int)Read("Kills") == 1 && Near((float)Read("FirstHit"),.25f),
+                "First confirmed hit preserves elapsed time and a repeated kill cannot score twice");
+            var ids = (HashSet<uint>)Read("Projectiles");
+            Invoke("RememberVolley",20u,0u,3); Invoke("RememberVolley",9u,10u,0);
+            Check(ids.Count == 0, "A reset ID counter or mismatched native pellet count creates no attribution");
+            Invoke("RememberVolley",uint.MaxValue,2u,3);
+            Check(ids.SetEquals(new uint[]{uint.MaxValue,0,1}),"A native three-pellet volley retains its IDs across unsigned wrap");
+            Invoke("Finish","fixture finished"); Hit(24,20,true);
+            Check(!(bool)Invoke("get_Active") && !(bool)Invoke("get_Pending") && birds.Count == 0 && ids.Count == 0 &&
+                (int)Read("Hits") == 3 && (string)Read("Id") == "fixture-round",
+                "Finishing releases target and projectile references, preserving the score and round ID");
+        }
+        finally { context.Unload(); }
+
+        using var game = ModuleDefMD.Load(Path.Combine(managed,"Assembly-CSharp.dll"));
+        using var runtime = ModuleDefMD.Load(candidate);
+        MethodDef Method(ModuleDef assembly,string type,string method) =>
+            assembly.GetTypes().Single(t => t.FullName == type).Methods.Single(m => m.Name == method);
+        var shoot = Method(game,"Weapon","Shoot"); var impact = Method(game,"ProjectileManager","Hit");
+        var settle = Method(game,"Server","RpcLogic___HitCreature___215526726");
+        Check(shoot.MethodSig.Params.Count == 0 && Calls(shoot).Any(c => c.Name == "AddProjectile") && Calls(shoot).Any(c => c.Name == "AddProjectiles") &&
+            Calls(shoot).Any(c => c.Name == "LocalHit") && impact.MethodSig.Params.Select(p=>p.FullName).SequenceEqual(new[]{"Projectile","ProjectileType","UnityEngine.RaycastHit"}) &&
+            Calls(impact).Any(c => c.Name == "LocalHit") && Calls(settle).Any(c => c.Name == "ServerChangeHp"),
+            "Installed game's gun, impact and server health methods expose the checked attribution chain");
+        string runtimeType = "AbyssalCrab.Runtime.CombatFeedbackRuntime";
+        var fire = Method(runtime,runtimeType,"ShotPrefix"); var hit = Method(runtime,runtimeType,"ImpactPrefix");
+        var local = Method(runtime,runtimeType,"LocalPrefix"); var hp = Method(runtime,runtimeType,"DamagePostfix");
+        bool Field(MethodDef m,string field) => m.Body.Instructions.Any(i => i.Operand is IField f && f.Name == field);
+        Check(Field(fire,"Gun") && Calls(fire).Any(c=>c.Name=="get_Holder") && Field(hit,"IsLocal") && Field(hit,"Owner") &&
+            Field(hit,"FromNpc") && Field(hit,"IsArrow") && Calls(hit).Any(c=>c.Name=="Remove") &&
+            Field(local,"Shooting") && Field(local,"Impact") && Calls(hp).Any(c=>c.Name=="Consume") && Calls(hp).Any(c=>c.Name=="get_Hp"),
+            "Round scores join this gun's local hit evidence to the host's actual HP change");
+        var pool = Method(runtime,"AbyssalCrab.Runtime.CombatBridgeRuntime","Build");
+        var bind = Method(runtime,"AbyssalCrab.Runtime.GullChallengeRound","Bind");
+        Check(game.GetTypes().Single(t => t.FullName=="Bird").BaseType.FullName=="Creature" &&
+            Calls(pool).Any(c=>c.FullName.Contains("GetComponent<Bird>")) && !Calls(pool).Any(c=>c.Name=="get_Creature") &&
+            Calls(pool).Any(c=>c.FullName.Contains("GetComponent<Albatross>")) && Calls(bind).Any(c=>c.FullName.Contains("GetComponent<Bird>")),
+            "Uninstantiated bird prefabs use native components, without relying on Awake-created caches");
+        foreach (string method in new[]{"AddProjectile","AddProjectiles"})
+        {
+            var add=Method(game,"ProjectileManager",method);
+            var il=add.Body.Instructions;
+            Check(il.Skip(1).Take(12).Any(i=>i.OpCode==OpCodes.Ldfld && i.Operand is IField f && f.Name=="_nextId") &&
+                il.Take(16).Any(i=>i.OpCode==OpCodes.Starg_S && i.Operand is Parameter p && p.Name=="id") &&
+                il.Any(i=>i.OpCode==OpCodes.Stfld && i.Operand is IField f && f.Name=="_nextId"),
+                "Native local ID allocation starts at the pre-shot counter: " + method);
+        }
+        var rollback=Method(runtime,"AbyssalCrab.Runtime.CombatBridgeRuntime","ChallengeRollback");
+        Check(Calls(rollback).Any(c=>c.Name=="RoundFor") && Calls(rollback).Any(c=>c.Name=="get_Pending") &&
+            Field(rollback,"WaveId") && Calls(rollback).Any(c=>c.Name=="Finish") && !Calls(rollback).Any(c=>c.Name=="Read" || c.Name=="Call"),
+            "Native rollback clears only its own pending wave without invoking reflected game code");
+        var bridge=Method(runtime,"AbyssalCrab.Runtime.CombatBridgeRuntime","TryHandle");
+        var op=bridge.Body.Instructions;
+        int index(string literal) => op.ToList().FindIndex(i => i.OpCode==OpCodes.Ldstr && Equals(i.Operand,literal));
+        int same=op.ToList().FindIndex(i=>i.Operand is IField f && f.Name=="Id" && f.DeclaringType.Name=="GullChallengeRound");
+        int start=op.ToList().FindIndex(i=>i.Operand is IMethod m && m.Name=="PrepareRound");
+        Check(same>=0 && Calls(bridge).Any(c=>c.Name=="TryParseExact") && index("missing")>same && index("missing")<start &&
+            op.Skip(same).Take(index("missing")-same).Any(i=>i.OpCode==OpCodes.Ret),
+            "Same-round result is returned before a new start, and unknown stop IDs have a distinct missing receipt");
+    }
+
     static object Audit(string baseline, string candidate)
     {
         using var before = ModuleDefMD.Load(baseline);
@@ -136,20 +223,10 @@ static class EntityOverlayVerification
         var changed = originals.Where(p => final.ContainsKey(p.Key) && Body(p.Value) != Body(final[p.Key])).Select(p => p.Key).ToArray();
         Check(removed.Length == 0, "Every baseline runtime method remains present", string.Join("; ", removed));
         string prefix = "AbyssalCrab.Runtime.";
-        var allowed = new HashSet<string> {
-            prefix + "GameplayTargeting::Point", prefix + "GameplayTargeting::Reset", prefix + "GameplayTargeting::Refresh", prefix + "GameplayTargeting::.cctor",
-            prefix + "GameplayRuntime::Validate", prefix + "GameplayRuntime::Configured", prefix + "GameplayRuntime::Restore",
-            prefix + "PredictiveAimRuntime::Validate", prefix + "PredictiveAimRuntime::Configure",
-            prefix + "CombatBridgeRuntime::TryHandle",
-            prefix + "MagicRangeRenderer::Configure", prefix + "MagicRangeRenderer::OnDestroy", prefix + "MagicRangeRenderer::OnGUI",
-            prefix + "MagicRangeRenderer::.ctor", prefix + "MagicRangeRenderer::.cctor",
-            "HowToFishTrainer.Runtime.TrainerBridgeHost::ReadAimProjection"
-        };
-        var unexpected = changed.Where(key => {
-            var method = final[key];
-            return !allowed.Contains(method.DeclaringType.FullName + "::" + method.Name);
-        }).ToArray();
-        Check(unexpected.Length == 0 && changed.Length == allowed.Count, "Exactly the reviewed 16 baseline methods change; every other original method is retained", string.Join("; ", unexpected));
+        var receipts = changed.Select(key => final[key]).Where(m => m.DeclaringType.FullName == "HowToFishTrainer.Runtime.TrainerBridgeHost").ToArray();
+        Check(receipts.Length == 2 && receipts.Any(m => m.Name == "FunReceipt" && Calls(m).Count(c => c.Name == "ChallengeReceipt") == 1)
+            && receipts.Any(m => m.Name == "RollbackFunWave" && Calls(m).Count(c => c.Name == "ChallengeRollback") == 1),
+            "Native registration and rollback each inform the challenge once; dispatch and spawning retain their code");
         var projection = final.Values.Single(m => m.DeclaringType.FullName == "HowToFishTrainer.Runtime.TrainerBridgeHost" && m.Name == "ReadAimProjection");
         var projectionInstructions = projection.Body.Instructions;
         Check(projectionInstructions.Count == 3 && projectionInstructions[0].OpCode == OpCodes.Ldarg_0
@@ -197,6 +274,45 @@ static class EntityOverlayVerification
         Check(Calls(draw).Any(c => c.Name == "get_DisplayTargets") && Calls(draw).Any(c => c.Name == "DisplayPoint")
             && !Calls(draw).Any(c => c.Name == "Select" || c.Name == "SelectHeadSilent"),
             "Multi-entity drawing consumes the shared catalog rather than a selected target");
+        var gui = renderer.Methods.Single(m => m.Name == "OnGUI").Body.Instructions.ToList();
+        int CallIndex(List<Instruction> il, string name) => il.FindIndex(i => i.Operand is IMethod m && m.Name == name);
+        int key = CallIndex(gui,"get_rightCtrlKey"), pressed = CallIndex(gui,"get_isPressed");
+        int entities = CallIndex(gui,"DrawEntities"), range = CallIndex(gui,"DrawRange");
+        Check(key >= 0 && pressed == key + 1 && entities > pressed && range > entities
+            && (gui[pressed+1].OpCode == OpCodes.Brtrue || gui[pressed+1].OpCode == OpCodes.Brtrue_S)
+            && ReferenceEquals(gui[pressed+1].Operand, gui[entities+1]),
+            "Holding right Ctrl skips exactly the entity draw call and still evaluates the original magic range circle");
+        MethodDef MarkerOwner(string owner, string name) => final.Values.Single(m => m.DeclaringType.FullName == prefix + owner && m.Name == name);
+        var current = MarkerOwner("PredictiveAimRuntime","CurrentLock");
+        var currentFields = current.Body.Instructions.Select(i => i.Operand).OfType<IField>().Select(f => f.Name.String).ToHashSet();
+        Check(currentFields.IsSupersetOf(new[]{"_target","_wasAds","_handledFrame","_weapon","Target"})
+            && Calls(current).Any(m => m.Name == "get_Enabled") && Calls(current).Any(m => m.Name == "get_IsAds")
+            && Calls(current).Any(m => m.Name == "get_frameCount") && Calls(current).Any(m => m.Name == "get_HeldItem")
+            && !Calls(current).Any(m => m.Name == "Select" || m.Name == "Valid"),
+            "ADS corner marker reads the current frame's real selected target and held aiming weapon without rescanning");
+        Check(Calls(draw).Any(m => m.FullName == current.FullName) && Calls(draw).Any(m => m.Name == "HighlightedShotTarget")
+            && Calls(draw).Count(m => m.Name == "DrawLockCorners") == 1,
+            "Both combat owners feed the one corner marker inside the existing per-entity draw");
+        var mark = MarkerOwner("GameplayRuntime","MarkGuidance");
+        var writers = final.Values.Where(m => Calls(m).Any(c => c.FullName == mark.FullName)).Select(m => m.Name.String).OrderBy(n => n).ToArray();
+        var track = MarkerOwner("GameplayRuntime","Track").Body.Instructions.ToList();
+        int steer = track.FindIndex(i => i.OpCode == OpCodes.Stfld && i.Operand is IField f && f.Name == "Velocity");
+        int volley = track.FindIndex(i => i.OpCode == OpCodes.Ldsfld && i.Operand is IField f && f.Name == "_latestVolley");
+        int marked = CallIndex(track,"MarkGuidance");
+        Check(writers.SequenceEqual(new[]{"RedirectShot","Track"}) && steer >= 0 && volley > steer && marked > volley + 1
+            && (track[volley+1].OpCode == OpCodes.Bne_Un || track[volley+1].OpCode == OpCodes.Bne_Un_S)
+            && ReferenceEquals(track[volley+1].Operand, track[marked+1]),
+            "A previous volley cannot replace the latest shot marker; only a real launch correction or velocity write can mark it");
+        var redirect = MarkerOwner("GameplayRuntime","RedirectShot").Body.Instructions.ToList();
+        var shot = MarkerOwner("GameplayRuntime","HighlightedShotTarget");
+        int corrected = CallIndex(redirect, "RecordFeatureHit");
+        Check(corrected >= 0 && CallIndex(redirect,"MarkGuidance") > corrected && mark.Body.Instructions.Any(i => Equals(i.Operand, .2f))
+            && StringLiteral(shot,"combat.silent_aim") && Calls(shot).Any(m => m.Name == "Point") && Calls(shot).Any(m => m.Name == "get_unscaledTime"),
+            "A successful shot pulses briefly and eligibility is checked before the marker is drawn");
+        var cleared = MarkerOwner("GameplayRuntime","ClearProjectiles").Body.Instructions.Where(i => i.OpCode == OpCodes.Stsfld)
+            .Select(i => ((IField)i.Operand).Name.String).ToHashSet();
+        Check(cleared.Contains("_latestVolley") && cleared.Contains("_guidedTarget"),
+            "Projectiles and their visual selection are cleared together at shutdown and restore");
         var displayPoint = final.Values.Single(m => m.DeclaringType.FullName == prefix + "GameplayTargeting" && m.Name == "DisplayPoint");
         Check(!displayPoint.Body.Instructions.Any(i => i.Operand is IField f && f.Name == "_targetTeammates")
             && !Calls(displayPoint).Any(c => c.Name == "get_UseFriendlyFire"),
@@ -263,15 +379,15 @@ static class EntityOverlayVerification
 
     static int Main(string[] args)
     {
-        if (args.Length != 4) throw new ArgumentException("baseline-runtime candidate-runtime renderer-source output-directory");
+        if (args.Length != 5) throw new ArgumentException("baseline-runtime candidate-runtime renderer-source output-directory game-managed-directory");
         Directory.CreateDirectory(args[3]);
         object audit = null;
         string fatal = null;
-        try { Geometry(args[1]); audit = Audit(args[0], args[1]); }
+        try { Geometry(args[1]); GullChallenge(args[1],args[4]); audit = Audit(args[0], args[1]); }
         catch (Exception error) { Failures++; fatal = error.ToString(); Console.WriteLine(fatal); }
         var report = new { passed = Failures == 0, checks = Checks.Count, failures = Failures,
             baselineRuntimeSha256 = Hash(args[0]), runtimeSha256 = Hash(args[1]), rendererSourceSha256 = Hash(args[2]),
-            geometryExecution = "actual final runtime IL through reflection; pure Single methods only",
+            geometryExecution = "actual runtime IL; pure clipping, round scoring, and projectile-ID arithmetic",
             unityNativeRuntimeExecuted = false, gameStarted = false, gameInjected = false, stubUsed = false,
             limitations = "Geometry execution verifies clipping math. dnlib checks are static; they do not establish Unity rendering, multiplayer behavior, or performance.",
             audit, results = Checks, fatal };

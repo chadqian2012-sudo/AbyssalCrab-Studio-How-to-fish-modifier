@@ -615,6 +615,19 @@
                 </Grid>
               </Border>
               <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                  <Border Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="16" Margin="0,0,0,10">
+                    <StackPanel>
+                      <TextBlock Text="海鸥飞靶挑战" FontSize="16" FontWeight="SemiBold"/>
+                      <TextBlock Text="{Binding GullChallengeStatus}" Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,6,0,8"/>
+                      <WrapPanel>
+                        <TextBlock Text="本轮海鸥数量" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <app:NumericInputBox Input="{Binding GullMigration.CountInput}" Width="85" VerticalAlignment="Center"/>
+                        <Button Content="开始本轮" Command="{Binding StartGullChallengeCommand}" IsEnabled="{Binding CanStartGullChallenge}" Style="{StaticResource PrimaryButton}" Margin="10,0,0,0"/>
+                        <Button Content="结束本轮" Command="{Binding StopGullChallengeCommand}" IsEnabled="{Binding CanStopGullChallenge}" Margin="7,0,0,0"/>
+                      </WrapPanel>
+                    </StackPanel>
+                  </Border>
                 <ItemsControl ItemsSource="{Binding FunEventsPage.Events}">
                   <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
@@ -666,6 +679,7 @@
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
+                </StackPanel>
               </ScrollViewer>
               <Border Grid.Row="2" Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="13" Margin="0,10,0,0">
                 <Grid>
@@ -935,7 +949,7 @@
                 <Border Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="18" Margin="0,0,0,12" Visibility="{Binding IsCombatPage, Converter={StaticResource BoolToVisibility}}">
                   <StackPanel>
                     <TextBlock Text="实体标注" FontSize="17" FontWeight="SemiBold"/>
-                    <TextBlock Text="辅助瞄准或魔法子弹开启时显示；两者关闭后隐藏。所有可攻击活体和有效队友均显示，墙后可见；始终显示红框，并绘制骨骼与连线。" Style="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,7,0,0"/>
+                    <TextBlock Text="辅助瞄准或魔法子弹开启时显示；两者关闭后隐藏。所有可攻击活体和有效队友均显示，墙后可见；红框与骨骼随目标移动，角标标出实际锁定目标。按住右 Ctrl 临时隐藏实体标注，松开恢复。" Style="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,7,0,0"/>
                     <Grid Margin="0,13,0,0">
                       <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                       <StackPanel Margin="0,0,12,0">

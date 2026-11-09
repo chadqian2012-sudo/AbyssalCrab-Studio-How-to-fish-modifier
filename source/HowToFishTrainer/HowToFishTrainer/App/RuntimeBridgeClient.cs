@@ -168,7 +168,7 @@ public sealed class RuntimeBridgeClient : IGameRuntimeClient, IAsyncDisposable
 					_pipe.Dispose();
 					throw;
 				}
-			}, TimeSpan.FromSeconds(12.0), cancellationToken);
+			}, TimeSpan.FromSeconds(command.FeatureId == "fun.challenge.start" ? 30 : 12), cancellationToken);
 		}
 		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
 		{

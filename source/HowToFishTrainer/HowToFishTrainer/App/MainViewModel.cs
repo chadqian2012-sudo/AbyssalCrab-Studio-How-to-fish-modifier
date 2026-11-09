@@ -754,6 +754,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
 	public void MarkAllLocksDisabled(string message)
 	{
+        ResetGullChallenge(message);
 		StopExperienceAutomation();
         FunEventsPage.Roulette.Disconnect();
         FunEventsPage.SlotMachine.Disconnect();

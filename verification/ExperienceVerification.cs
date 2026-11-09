@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Pipes;
+using System.Buffers.Binary;
 using System.Linq;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -21,11 +23,13 @@ sealed class ExperienceRuntime : IGameRuntimeClient
 {
     public readonly List<FeatureCommand> Commands=new();
     public bool FailClear,FailWave;
+    public Func<FeatureCommand,Task<RuntimeCommandResult>>? GullCommand;
     public TaskCompletionSource<RuntimeCommandResult>? ClearPending;
     public TaskCompletionSource<RuntimeCommandResult>? SpinPending,GenerationPending;
     public ValueTask<RuntimeCommandResult> ExecuteAsync(FeatureCommand command,CancellationToken token)
     {
         Commands.Add(command);object data=new{applied=true,x=1.25,y=2.5,z=-3.75};bool ok=true;
+        if(command.FeatureId is "fun.challenge.start" or "fun.challenge.stop")return new(GullCommand!(command));
         if(command.FeatureId=="player.spin.lock"&&SpinPending!=null)return new(SpinPending.Task);
         if(command.FeatureId=="generation.item"&&GenerationPending!=null)return new(GenerationPending.Task);
         if(command.FeatureId=="locks.disable_all") { if(ClearPending!=null)return new(ClearPending.Task);ok=!FailClear; }
@@ -56,12 +60,108 @@ static class ExperienceVerification
     static IEnumerable<T> Find<T>(DependencyObject node)where T:DependencyObject{if(node is T value)yield return value;for(int i=0;i<VisualTreeHelper.GetChildrenCount(node);i++)foreach(var child in Find<T>(VisualTreeHelper.GetChild(node,i)))yield return child;}
     static JsonElement Session(int alive=0)=>JsonSerializer.SerializeToElement(new{predictiveAim=new{lockedTarget="Seagull",last=new{state="predicted",speed=100,flightTime=.25,distance=25,leadOffset=new{x=1.25,y=0,z=2.5}},weapon=new{name="Rifle",speed=100},performance=new{trackingMeanUs=12.5,trackingP95UpperUs=25,exceptions=0},seagullWaves=new[]{new{alive}}}});
     static FeatureItemViewModel Feature(MainViewModel vm,string id){var d=FeatureRegistry.Find(id)!;vm.SelectedPage=vm.Pages.Single(p=>p.Category==MainViewModel.DisplayCategory(d.Id,d.Category));return vm.Features.Single(f=>f.Descriptor.Id==id);}
+    static async Task VerifySlowWaveTransport()
+    {
+        async Task<bool> ReplyAfterNormalDeadline(string featureId)
+        {
+            string name="AbyssalCrab.Fixture."+Guid.NewGuid().ToString("N");
+            using var limit=new CancellationTokenSource(TimeSpan.FromSeconds(24));
+            using var server=new NamedPipeServerStream(name,PipeDirection.InOut,1,PipeTransmissionMode.Byte,PipeOptions.Asynchronous|PipeOptions.CurrentUserOnly);
+            using var client=new NamedPipeClientStream(".",name,PipeDirection.InOut,PipeOptions.Asynchronous);
+            await Task.WhenAll(server.WaitForConnectionAsync(limit.Token),client.ConnectAsync(limit.Token));
+            // Only the pipe is exercised. No process gateway or game is constructed.
+            var bridge=(RuntimeBridgeClient)Activator.CreateInstance(typeof(RuntimeBridgeClient),BindingFlags.Instance|BindingFlags.NonPublic,
+                null,new object?[]{client,null,Array.Empty<byte>()},null)!;
+            var call=bridge.ExecuteAsync(new FeatureCommand(featureId,JsonSerializer.SerializeToElement(new{}),Capability.HostWorld),limit.Token).AsTask();
+            byte[] header=new byte[4];
+            await server.ReadExactlyAsync(header,limit.Token);
+            var request=new byte[BinaryPrimitives.ReadInt32LittleEndian(header)];
+            await server.ReadExactlyAsync(request,limit.Token);
+            using var payload=JsonDocument.Parse(request);
+            await Task.Delay(TimeSpan.FromSeconds(14),limit.Token);
+            if (!call.IsCompleted)
+            {
+                var root=payload.RootElement;
+                var response=JsonSerializer.SerializeToUtf8Bytes(new { protocolVersion=1,session=root.GetProperty("session"),correlationId=root.GetProperty("correlationId"),ok=true,message="fixture" });
+                BinaryPrimitives.WriteInt32LittleEndian(header,response.Length);
+                await server.WriteAsync(header,limit.Token);await server.WriteAsync(response,limit.Token);
+            }
+            try{return (await call).Succeeded;}
+            catch(OperationCanceledException) when(!limit.IsCancellationRequested){return false;}
+        }
+        var replies=await Task.WhenAll(ReplyAfterNormalDeadline("fun.challenge.start"),ReplyAfterNormalDeadline("fun.event.execute"));
+        Check(replies[0],"A late flight challenge start receipt survives the ordinary 12-second deadline on the real pipe client");
+        Check(!replies[1],"An ordinary animal wave retains the normal transport deadline on the same delayed pipe fixture");
+    }
+    static void VerifyGullChallenge(string folder)
+    {
+        var vm = new MainViewModel(preferencesStore:new ExperiencePreferenceStore(), experiencePath:Path.Combine(folder,"gull","experience.json"));
+        var runtime = new ExperienceRuntime();
+        vm.Connect(runtime,CapabilityMatrix.For(SessionMode.Host,false)); Pump();
+        JsonElement Score(string id, bool active, int hits=0, int kills=0) => JsonSerializer.SerializeToElement(new {
+            gullChallenge = new { roundId=id, active, total=8, hits, kills, firstHitSeconds=hits>0 ? (double?)1.25 : null, reason="本轮结束" } });
+        RuntimeCommandResult Ok(JsonElement data) => new(true,"确认",data,data,false);
+        string id = "";
+        int Writes() => runtime.Commands.Count(c=>c.FeatureId.StartsWith("fun.challenge."));
+        runtime.GullCommand = c => { id=c.Arguments.GetProperty("roundId").GetString()!;return Task.FromResult(Ok(Score(id,c.FeatureId=="fun.challenge.start"))); };
+
+        Check(vm.CanStartGullChallenge && !vm.CanStopGullChallenge && Writes()==0,"Connecting exposes the challenge without starting a round");
+        vm.GullMigration.CountInput.Text="2.5"; Await(vm.RunGullChallengeAsync(true));
+        Check(Writes()==0&&!vm.CanStartGullChallenge,"An invalid fractional migration count cannot spawn a challenge wave");
+        vm.GullMigration.CountInput.Text="8";vm.AutoRefill=true; Await(vm.RunGullChallengeAsync(true));
+        Check(Writes()==0 && !vm.CanStartGullChallenge,"Auto-refill blocks challenge starts");vm.AutoRefill=false;
+        var pending=new TaskCompletionSource<RuntimeCommandResult>();
+        runtime.GullCommand=c=>{id=c.Arguments.GetProperty("roundId").GetString()!;return pending.Task;};
+        var start=vm.RunGullChallengeAsync(true);
+        Await(vm.RunGullChallengeAsync(true));vm.AutoRefill=true;
+        Check(Writes()==1 && !vm.AutoRefill && !vm.CanStopGullChallenge && Guid.TryParseExact(id,"N",out _) &&
+              runtime.Commands.Last().Arguments.GetProperty("count").GetInt32()==8,"Concurrent clicks send one explicit start with a new round ID and shared wave count");
+        pending.SetResult(Ok(Score(id,true)));Await(start);
+        Check(vm.CanStopGullChallenge && !vm.CanStartGullChallenge && vm.GullChallengeStatus.Contains("尚未命中"),"The acknowledged round can be ended and has no fabricated first hit");
+        vm.UpdateExperienceSession(Score("unrelated",false,5,4));Check(vm.CanStopGullChallenge && vm.GullChallengeStatus.Contains("尚未命中"),"Unrelated round snapshots never overwrite live scores");
+        vm.UpdateExperienceSession(Score(id,true,3,2));Check(vm.GullChallengeStatus.Contains("首中 1.25 秒") && vm.GullChallengeStatus.Contains("有效命中 3 次") && vm.GullChallengeStatus.Contains("击落 2/8"),"Session scores show actual first-hit time, hits and kills for the matching wave");
+        vm.UpdateExperienceSession(Score(id,false,4,3));vm.UpdateExperienceSession(Score(id,true,2,1));
+        Check(vm.CanStartGullChallenge && !vm.CanStopGullChallenge && vm.GullChallengeStatus.Contains("击落 3/8") && Writes()==1,"A completed score rejects a late active snapshot and never restarts automatically");
+
+        string lost="";runtime.GullCommand=c=>{lost=c.Arguments.GetProperty("roundId").GetString()!;return Task.FromException<RuntimeCommandResult>(new IOException("回包丢失"));};
+        Await(vm.RunGullChallengeAsync(true));Check(vm.CanStartGullChallenge && vm.CanStopGullChallenge,"Missing start acknowledgement permits a retry or end without claiming success");
+        vm.GullMigration.CountInput.Text="5";
+        runtime.GullCommand=c=>Task.FromResult(Ok(Score(c.Arguments.GetProperty("roundId").GetString()!,true)));
+        Await(vm.RunGullChallengeAsync(true));
+        Check(runtime.Commands.Last().Arguments.GetProperty("roundId").GetString()==lost && runtime.Commands.Last().Arguments.GetProperty("count").GetInt32()==8,"A retried start keeps the same round ID and submitted count");
+        pending=new();runtime.GullCommand=c=>pending.Task;
+        var stop=vm.RunGullChallengeAsync(false);int before=Writes();Await(vm.RunGullChallengeAsync(false));
+        Check(Writes()==before && runtime.Commands.Last().Arguments.GetProperty("roundId").GetString()==lost,"Repeated stops send a single request scoped to the current round");
+        vm.ResetWorldContext();pending.SetResult(Ok(Score(lost,true,5,4)));Await(stop);
+        Check(vm.CanStartGullChallenge && !vm.CanStopGullChallenge && !vm.GullChallengeStatus.Contains("击落 4/8"),"A stale completion cannot revive a challenge after world change");
+
+        pending=new();runtime.GullCommand=c=>{id=c.Arguments.GetProperty("roundId").GetString()!;return pending.Task;};
+        start=vm.RunGullChallengeAsync(true);Await(vm.EmergencyDisableAsync());
+        pending.SetResult(Ok(Score(id,true,3,2)));Await(start);vm.UpdateExperienceSession(Score(id,true,3,2));
+        Check(!vm.CanStopGullChallenge && vm.CanStartGullChallenge,"A late start or session poll cannot rearm a round after emergency clear");
+        runtime.GullCommand=c=>{id=c.Arguments.GetProperty("roundId").GetString()!;return Task.FromResult(Ok(Score(id,true)));};
+        Await(vm.RunGullChallengeAsync(true));string firstId=id;
+        var empty=JsonSerializer.SerializeToElement(new { gullChallenge=(object?)null });
+        vm.UpdateExperienceSession(empty,null);
+        Check(vm.CanStopGullChallenge,"A session read issued before the start acknowledgement cannot clear the new round");
+        vm.UpdateExperienceSession(empty,id);
+        Check(vm.CanStartGullChallenge && !vm.CanStopGullChallenge && vm.GullChallengeStatus.Contains("未知"),"A matching in-flight inspection observes runtime heartbeat cleanup without inventing a score");
+        Await(vm.RunGullChallengeAsync(true));vm.UpdateExperienceSession(empty,firstId);
+        Check(vm.CanStopGullChallenge,"A prior round's empty read cannot clear a different round");
+        runtime.GullCommand=c=>Task.FromResult(Ok(JsonSerializer.SerializeToElement(new {roundId=id,missing=true,gullChallenge=(object?)null})));
+        Await(vm.RunGullChallengeAsync(false));
+        Check(vm.CanStartGullChallenge && !vm.CanStopGullChallenge && vm.GullChallengeStatus.Contains("未知"),"An idempotent stop for a missing round releases the controls and reports an unknown final score");
+        vm.Disconnect();Check(!vm.CanStartGullChallenge && !vm.CanStopGullChallenge,"Disconnected controls cannot send round commands");
+        vm.CloseExperience();vm.ClosePreferences();
+    }
     [STAThread] static int Main(string[] args)
     {
         bool codeOnly=Environment.GetEnvironmentVariable("ABYSS_CODE_ONLY")=="1";
         if(!codeOnly){var app=new App();app.InitializeComponent();}
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
         string root=args[0],folder=Path.Combine(root,"verification","experience-fixture-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(folder);
+        VerifyGullChallenge(folder);
+        Await(VerifySlowWaveTransport());
         string path=Path.Combine(folder,"experience-settings.json");
         var store=new ExperienceSettingsStore(path);var initial=store.Load();Check(initial.Presets.Count==0,"First launch defaults");
         initial.Presets.Add(new("valid","{}"));store.Save(initial);initial.SpinCurve="脉冲";store.Save(initial);

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using HarmonyLib;
 using HowToFishTrainer.Runtime;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace AbyssalCrab.Runtime
 {
@@ -72,7 +73,9 @@ namespace AbyssalCrab.Runtime
             var previousMatrix = GUI.matrix;
             try
             {
-                DrawEntities(camera, viewport, previousMatrix);
+                var keyboard = Keyboard.current;
+                if (keyboard == null || !keyboard.rightCtrlKey.isPressed)
+                    DrawEntities(camera, viewport, previousMatrix);
                 if (silent && player.Holding && player.Holding.HeldItem && player.Holding.HeldItem.Weapon)
                     DrawRange(camera, viewport, previousMatrix);
             }
@@ -96,6 +99,8 @@ namespace AbyssalCrab.Runtime
         }
         private void DrawEntities(Camera camera, Rect viewport, Matrix4x4 matrix)
         {
+            var aimTarget = PredictiveAimRuntime.CurrentLock();
+            var shotTarget = GameplayRuntime.HighlightedShotTarget();
             var targets = GameplayTargeting.DisplayTargets;
             int revision = GameplayTargeting.DisplayRevision;
             if (_catalogRevision != revision)
@@ -152,6 +157,24 @@ namespace AbyssalCrab.Runtime
                     GUI.color = new Color(1,0,0,.55f);
                     ScreenLine(aim, box.center, viewport, matrix);
                 }
+                if (ReferenceEquals(target, aimTarget) || ReferenceEquals(target, shotTarget))
+                    DrawLockCorners(box, matrix);
+            }
+        }
+        private static void DrawLockCorners(Rect box, Matrix4x4 matrix)
+        {
+            float length = Mathf.Min(10f, Mathf.Min(box.width, box.height) * .35f);
+            float thickness = Mathf.Min(2f, length);
+            float top = Screen.height - box.yMax, bottom = Screen.height - box.yMin;
+            GUI.matrix = matrix;
+            GUI.color = new Color(1f, .84f, .2f, 1f);
+            for (int i = 0; i < 4; i++)
+            {
+                bool left = (i & 1) == 0, upper = (i & 2) == 0;
+                GUI.DrawTexture(new Rect(left ? box.xMin : box.xMax - length, upper ? top : bottom - thickness,
+                    length, thickness), Texture2D.whiteTexture);
+                GUI.DrawTexture(new Rect(left ? box.xMin : box.xMax - thickness, upper ? top : bottom - length,
+                    thickness, length), Texture2D.whiteTexture);
             }
         }
         private static bool ProjectSegment(Camera camera, Vector3 from, Vector3 to, out Vector3 a, out Vector3 b)
