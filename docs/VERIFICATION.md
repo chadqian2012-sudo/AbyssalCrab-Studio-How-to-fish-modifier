@@ -1,5 +1,27 @@
 # 当前交付验证范围 | Current Verification Scope
 
+## r24 的成品已通过离线检查，实机结果待记录 | r24 candidate verification
+
+2026-11-09，在 r23 上新增锁定角标、右 Ctrl 临时隐藏和一轮 60 秒的海鸥飞靶挑战。两种发布包均已解包，450 个有效文件逐项相同。两份主程序都嵌入本次运行时。
+
+- 运行时 74 项通过。直接执行候选 DLL 的计分、截止时间、重复击落和弹丸编号算术；对照当前游戏程序集检查枪械发射、伤害、预制体筛选及生成登记/回滚入口。相对 r23 保持 1159 个原方法，改变 17 个，新增 25 个。
+- 成品应用行为 593 项通过。其中 150 项是体验功能检查，包括重复开局、丢失回执、断线、换世界和旧回包。真实本机测试管道把回复延迟 14 秒，新开局成功，普通趣味操作仍使用 12 秒时限。低帧率下游戏能否完成 50 只海鸥的实际登记仍待验收。
+- 离屏界面 123 项通过，生成 114 张图，未发现 WPF 绑定错误。检查包括两处界面共享数量、非法草稿不能开局及小窗滚动后可操作。
+
+The packaged application passed 593 behavior checks and 123 off-screen UI checks. The runtime passed 74 checks spanning executable scoring math and static inspection of the installed game's native weapon and entity interfaces. A local named-pipe fixture delayed both replies by 14 seconds: the challenge start succeeded while a normal wave retained its original timeout. Both packages have 450 identical entries. No game process was launched or injected.
+
+本轮新增 C-16、C-17、C-18 后，人工验收共 64 项。优先核对开镜、开枪与角标是否同步，按住与松开右 Ctrl 的效果，以及本机命中、其他玩家击落和飞靶离场时的最终计分。
+
+### r24 证据附录 | Evidence appendix
+
+- Runtime audit and checks: `build/staging/combat-challenge/runtime-audit.json`, `build/staging/combat-challenge/verification/entity-overlay-verification.json`.
+- Application and off-screen checks: `build/behavior-r24/behavior-manifest.json`, `build/ui-r24-packaged/ui-verification.json`.
+- Package comparison: `build/package-audit-r24/package-payload-equivalence.json`.
+- Runtime SHA-256: `66c58648ef441d98c3b0212414fc409571a5f1cd85293b39e1bf096828bc75b6`.
+- Application SHA-256: `2af44ab3346cc4090b3542e7ef33b3a681bc9d31df81955aee06df2a157d657a`.
+- single-file SHA-256: `23ee5db898edd70c81735bf3e0ed61c08a8ac99dd289f9e3601da4f1ea670a3c`.
+- compressed-single-file SHA-256: `11c394508cf496adea987ba78e486d0de13c5d3b3f083647e3e0b5b8e85691de`.
+
 ## r23 两种候选包的内容一致，游戏画面待验收 | r23 package verification
 
 2026-11-08，默认版和压缩版解出的 450 个文件逐项相同。两份主程序都嵌入经核对的新 Runtime 和 Harmony。以下检查直接使用候选运行时或从成品提取的应用程序集。

@@ -5,7 +5,7 @@
 - 项目文件 | Project file: `source/HowToFishTrainer/HowToFishTrainer.csproj`
 - 目标平台 | Target: WPF / .NET 8 / Windows x64
 - 发布入口 | Build entry point: `build/Build-Release.ps1`
-- r23 运行时补丁入口 | Runtime patch entry point: `build/Build-TargetOptions.ps1`
+- r24 运行时补丁入口 | Runtime patch entry point: `build/Build-TargetOptions.ps1`
 - 本地构建所需引用 | References required for a local build: `patched/HowToFishTrainer.Core.dll`, `references/HowToFishTrainer.Memory.dll`, plus the embedded Runtime/Harmony assemblies in the project directory. These binary files are excluded from this public source repository; obtain them only from sources you are authorized to use.
 
 ## 环境 | Prerequisites
@@ -28,25 +28,20 @@ Build on Windows with PowerShell and the .NET 8 Windows Desktop SDK. The script 
 
 The default mode creates a Windows x64 self-contained single file and does not require a separate .NET installation. The compressed single-file build extracts on startup; distribute the folder build as a whole; the framework-dependent build requires the .NET 8 Desktop Runtime x64. Verify outputs and embedded resources against the current delivery notes before distribution.
 
-## r23 从已核对的 r22b Runtime 制作候选 | Build r23 from the verified r22b Runtime
+## r24 以已交付的 r23 为父版本 | Patch the shipped r23 runtime
 
-r23 使用显式依赖参数，从 r22b Runtime 制作实体标注补丁，不依赖旧 r11 目录。先准备获授权的游戏程序集、Harmony、dnlib 和父 Runtime，再执行：
+补丁输入为 r23 默认版内嵌运行时、对应的游戏 Managed 程序集、Harmony 及 dnlib。先生成并验证运行时，再用上面的发布入口分别打包。两种 EXE 都需要解包核验。
 
-The r23 patch takes explicit dependency paths and starts from the r22b Runtime, replacing the former r11 directory assumption. Supply authorized game assemblies, Harmony, dnlib and the parent Runtime, then run:
-
-```powershell
-& '.\build\Build-TargetOptions.ps1' -DotnetPath '<SDK>/dotnet.exe' -GameManagedDirectory '<game>/How to Fish_Data/Managed' -DnlibPath '<dnlib>/dnlib.dll' -ParentRuntimePath '<authorized-r22b>/HowToFishTrainer.Runtime.dll'
-```
-
-构建脚本仅读取游戏程序集。为复核成品，可在生成两种 EXE 后运行下列命令。脚本会解包、比较所有文件，并核对每份成品内嵌的 Runtime 与 Harmony。
-
-The game assemblies are read-only inputs. After publishing both variants, compare their extracted payloads and verify that both contain the current embedded Runtime and Harmony.
+Use the embedded r23 Runtime from the delivered candidate. Runtime construction and verification precede both application publishes. The game directory is a read-only build input.
 
 ```powershell
+& '.\build\Build-TargetOptions.ps1' -DotnetPath '<SDK>/dotnet.exe' -GameManagedDirectory '<game>/How to Fish_Data/Managed' -DnlibPath '<dnlib>/dnlib.dll' -ParentRuntimePath '<r23>/HowToFishTrainer.Runtime.dll'
 python '.\build\compare_packaged_payloads.py' '<default.exe>' '<compressed.exe>' '<verification>'
 python '.\build\check_branding.py' '<default.exe>' '<verification>/single-file/assemblies'
 python '.\build\check_branding.py' '<compressed.exe>' '<verification>/compressed-single-file/assemblies'
 ```
+
+父版本 SHA-256 为 `36d5f71f02f9dd21ffcd37aaf7f0266732c6783c84b86802d6186ffc37db56ee`。构建报告随候选交付。`build/staging/combat-challenge/` 保存当前工作副本的运行时审计。历史 r23 的精确构建步骤以 r23 提交的文档及脚本为准。
 
 ## 历史 r18 补丁有独立版本前提 | Historical r18 patch prerequisites
 
@@ -76,7 +71,7 @@ The public repository does not bundle the .NET SDK. The portable SDK mentioned i
 
 The standalone journal project is `source/AnglerCompanion/AnglerCompanion.csproj` and shares journal sources with the trainer. Local r16b validation used the .NET 8 Windows Desktop SDK. DLLs, icons, branding images, distributables and game assemblies are excluded from this source publication. Supply authorized dependencies required by the project files; historical packaging scripts have version-specific assumptions. A clean-clone rebuild and live-game acceptance remain pending.
 
-## r23 构建证据附录 | r23 build evidence appendix
+## 历史 r23 构建证据附录 | r23 build evidence appendix
 
 - 父 Runtime / Required parent Runtime: r22b, SHA-256 `b5bf1fb7fa166ec4c500d03231594862af4784d01805497446d425f99206f210`.
 - 当前 Runtime 审计 / Current Runtime audit: `build/staging/entity-overlay/runtime-audit.json`.
