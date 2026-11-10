@@ -14,8 +14,8 @@
                    所以不会触发长列表重排。 -->
               <Border.RenderTransform>
                 <TransformGroup>
-                  <ScaleTransform ScaleX="1" ScaleY="1" />
-                  <TranslateTransform X="0" Y="0" />
+                  <ScaleTransform x:Name="NavScale" />
+                  <TranslateTransform x:Name="NavOffset" />
                 </TransformGroup>
               </Border.RenderTransform>
               <!-- 竖向边缘高光（GlassEdgeVBrush）：让胶囊读成"立起来的玻璃药丸"，而不是一块平色块。 -->

@@ -24,6 +24,14 @@ Build on Windows with PowerShell and the .NET 8 Windows Desktop SDK. The script 
 & '.\build\Build-Release.ps1' -DotnetPath '<SDK>/dotnet.exe' -OutputDirectory '<output>' -OutputName 'AbyssalCrab Studio.exe'
 ```
 
+要检查四种发布方式，可运行下面一条命令。输出使用新目录，避免把旧包计入体积。省略 `--output-directory` 时，汇总仍写到 `verification/packaging-variants.json`。
+
+To check all four modes, use a fresh output directory. Without an explicit directory, the summary remains at `verification/packaging-variants.json`.
+
+```powershell
+python .\build\check_packaging_variants.py --dotnet-path '<SDK>/dotnet.exe' --package-cache '<NuGet cache>' --output-directory '<new output>'
+```
+
 默认模式生成 Windows x64 自包含单文件，无需用户另装 .NET。压缩单文件在启动时解压；目录版必须整体分发；框架依赖版要求目标电脑安装 .NET 8 Desktop Runtime x64。正式分发前应按当前交付说明核验输出与嵌入资源。
 
 The default mode creates a Windows x64 self-contained single file and does not require a separate .NET installation. The compressed single-file build extracts on startup; distribute the folder build as a whole; the framework-dependent build requires the .NET 8 Desktop Runtime x64. Verify outputs and embedded resources against the current delivery notes before distribution.

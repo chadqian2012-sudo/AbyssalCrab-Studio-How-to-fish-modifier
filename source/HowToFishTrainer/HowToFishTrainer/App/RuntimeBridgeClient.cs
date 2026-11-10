@@ -3,7 +3,6 @@ using System.Buffers.Binary;
 using System.ComponentModel;
 using System.IO;
 using System.IO.Pipes;
-using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading;
@@ -34,9 +33,9 @@ public sealed class RuntimeBridgeClient : IGameRuntimeClient, IAsyncDisposable
 	{
 		using Stream resource = typeof(RuntimeBridgeClient).Assembly.GetManifestResourceStream(resourceName)
 			?? throw new InvalidOperationException("Embedded dependency missing: " + resourceName);
-		using MemoryStream memory = new MemoryStream();
-		resource.CopyTo(memory);
-		return memory.ToArray();
+		var bytes = new byte[checked((int)resource.Length)];
+		resource.ReadExactly(bytes);
+		return bytes;
 	}
 
 	public Guid SessionId => _session;
@@ -143,14 +142,14 @@ public sealed class RuntimeBridgeClient : IGameRuntimeClient, IAsyncDisposable
 				await _pipe.WriteAsync(header, operationToken);
 				await _pipe.WriteAsync(payload, operationToken);
 				await _pipe.FlushAsync(operationToken);
-				await ReadExactly(_pipe, header, operationToken);
-				int num = BinaryPrimitives.ReadInt32LittleEndian(header);
-				if ((num < 1 || num > 262144) ? true : false)
+				await _pipe.ReadExactlyAsync(header, operationToken);
+				int length = BinaryPrimitives.ReadInt32LittleEndian(header);
+				if (length is < 1 or > 262144)
 				{
 					throw new InvalidDataException("Runtime response size invalid.");
 				}
-				byte[] response = new byte[num];
-				await ReadExactly(_pipe, response, operationToken);
+				byte[] response = new byte[length];
+				await _pipe.ReadExactlyAsync(response, operationToken);
 				using JsonDocument jsonDocument = JsonDocument.Parse(response);
 				JsonElement rootElement = jsonDocument.RootElement;
 				RuntimeResponseValidator.Validate(rootElement, _session, correlation);
@@ -191,39 +190,17 @@ public sealed class RuntimeBridgeClient : IGameRuntimeClient, IAsyncDisposable
 	public async Task<RuntimeSessionSnapshot> InspectSessionAsync(CancellationToken cancellationToken)
 	{
 		RuntimeCommandResult runtimeCommandResult = await ExecuteAsync(new FeatureCommand("session.inspect", JsonSerializer.SerializeToElement(new { }), Capability.ReadOnly), cancellationToken);
-		if (runtimeCommandResult.Succeeded)
-		{
-			JsonElement? applied = runtimeCommandResult.Applied;
-			if (applied.HasValue)
-			{
-				JsonElement valueOrDefault = applied.GetValueOrDefault();
-                LastInspection = valueOrDefault.Clone();
-				JsonElement value;
-				JsonElement value2;
-				JsonElement value3;
-				JsonElement value4;
-				JsonElement value5;
-				int value6 = default;
-				JsonElement value7;
-				ulong num = default;
-				return new RuntimeSessionSnapshot(valueOrDefault.TryGetProperty("host", out value) && value.GetBoolean(), valueOrDefault.TryGetProperty("client", out value2) && value2.GetBoolean(), valueOrDefault.TryGetProperty("lobby", out value3) && value3.GetBoolean(), valueOrDefault.TryGetProperty("lobbyId", out value4) ? value4.GetString() : null, (valueOrDefault.TryGetProperty("ownerId", out value5) && LocalTestSafeTryGetInt32(ref value5, ref value6)) ? new int?(value6) : ((int?)null), (valueOrDefault.TryGetProperty("sceneHandle", out value7) && LocalTestSafeTryGetUInt64(ref value7, ref num)) ? num : 0);
-			}
-		}
-		throw new InvalidDataException("Runtime session inspection failed: " + runtimeCommandResult.Message);
-	}
+		if (!runtimeCommandResult.Succeeded || runtimeCommandResult.Applied is not JsonElement session)
+			throw new InvalidDataException("Runtime session inspection failed: " + runtimeCommandResult.Message);
 
-	private static async Task ReadExactly(Stream stream, Memory<byte> target, CancellationToken token)
-	{
-		int num2;
-		for (int offset = 0; offset < target.Length; offset += num2)
-		{
-			int num = offset;
-			num2 = await stream.ReadAsync(target.Slice(num, target.Length - num), token);
-			if (num2 == 0)
-			{
-				throw new EndOfStreamException();
-			}
-		}
+		LastInspection = session;
+		return new RuntimeSessionSnapshot(
+			session.TryGetProperty("host", out var host) && host.GetBoolean(),
+			session.TryGetProperty("client", out var client) && client.GetBoolean(),
+			session.TryGetProperty("lobby", out var lobby) && lobby.GetBoolean(),
+			session.TryGetProperty("lobbyId", out var lobbyId) ? lobbyId.GetString() : null,
+			session.TryGetProperty("ownerId", out var owner) && owner.ValueKind == JsonValueKind.Number && owner.TryGetInt32(out int id) ? id : null,
+			session.TryGetProperty("sceneHandle", out var scene) && scene.ValueKind == JsonValueKind.Number && scene.TryGetUInt64(out ulong handle) ? handle : 0);
 	}
 
 	public ValueTask DisposeAsync()
@@ -235,23 +212,4 @@ public sealed class RuntimeBridgeClient : IGameRuntimeClient, IAsyncDisposable
 		return ValueTask.CompletedTask;
 	}
 
-	private static bool LocalTestSafeTryGetInt32(ref JsonElement P_0, ref int P_1)
-	{
-		if (P_0.ValueKind != JsonValueKind.Number)
-		{
-			P_1 = 0;
-			return false;
-		}
-		return P_0.TryGetInt32(out P_1);
-	}
-
-	private static bool LocalTestSafeTryGetUInt64(ref JsonElement P_0, ref ulong P_1)
-	{
-		if (P_0.ValueKind != JsonValueKind.Number)
-		{
-			P_1 = 0uL;
-			return false;
-		}
-		return P_0.TryGetUInt64(out P_1);
-	}
 }

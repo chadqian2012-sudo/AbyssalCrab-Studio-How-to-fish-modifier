@@ -962,11 +962,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
 	private async Task ReplayEnabledTogglesAsync(IGameRuntimeClient runtime, CapabilitySet capabilities, int connectionEpoch)
 	{
-		KeyValuePair<string, FeatureToggleState>[] array = _toggleStates.Where((KeyValuePair<string, FeatureToggleState> keyValuePair) => keyValuePair.Value.Enabled).ToArray();
-		KeyValuePair<string, FeatureToggleState>[] array2 = array;
-		for (int num = 0; num < array2.Length; num++)
+		foreach (var pair in _toggleStates.Where(entry => entry.Value.Enabled).ToArray())
 		{
-			KeyValuePair<string, FeatureToggleState> pair = array2[num];
 			if (!ReplayIsCurrent(runtime, connectionEpoch))
 			{
 				break;
@@ -1001,33 +998,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 				{
 					continue;
 				}
-				int num2;
-				if (runtimeCommandResult.Succeeded)
-				{
-					JsonElement? applied = runtimeCommandResult.Applied;
-					if (applied.HasValue)
-					{
-						JsonElement valueOrDefault = applied.GetValueOrDefault();
-						if (valueOrDefault.ValueKind == JsonValueKind.Object && valueOrDefault.TryGetProperty("applied", out var value2))
-						{
-							num2 = ((value2.ValueKind == JsonValueKind.False) ? 1 : 0);
-							goto IL_026c;
-						}
-					}
-				}
-				num2 = 0;
-				goto IL_026c;
-				IL_026c:
-				bool flag = (byte)num2 != 0;
-				string stateLabel;
-				if (runtimeCommandResult.Succeeded)
-				{
-					stateLabel = (flag ? "等待条件" : "已开启");
-				}
-				else
-				{
-					stateLabel = "恢复失败";
-				}
+				string stateLabel = !runtimeCommandResult.Succeeded ? "恢复失败"
+					: FeatureItemViewModel.IsWaitingForCondition(runtimeCommandResult.Applied) ? "等待条件" : "已开启";
 				ApplyRememberedToggleState(pair.Key, new FeatureToggleState(runtimeCommandResult.Succeeded, runtimeCommandResult.Message, stateLabel, runtimeCommandResult.Succeeded));
 			}
 			catch (Exception ex)
@@ -1046,11 +1018,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
 	private bool ReplayIsCurrent(IGameRuntimeClient runtime, int connectionEpoch)
 	{
-		if (connectionEpoch == Volatile.Read(in _connectionEpoch))
-		{
-			return _runtime == runtime;
-		}
-		return false;
+		return connectionEpoch == Volatile.Read(in _connectionEpoch) && _runtime == runtime;
 	}
 
 	private void ApplyRememberedToggleState(string id, FeatureToggleState state)
@@ -1474,15 +1442,15 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
 	private static IReadOnlyList<PerformanceStat> PerformanceStats(double damage, double interval, double speed, double spread, double recoil, double magazine)
 	{
-		return new _003C_003Ez__ReadOnlyArray<PerformanceStat>(new PerformanceStat[6]
-		{
+		return
+		[
 			new PerformanceStat("伤害", damage.ToString("0.##"), Math.Clamp(damage / 100.0, 0.0, 1.0)),
 			new PerformanceStat("射速", (interval <= 0.0) ? "—" : ((1.0 / interval).ToString("0.##") + "/秒"), (interval <= 0.0) ? 0.0 : Math.Clamp(1.0 / interval / 15.0, 0.0, 1.0)),
 			new PerformanceStat("精准度", spread.ToString("0.##"), Math.Clamp(1.0 - spread / 12.0, 0.0, 1.0)),
 			new PerformanceStat("后坐力控制", recoil.ToString("0.##"), Math.Clamp(1.0 - recoil / 20.0, 0.0, 1.0)),
 			new PerformanceStat("弹速", speed.ToString("0.##"), Math.Clamp(speed / 150.0, 0.0, 1.0)),
 			new PerformanceStat("弹匣", magazine.ToString("0"), Math.Clamp(magazine / 50.0, 0.0, 1.0))
-		});
+		];
 	}
 
 	private async Task ReadPositionAsync()
