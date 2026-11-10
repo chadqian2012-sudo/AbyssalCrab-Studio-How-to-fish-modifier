@@ -114,8 +114,8 @@ namespace AbyssalCrab.Runtime
                 }
                 foreach (var target in _expired) _visuals.Remove(target);
             }
-            Vector2 aim;
-            bool haveAim = EntityOverlayProjection.TryAimPoint(_host, camera, out aim);
+            Vector2 aim = default(Vector2);
+            bool? haveAim = null;
             Vector3 origin = camera.transform.position;
             float maximum = _distance * _distance;
             for (int i = 0; i < targets.Count; i++)
@@ -141,18 +141,30 @@ namespace AbyssalCrab.Runtime
                     if (right <= left || top <= bottom) continue;
                     box=Rect.MinMaxRect(left,bottom,right,top);
                 }
+                // Both box paths already clip to the viewport. The four edges are axis-aligned.
+                GUI.matrix = matrix;
                 GUI.color = Color.red;
-                ScreenLine(new Vector2(box.xMin,box.yMin),new Vector2(box.xMax,box.yMin),viewport,matrix);
-                ScreenLine(new Vector2(box.xMax,box.yMin),new Vector2(box.xMax,box.yMax),viewport,matrix);
-                ScreenLine(new Vector2(box.xMax,box.yMax),new Vector2(box.xMin,box.yMax),viewport,matrix);
-                ScreenLine(new Vector2(box.xMin,box.yMax),new Vector2(box.xMin,box.yMin),viewport,matrix);
+                float topY = Screen.height - box.yMax;
+                var pixel = Texture2D.whiteTexture;
+                if (box.width >= .1f)
+                {
+                    GUI.DrawTexture(new Rect(box.xMin, topY - .5f, box.width, 1), pixel);
+                    GUI.DrawTexture(new Rect(box.xMin, topY + box.height - .5f, box.width, 1), pixel);
+                }
+                if (box.height >= .1f)
+                {
+                    GUI.DrawTexture(new Rect(box.xMin - .5f, topY, 1, box.height), pixel);
+                    GUI.DrawTexture(new Rect(box.xMax - .5f, topY, 1, box.height), pixel);
+                }
                 for (int bone = 0; bone < visual.Bones.Count; bone++)
                 {
                     var from = visual.Bones[bone]; var to = visual.Parents[bone];
                     if (from && to && from.gameObject.activeInHierarchy && to.gameObject.activeInHierarchy)
                         WorldLine(camera, box, from.position, to.position, matrix);
                 }
-                if (haveAim)
+                if (!haveAim.HasValue)
+                    haveAim = EntityOverlayProjection.TryAimPoint(_host, camera, out aim);
+                if (haveAim.Value)
                 {
                     GUI.color = new Color(1,0,0,.55f);
                     ScreenLine(aim, box.center, viewport, matrix);

@@ -532,19 +532,29 @@ public sealed partial class MainViewModel
         CombatDiagnostics=$"状态：{label}    目标：{TextValue(aim,"lockedTarget")}\n当前武器：{weaponName}    弹速：{Num(weapon,"speed")} m/s\n最近跟踪距离：{Num(last,"distance")} m    预计飞行：{Num(last,"flightTime")} s\n提前量 XYZ：{Num(lead,"x")}, {Num(lead,"y")}, {Num(lead,"z")}\n跟踪平均：{Num(perf,"trackingMeanUs")} μs    P95 ≤ {Num(perf,"trackingP95UpperUs")} μs    异常：{Num(perf,"exceptions","0")}\n更新：{DateTime.Now:HH:mm:ss}（复用每秒会话读取；跟踪数据仅在辅助运行时更新）";
         if(AutoRefill){var waves=Field(aim,"seagullWaves");if(waves.ValueKind!=JsonValueKind.Array){AutoRefill=false;AutoRefillStatus="缺少海鸥存活数据，自动补充已停止";}else{
             int alive=0;bool valid=true;foreach(var wave in waves.EnumerateArray()){var count=Field(wave,"alive");if(count.ValueKind!=JsonValueKind.Number||!count.TryGetInt32(out int n)||n<0||n>100000){valid=false;break;}alive+=n;}
-            if(valid){AutoRefillStatus=$"存活 {alive} 只 · 已补充 {AutoRefillCount}/{RefillLimitInput.LastValidValue:0} 波";if(alive==0)_=RefillSeagullsAsync();}
+            if(valid)
+            {
+                var migration = GullMigration;
+                string error = NumericInput.FirstError(RefillLimitInput, migration.CountInput);
+                if (error.Length != 0) AutoRefillStatus = "自动补充暂停 · " + error;
+                else
+                {
+                    AutoRefillStatus=$"存活 {alive} 只 · 已补充 {AutoRefillCount}/{RefillLimitInput.LastValidValue:0} 波";
+                    if (alive == 0) _ = RefillSeagullsAsync(migration);
+                }
+            }
             else{AutoRefill=false;AutoRefillStatus="海鸥数量数据无效，自动补充已停止";}
         }}
         OnPropertyChanged(nameof(ActiveFeaturesText));
     }
-    private async Task RefillSeagullsAsync()
+    private async Task RefillSeagullsAsync(FunEventCardViewModel migration)
     {
         if(!AutoRefill||_closedExperience||_experienceWorkBusy||DateTimeOffset.UtcNow-_lastRefill<TimeSpan.FromSeconds(3))return;
-        if(RefillLimitInput.HasError||AutoRefillCount>=RefillLimitInput.LastValidValue){AutoRefill=false;AutoRefillStatus="已达到补充上限，请手动重新开启";return;}
+        if(AutoRefillCount>=RefillLimitInput.LastValidValue){AutoRefill=false;AutoRefillStatus="已达到补充上限，请手动重新开启";return;}
         var runtime=_runtime;int epoch=_connectionEpoch,generation=_autoGeneration;
-        var card=FunEventsPage.Events.FirstOrDefault(e=>e.Id=="seagull-migration");if(runtime==null||card?.CanExecute!=true||!FunEventsPage.CanExecuteWave)return;
+        if(runtime==null||!migration.CanExecute||!FunEventsPage.CanExecuteWave)return;
         int work=++_experienceWorkVersion;_experienceWorkBusy=true;_lastRefill=DateTimeOffset.UtcNow;
-        try{var result=await FunEventsPage.ExecuteWaveAsync("seagull-migration");if(runtime!=_runtime||epoch!=_connectionEpoch||generation!=_autoGeneration)return;
+        try{var result=await FunEventsPage.ExecuteWaveAsync(migration.Id);if(runtime!=_runtime||epoch!=_connectionEpoch||generation!=_autoGeneration)return;
             if(result){AutoRefillCount++;AutoRefillStatus=$"已补充第 {AutoRefillCount} 波（按本波实际数量生成）";}
             else{AutoRefill=false;AutoRefillStatus="补充未成功，已停止；请检查趣味事件结果";}
         }catch(Exception e){if(runtime==_runtime&&epoch==_connectionEpoch){AutoRefill=false;AutoRefillStatus="自动补充失败 · "+e.Message;}}
