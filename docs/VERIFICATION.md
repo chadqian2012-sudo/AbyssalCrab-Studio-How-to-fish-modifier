@@ -1,5 +1,16 @@
 # 当前交付验证范围 | Current Verification Scope
 
+## r24 代码修订已通过离线检查 | Post-r24 code checks
+
+海鸥自动补充已开启时，清空波次上限或输入无效的每波数量会暂停生成。两项都填好后，下次检测到海鸥耗尽即可继续。相同操作下，旧版误关开关，修正数字后生成了 0 波；修订版收到 1 波确认。
+
+实体框现在直接绘制四条一像素的边。第一个可见框才查询准心，同帧的其余连线共用结果。与已交付 r24 逐方法比较，运行时只改变了实体绘制方法。应用离线检查 596 项通过（原有 593 项加 3 项补群检查），运行时检查 75 项通过（原有 74 项加 1 项准心检查）。
+
+- [ ] 游戏中编辑两格数量，确认输入期间暂停，改正后只补一波，到达上限后停止。
+- [ ] 在第一、第三人称观察贴屏边的框线和移动目标连线；比较空场景及 24、64、128 个实体时的帧耗时。
+
+The rebuilt app passed all 596 offline behavior checks with the revised runtime embedded. All 75 runtime checks passed. Frame time and appearance still need in-game measurement.
+
 ## r24 的成品已通过离线检查，实机结果待记录 | r24 candidate verification
 
 2026-11-09，在 r23 上新增锁定角标、右 Ctrl 临时隐藏和一轮 60 秒的海鸥飞靶挑战。两种发布包均已解包，450 个有效文件逐项相同。两份主程序都嵌入本次运行时。

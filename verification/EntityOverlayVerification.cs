@@ -276,6 +276,17 @@ static class EntityOverlayVerification
             "Multi-entity drawing consumes the shared catalog rather than a selected target");
         var gui = renderer.Methods.Single(m => m.Name == "OnGUI").Body.Instructions.ToList();
         int CallIndex(List<Instruction> il, string name) => il.FindIndex(i => i.Operand is IMethod m && m.Name == name);
+        var drawIl = draw.Body.Instructions.ToList();
+        int aimRead = CallIndex(drawIl, "TryAimPoint"), hasAim = CallIndex(drawIl, "get_HasValue"), aimValue = CallIndex(drawIl, "get_Value");
+        Check(aimRead > 0 && Calls(draw).Count(c => c.Name == "TryAimPoint") == 1 &&
+            CallIndex(drawIl, "ProjectBox") < CallIndex(drawIl, "MinMaxRect") &&
+            CallIndex(drawIl, "MinMaxRect") < CallIndex(drawIl, "DrawTexture") && CallIndex(drawIl, "DrawTexture") < hasAim &&
+            hasAim < aimRead && aimRead < aimValue && drawIl[hasAim + 1].IsBrtrue() &&
+            ReferenceEquals(drawIl[hasAim + 1].Operand, drawIl[aimValue - 1]) &&
+            ReferenceEquals(drawIl[hasAim - 1].Operand, drawIl[aimValue - 1].Operand) &&
+            drawIl.Skip(aimRead + 1).Take(aimValue - aimRead - 1).Any(i => i.Operand is IMethod ctor && ctor.Name == ".ctor" &&
+                ctor.DeclaringType.FullName.StartsWith("System.Nullable`1<System.Boolean>")),
+            "Crosshair read follows a visible box; subsequent boxes reuse both successful and failed reads");
         int key = CallIndex(gui,"get_rightCtrlKey"), pressed = CallIndex(gui,"get_isPressed");
         int entities = CallIndex(gui,"DrawEntities"), range = CallIndex(gui,"DrawRange");
         Check(key >= 0 && pressed == key + 1 && entities > pressed && range > entities

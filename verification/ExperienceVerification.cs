@@ -211,7 +211,26 @@ static class ExperienceVerification
         runtime.FailWave=true;vm.AutoRefill=true;vm.UpdateExperienceSession(Session(0));Pump();Check(!vm.AutoRefill&&vm.AutoRefillStatus.Contains("未成功"),"Failed wave stops automatic retries");runtime.FailWave=false;
         vm.AutoRefill=true;vm.UpdateExperienceSession(null);Check(!vm.AutoRefill,"Missing entire session disarms refill");vm.AutoRefill=true;vm.UpdateExperienceSession(JsonSerializer.SerializeToElement(new{}));Check(!vm.AutoRefill,"Older runtime without diagnostic section disarms refill");
         vm.AutoRefill=true;vm.TrackDeathPosition=true;vm.Connect(runtime,CapabilityMatrix.For(SessionMode.Host,false));Pump();Check(!vm.AutoRefill&&!vm.TrackDeathPosition,"Direct capability/session reconnection disarms automation even when scene handle is unchanged");
-        vm.RefillLimitInput.Value=1;vm.AutoRefill=true;vm.UpdateExperienceSession(Session(0));Pump();Check(vm.AutoRefillCount==1,"Refill records one confirmed wave");
+        vm.RefillLimitInput.Value=1;
+        vm.AutoRefill=true;
+        int wavesBeforeEdit = runtime.Commands.Count(c => c.FeatureId == "fun.event.execute");
+        vm.RefillLimitInput.Text = "";
+        vm.UpdateExperienceSession(Session(0));
+        Check(vm.AutoRefill && vm.AutoRefillCount == 0 && vm.AutoRefillStatus.Contains(vm.RefillLimitInput.Error) &&
+              runtime.Commands.Count(c => c.FeatureId == "fun.event.execute") == wavesBeforeEdit,
+              "An incomplete wave limit pauses refill without disarming or spawning");
+        vm.RefillLimitInput.Text = "1";
+        vm.GullMigration.CountInput.Text = "2.5";
+        vm.UpdateExperienceSession(Session(0));
+        Check(vm.AutoRefill && vm.AutoRefillCount == 0 && vm.AutoRefillStatus.Contains(vm.GullMigration.CountInput.Error) &&
+              runtime.Commands.Count(c => c.FeatureId == "fun.event.execute") == wavesBeforeEdit,
+              "A fractional animal count keeps refill armed and explains which draft to correct");
+        vm.GullMigration.CountInput.Text = "8";
+        vm.UpdateExperienceSession(Session(0));Pump();
+        Check(vm.AutoRefill && runtime.Commands.Count(c => c.FeatureId == "fun.event.execute") == wavesBeforeEdit + 1 &&
+              runtime.Commands.Last(c => c.FeatureId == "fun.event.execute").Arguments.GetProperty("count").GetInt32() == 8,
+              "Correcting both drafts resumes one wave using its corrected count");
+        Check(vm.AutoRefillCount==1,"Refill records one confirmed wave");
         typeof(MainViewModel).GetField("_lastRefill",BindingFlags.NonPublic|BindingFlags.Instance)!.SetValue(vm,DateTimeOffset.MinValue);commands=runtime.Commands.Count;vm.UpdateExperienceSession(Session(0));Pump();Check(!vm.AutoRefill&&vm.AutoRefillCount==1&&!runtime.Commands.Skip(commands).Any(c=>c.FeatureId=="fun.event.execute"),"Wave limit preserves count and blocks further generation");
         vm.SelectedTeleportPoint=vm.TeleportPoints.Single();vm.CurrentXInput.Text="17.5";commands=runtime.Commands.Count;vm.TeleportSelectedCommand.Execute(null);Pump();Check(runtime.Commands.Skip(commands).Last(c=>c.FeatureId=="world.teleport").Arguments.GetProperty("x").GetDouble()==17.5,"Selected point supplies initial coordinates; edited coordinates control actual teleport");
         vm.CurrentXInput.Text="-";commands=runtime.Commands.Count;vm.TeleportSelectedCommand.Execute(null);Pump();Check(runtime.Commands.Count==commands,"Invalid edited coordinate blocks teleport even with saved point selected");
