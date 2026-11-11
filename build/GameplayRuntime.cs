@@ -26,6 +26,9 @@ namespace AbyssalCrab.Runtime
         private static readonly Dictionary<Projectile, GameplayFlight> Shots = new Dictionary<Projectile, GameplayFlight>();
         private static readonly List<Projectile> Expired = new List<Projectile>();
         private static float _nextPrune;
+        private static GameplayLaunch _latestVolley;
+        private static Component _guidedTarget;
+        private static float _highlightUntil;
         private static float _nextDashWarning, _nextShotWarning;
         private static string _lastDashError, _lastShotError;
         private static AccessTools.FieldRef<ProjectileManager,uint> _nextId;
@@ -87,6 +90,7 @@ namespace AbyssalCrab.Runtime
         }
         public static bool Validate(string id, JObject args)
         {
+            if (id == "combat.silent_aim" && args["entityOverlayDistance"] != null) MagicRangePolicy.CheckedDistance(args["entityOverlayDistance"]);
             if (id == "player.move.multiplier" || id == "player.sprint.multiplier" || id == "player.jump.multiplier")
             { Require(args, "value", .25, GameplayPolicy.Maximum(id), false); return true; }
             if (id != "combat.silent_aim" && id != "player.air_dash.lock") return false;
@@ -113,8 +117,9 @@ namespace AbyssalCrab.Runtime
             if (id == "combat.aim_assist") _head = args.Value<bool?>("headLockEnabled") ?? false;
             if (id == "combat.silent_aim")
             {
+                if(args["entityOverlayDistance"] != null) MagicRangeRenderer.ConfigureDistance(host, MagicRangePolicy.CheckedDistance(args["entityOverlayDistance"]));
                 if(args.Value<bool?>("enabled")==false)
-                { GameplayTargeting.ConfigureTeammates(false); MagicRangeRenderer.Stop(); return result; }
+                { GameplayTargeting.ConfigureTeammates(false); MagicRangeRenderer.Refresh(host); return result; }
                 _angle = args.Value<float?>("angle") ?? 8; _distance = args.Value<float?>("distance") ?? 35;
                 _strength = args.Value<float?>("strength") ?? 100; _trigger = args.Value<string>("trigger") ?? "fire";
                 GameplayTargeting.ConfigureTeammates(args.Value<bool?>("targetTeammates") ?? false);
@@ -123,10 +128,28 @@ namespace AbyssalCrab.Runtime
             return result;
         }
         public static void Restore(TrainerBridgeHost host, string id)
-        { if (id == "combat.silent_aim") { ClearProjectiles(); GameplayTargeting.ConfigureTeammates(false); MagicRangeRenderer.Stop(); } if (id == "player.air_dash.lock") StopDash(); }
+        { if (id == "combat.silent_aim") { ClearProjectiles(); GameplayTargeting.ConfigureTeammates(false); MagicRangeRenderer.Refresh(host); } if (id == "player.air_dash.lock") StopDash(); }
         public static void Reset(TrainerBridgeHost host)
         { ClearProjectiles(); StopDash(); GameplayTargeting.Reset(); MagicRangeRenderer.Stop(); _host = null; _head = false; _explosion = null;_nextDashWarning=_nextShotWarning=0;_lastDashError=_lastShotError=null; }
-        private static void ClearProjectiles() { Shots.Clear(); Expired.Clear(); _nextPrune = 0; }
+        private static void ClearProjectiles()
+        {
+            Shots.Clear(); Expired.Clear(); _nextPrune = 0;
+            _latestVolley = null; _guidedTarget = null;
+        }
+        public static Component HighlightedShotTarget()
+        {
+            Vector3 point;
+            if (_guidedTarget && Time.unscaledTime < _highlightUntil && _host != null && _host.IsLockEnabled("combat.silent_aim")
+                && GameplayTargeting.Point(_guidedTarget, out point))
+                return _guidedTarget;
+            _guidedTarget = null;
+            return null;
+        }
+        private static void MarkGuidance(Component target)
+        {
+            _guidedTarget = target;
+            _highlightUntil = Time.unscaledTime + .2f;
+        }
         private static void StopDash() { _dashUntil = 0; _dashPressedFrame = -1; _dashPlayer = null; }
         private static bool Ready(Player p) => p && p == Player.LocalPlayer && !p.IsDeinitializing && p.Dying && !p.Dying.IsDead && p.Camera && p.Camera.MouseLocked && !p.BlockInputs;
         public static void Tick(TrainerBridgeHost host)
@@ -194,6 +217,8 @@ namespace AbyssalCrab.Runtime
         private static bool RedirectShot(TrainerBridgeHost host, object owner, object info, bool local, bool forbidden, Vector3 muzzle, Vector3[] velocities, out Vector3[] corrected)
         {
             corrected=null; if (host != _host || !ShotReady(owner,info,local,forbidden) || velocities == null || velocities.Length == 0 || _strength <= 0) return false;
+            _latestVolley = null;
+            _guidedTarget = null;
             var p=(Player)owner; if ((muzzle-p.Camera.CamTransform.position).sqrMagnitude>25) return false;
             Vector3 point; var target=GameplayTargeting.Select(p.Camera.CamTransform.position,p.Camera.CamTransform.forward,muzzle,_distance,_angle,_head,out point);
             if (!target) return false;
@@ -205,7 +230,9 @@ namespace AbyssalCrab.Runtime
             Vector3 desired=Vector3.Slerp(current.normalized,launch.normalized,_strength/100);
             Quaternion turn=Quaternion.FromToRotation(current.normalized,desired); corrected=new Vector3[velocities.Length];
             for(int i=0;i<velocities.Length;i++) corrected[i]=turn*velocities[i];
-            host.RecordFeatureHit("combat.silent_aim","configured-projectile-launch"); return true;
+            host.RecordFeatureHit("combat.silent_aim","configured-projectile-launch");
+            MarkGuidance(target);
+            return true;
         }
         private static GameplayLaunch Launch(ProjectileManager manager, Player owner, WeaponInfo info, bool local, bool forbidden, Vector3 pos)
         {
@@ -224,8 +251,11 @@ namespace AbyssalCrab.Runtime
         }
         private static void RegisterLaunch(ProjectileManager __instance, Player owner, WeaponInfo weaponInfo, GameplayLaunch __state)
         {
-            if (__state==null || Shots.Count>=1024)return;
+            if (__state==null)return;
             uint count=unchecked(_nextId(__instance)-__state.StartId);
+            if (count == 0) return;
+            _latestVolley = __state;
+            if (Shots.Count >= 1024) return;
             foreach(var p in __instance.GetType(weaponInfo.ProjectileType).Projectiles)
                 if(p.IsLocal&&p.Owner==owner&&unchecked(p.Id-__state.StartId)<count)
                     if(Shots.Count<1024)Shots[p]=new GameplayFlight {Volley=__state,LastSeen=Time.unscaledTime};
@@ -255,6 +285,7 @@ namespace AbyssalCrab.Runtime
             float speed=projectile.Velocity.magnitude;
             Vector3 launch=GameplayTargeting.LaunchDirection(state.Target,point,projectile.Position,projectile.Velocity,projectile.GravityForce,false);
             projectile.Velocity=Vector3.RotateTowards(projectile.Velocity,launch.normalized*speed,GameplayPolicy.TurnRadians(state.Strength,Time.fixedDeltaTime),0);
+            if (ReferenceEquals(state, _latestVolley)) MarkGuidance(state.Target);
         }
         public static bool TryHandle(TrainerBridgeHost host, JObject envelope)
         {

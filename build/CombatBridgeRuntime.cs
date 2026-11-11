@@ -36,29 +36,81 @@ namespace AbyssalCrab.Runtime
             string id = envelope.Value<string>("featureId");
             var args = envelope["arguments"] as JObject ?? new JObject();
             string correlation = envelope.Value<string>("correlationId");
+            if (id == "view.entity_overlay.configure")
+            {
+                Call(host, "ValidateAuthority", new object[] { id });
+                float distance = MagicRangePolicy.CheckedDistance(args["distance"]);
+                MagicRangeRenderer.ConfigureDistance(host, distance);
+                Call(host, "Reply", new object[] { correlation, true, "实体标注显示距离已应用", new JObject { ["distance"] = distance }, false, true });
+                return true;
+            }
             if (id == "combat.feedback.configure")
             {
                 CombatFeedbackRuntime.Configure(host, args);
                 Call(host, "Reply", new object[] { correlation, true, "战斗反馈设置已应用", new JObject { ["enabled"] = args.Value<bool?>("enabled") ?? false }, false, true });
                 return true;
             }
-            if (id != "fun.event.execute" || args["count"] == null) return false;
-            string eventId = args.Value<string>("eventId");
+            var round = CombatFeedbackRuntime.RoundFor(host);
+            bool start = id == "fun.challenge.start";
+            if (start || id == "fun.challenge.stop")
+            {
+                Call(host,"ValidateAuthority",new object[]{"fun.event.execute"});
+                var key = args["roundId"];
+                Guid parsed;
+                if (key == null || key.Type != JTokenType.String || !Guid.TryParseExact((string)key,"N",out parsed))
+                    throw new ArgumentException("飞靶回合编号无效");
+                if (round != null && round.Id == (string)key)
+                {
+                    if (round.Pending) throw new InvalidOperationException("本轮海鸥正在登记，请等待生成完成。");
+                    if (!start && round.Active) round.Finish("已手动结束");
+                    Call(host,"Reply",new object[]{correlation,true,"本轮飞靶成绩",new JObject { ["gullChallenge"]=round.Snapshot() },false,true});
+                    return true;
+                }
+                if (!start)
+                {
+                    Call(host,"Reply",new object[]{correlation,true,"本轮已不存在，无法读取最终成绩",
+                        new JObject { ["roundId"]=(string)key,["missing"]=true,["gullChallenge"]=JValue.CreateNull() },false,true});
+                    return true;
+                }
+            }
+            if (!start && (id != "fun.event.execute" || args["count"] == null)) return false;
+            string eventId = start ? "seagull-migration" : args.Value<string>("eventId");
             if (!Animal(eventId)) throw new ArgumentException("此事件不支持自定义动物数量");
-            if (args["count"].Type != JTokenType.Integer) throw new ArgumentException("动物数量需要整数");
+            if (args["count"] == null || args["count"].Type != JTokenType.Integer) throw new ArgumentException("动物数量需要整数");
             long count = args.Value<long>("count");
             if (count < 1 || count > 50) throw new ArgumentOutOfRangeException("count", "每波动物数量需要在 1–50 之间");
-            // Retain the native authority, resource preflight, batching, registration and rollback.
-            Call(host, "ValidateAuthority", new object[] { id });
+            // Use the original authority, preflight, registration, cancellation and rollback.
+            if (!start) Call(host, "ValidateAuthority", new object[] { id });
+            if (start) round = CombatFeedbackRuntime.PrepareRound(host,(string)args["roundId"]);
             _count = (int)count;
             try
             {
                 Call(host, "BeginFunEvent", new object[] { correlation, eventId });
                 _waveHost=host;_wave=Read(host,"_activeFunWave");_waveIndex=0;
-                _waveDeadline=Time.realtimeSinceStartup+10.5f;_nextWaveCheck=0;
+                _waveDeadline=Time.realtimeSinceStartup+(start ? 28f : 10.5f);_nextWaveCheck=0;
+                if (start) round.WaveId = (string)Read(_wave,"WaveId");
+            }
+            catch
+            {
+                if (start) round.Finish("飞靶生成失败");
+                throw;
             }
             finally { _count = 0; }
             return true;
+        }
+        public static JObject ChallengeReceipt(JObject receipt, TrainerBridgeHost host, object wave)
+        {
+            var round = CombatFeedbackRuntime.RoundFor(host);
+            if (round == null || !round.Pending || round.WaveId != (string)receipt["waveId"]) return receipt;
+            round.Bind((IList)Read(wave,"Entities"),Time.realtimeSinceStartup);
+            receipt["gullChallenge"] = round.Snapshot();
+            return receipt;
+        }
+        public static void ChallengeRollback(TrainerBridgeHost host, string waveId)
+        {
+            var round = CombatFeedbackRuntime.RoundFor(host);
+            if (round != null && round.Pending && round.WaveId != null && round.WaveId == waveId)
+                round.Finish("飞靶登记未完成");
         }
         public static void MaintainWave(TrainerBridgeHost host)
         {
@@ -96,6 +148,19 @@ namespace AbyssalCrab.Runtime
             if (id == "piranha-rain") pool = (IList)Call(host,"Piranhas",new object[]{catalog});
             else if (id == "ocean-parade") pool = (IList)Call(host,"MixParade",new object[]{catalog});
             else pool = (IList)Read(catalog,id == "seagull-migration" ? "Birds" : id == "crab-parade" ? "Crabs" : "Fish");
+            var round = CombatFeedbackRuntime.RoundFor(host);
+            if (id == "seagull-migration" && round != null && round.Pending && round.WaveId == null)
+            {
+                var birds = new System.Collections.Generic.List<object>();
+                foreach (var value in pool)
+                {
+                    var item = value as Item;
+                    var bird = item ? item.GetComponent<Bird>() : null;
+                    if (bird && bird.BossType == BossType.None && !item.GetComponent<Albatross>()) birds.Add(item);
+                }
+                if (birds.Count == 0) throw new InvalidOperationException("当前目录没有可确认的普通海鸥。");
+                pool = birds;
+            }
             if (pool.Count == 0) throw new InvalidOperationException("当前游戏目录没有兼容动物");
             if (id == "whale-fall")
             {

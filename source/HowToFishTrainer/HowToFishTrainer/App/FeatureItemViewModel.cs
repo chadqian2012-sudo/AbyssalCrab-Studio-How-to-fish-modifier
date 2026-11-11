@@ -296,7 +296,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 				orderby kind
 				select kind);
             if (Options.Count == 0 && !list.Contains(SelectedKind)) list.Add(SelectedKind);
-			return new _003C_003Ez__ReadOnlyList<string>(list);
+			return list.AsReadOnly();
 		}
 	}
 
@@ -661,8 +661,9 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 
 	public event PropertyChangedEventHandler? PropertyChanged;
 
-	public FeatureItemViewModel(FeatureDescriptor descriptor, IGameRuntimeClient? runtime = null, CapabilitySet? capabilities = null, IReadOnlyList<CatalogOption>? options = null, FeatureToggleState? toggleState = null, Action<FeatureItemViewModel>? stateChanged = null, Action? playEnabledSound = null, ISponsorAccessGate? sponsorAccessGate = null, Action<string, string>? showFeatureNotice = null)
+	public FeatureItemViewModel(FeatureDescriptor descriptor, IGameRuntimeClient? runtime = null, CapabilitySet? capabilities = null, IReadOnlyList<CatalogOption>? options = null, FeatureToggleState? toggleState = null, Action<FeatureItemViewModel>? stateChanged = null, Action? playEnabledSound = null, ISponsorAccessGate? sponsorAccessGate = null, Action<string, string>? showFeatureNotice = null, NumericInput? entityOverlayDistanceInput = null)
 	{
+		EntityOverlayDistanceInput = entityOverlayDistanceInput ?? new NumericInput("显示距离（米）", 200, 1, 1000);
 		_showFeatureNotice = showFeatureNotice;
 		Descriptor = descriptor;
         foreach (var input in new[] { MagicAngleInput, MagicDistanceInput, MagicStrengthInput })
@@ -856,77 +857,33 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
             }));
 			OperationReceipt operationReceipt = await new FeatureEngine(_runtime).ExecuteAsync(new FeatureCommand(Descriptor.Id, arguments, Descriptor.RequiredCapability), _capabilities, CancellationToken.None);
             if(operationEpoch!=_operationEpoch)return;
-			ReceiptStatus status = operationReceipt.Status;
-			bool flag = (uint)status <= 1u;
-			bool flag2 = flag;
-            if (flag2) RevertToggle(desired);
-            if (IsMagicBullet && desired && flag2) _appliedMagicArguments = arguments.Clone();
-            if (IsMagicBullet && argumentsOverride.HasValue && !flag2)
-            { _magicTargetTeammates = TargetingArguments.Teammates(_appliedMagicArguments); Changed(nameof(MagicTargetTeammates)); }
-            if (IsSpin && desired && flag2)
-            {
-                _appliedSpinSpeed = spinSpeed;
-                _appliedSpinAutoJump = spinAutoJump;
-            }
+			bool succeeded = operationReceipt.Status is ReceiptStatus.Succeeded or ReceiptStatus.AppliedUnverified;
+			if (succeeded) RevertToggle(desired);
+			if (IsMagicBullet && desired && succeeded) _appliedMagicArguments = arguments.Clone();
+			if (IsMagicBullet && argumentsOverride.HasValue && !succeeded)
+			{
+				_magicTargetTeammates = TargetingArguments.Teammates(_appliedMagicArguments);
+				Changed(nameof(MagicTargetTeammates));
+			}
+			if (IsSpin && desired && succeeded)
+			{
+				_appliedSpinSpeed = spinSpeed;
+				_appliedSpinAutoJump = spinAutoJump;
+			}
 			Status = operationReceipt.Message;
-			int num;
-			if (desired & flag2)
+			var applied = operationReceipt.Applied;
+			bool waiting = desired && succeeded && IsWaitingForCondition(applied);
+			IsSuccessful = succeeded && !waiting;
+			if (waiting)
 			{
-				JsonElement? applied = operationReceipt.Applied;
-				if (applied.HasValue)
-				{
-					JsonElement valueOrDefault = applied.GetValueOrDefault();
-					if (valueOrDefault.ValueKind == JsonValueKind.Object && valueOrDefault.TryGetProperty("applied", out var value))
-					{
-						num = ((value.ValueKind == JsonValueKind.False) ? 1 : 0);
-						goto IL_01c1;
-					}
-				}
-			}
-			num = 0;
-			goto IL_01c1;
-			IL_020d:
-			object obj;
-			string waitingFor = (string)obj;
-			FeatureItemViewModel featureItemViewModel = this;
-			bool flag3;
-			string stateLabel;
-			if (flag3)
-			{
-				stateLabel = WaitingLabel(waitingFor);
-			}
-			else if (flag2)
-			{
-				stateLabel = (desired ? "已开启" : "已关闭");
+				StateLabel = WaitingLabel(applied.GetValueOrDefault().TryGetProperty("waitingFor", out var waitingFor) ? waitingFor.GetString() : null);
 			}
 			else
 			{
-				stateLabel = "执行失败";
+				StateLabel = succeeded ? (desired ? "已开启" : "已关闭") : "执行失败";
 			}
-			featureItemViewModel.StateLabel = stateLabel;
-			if (((flag2 && !flag3) & desired) && !Descriptor.Advanced)
-			{
-				_playEnabledSound?.Invoke();
-			}
-			if (!flag2)
-			{
-				RevertToggle(previous);
-			}
-			return;
-			IL_01c1:
-			flag3 = (byte)num != 0;
-			IsSuccessful = flag2 && !flag3;
-			if (flag3)
-			{
-				JsonElement? applied = operationReceipt.Applied;
-				if (applied.HasValue && applied.GetValueOrDefault().TryGetProperty("waitingFor", out var value2))
-				{
-					obj = value2.GetString();
-					goto IL_020d;
-				}
-			}
-			obj = null;
-			goto IL_020d;
+			if (succeeded && !waiting && desired && !Descriptor.Advanced) _playEnabledSound?.Invoke();
+			if (!succeeded) RevertToggle(previous);
 		}
 		catch (Exception ex)
 		{
@@ -943,6 +900,10 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
             if(operationEpoch==_operationEpoch){IsBusy = false;NotifyStateChanged();}
 		}
 	}
+
+	internal static bool IsWaitingForCondition(JsonElement? applied) =>
+		applied is { ValueKind: JsonValueKind.Object } value &&
+		value.TryGetProperty("applied", out var flag) && flag.ValueKind == JsonValueKind.False;
 
 	private static string WaitingLabel(string? waitingFor)
 	{

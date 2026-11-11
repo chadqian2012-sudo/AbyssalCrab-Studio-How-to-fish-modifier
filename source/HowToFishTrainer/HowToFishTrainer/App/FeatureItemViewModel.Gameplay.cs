@@ -7,6 +7,7 @@ namespace HowToFishTrainer.App;
 public sealed partial class FeatureItemViewModel
 {
     public bool IsMagicBullet => Descriptor.Id == "combat.silent_aim";
+    public NumericInput EntityOverlayDistanceInput { get; }
     public NumericInput MagicAngleInput { get; } = new("捕获角度（度）", 8, .5, 180);
     public NumericInput MagicDistanceInput { get; } = new("追踪距离（米）", 35, 1, 1000);
     public NumericInput MagicStrengthInput { get; } = new("追踪强度（%）", 100, 0, 100);
@@ -25,7 +26,7 @@ public sealed partial class FeatureItemViewModel
             Changed();
             NotifyStateChanged();
             if (!_restoringParameters && Enabled && CanInteract)
-                _ = ExecuteToggleAsync(true, true, _appliedMagicArguments.HasValue ? TargetingArguments.WithTeammates(_appliedMagicArguments.Value, value) : null);
+                _ = ExecuteToggleAsync(true, true, _appliedMagicArguments.HasValue ? TargetingArguments.WithTeammates(_appliedMagicArguments.Value, value, EntityOverlayDistanceInput.LastValidValue) : null);
         }
     }
     public AimAssistTriggerOption MagicTrigger
@@ -38,5 +39,6 @@ public sealed partial class FeatureItemViewModel
     public JsonElement MagicArguments(bool enabled) => enabled ? JsonSerializer.SerializeToElement(new {
         enabled, angle = MagicAngleInput.Value, distance = MagicDistanceInput.Value,
         strength = MagicStrengthInput.Value, trigger = MagicTrigger.Value,
-        targetTeammates = MagicTargetTeammates }) : JsonSerializer.SerializeToElement(new { enabled });
+        targetTeammates = MagicTargetTeammates, entityOverlayDistance = EntityOverlayDistanceInput.LastValidValue })
+        : JsonSerializer.SerializeToElement(new { enabled, entityOverlayDistance = EntityOverlayDistanceInput.LastValidValue });
 }

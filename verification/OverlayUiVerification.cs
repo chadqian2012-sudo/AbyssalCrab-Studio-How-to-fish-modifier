@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -62,17 +63,158 @@ static class OverlayUiVerification
         for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
             foreach (var child in Find<T>(VisualTreeHelper.GetChild(root, i))) yield return child;
     }
-    private static void Render(FrameworkElement root, string path, int width = 1000, int height = 720)
+    private static void Render(FrameworkElement root, string? path, int width = 1000, int height = 720)
     {
         root.Measure(new Size(width, height)); root.Arrange(new Rect(0, 0, width, height)); root.UpdateLayout(); Pump();
         var settled = new DispatcherFrame();
         var timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(350) };
         timer.Tick += (_, _) => { timer.Stop(); settled.Continue = false; };
         timer.Start(); Dispatcher.PushFrame(settled); root.UpdateLayout();
+        if (path == null) return;
         var image = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
         image.Render(root);
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(image));
         using var file = File.Create(path); encoder.Save(file); Images.Add(path);
+    }
+
+    private static bool InsideScrollViewports(FrameworkElement element, Rect region)
+    {
+        int count = 0;
+        for (DependencyObject parent = element; parent != null; parent = VisualTreeHelper.GetParent(parent))
+        {
+            if (parent is not ScrollContentPresenter viewport) continue;
+            count++;
+            Point start = element.TranslatePoint(region.TopLeft, viewport), end = element.TranslatePoint(region.BottomRight, viewport);
+            if (viewport.ActualWidth <= 0 || viewport.ActualHeight <= 0 || start.X < -1 || start.Y < -1 ||
+                end.X > viewport.ActualWidth + 1 || end.Y > viewport.ActualHeight + 1) return false;
+        }
+        return count >= 2;
+    }
+
+    private static void VerifyEntityOverlay(MainViewModel vm, OverlayUiRuntime runtime, TrainerContentView mainView,
+        TrainerContentView overlayView, FrameworkElement overlayRoot, TabControl tabs, string output)
+    {
+        vm.Connect(runtime, CapabilityMatrix.For(SessionMode.Host, false)); Pump();
+        vm.SelectedPage = vm.Pages.First(p => p.Category == "战斗"); tabs.SelectedIndex = 1;
+        foreach (var view in new[] { mainView, overlayView }) Find<Expander>(Find<ExperienceBar>(view).Single()).Single().IsExpanded = false;
+        Render(mainView,null,1400,800);
+        Render(overlayRoot,null,620,680);
+        var input = vm.EntityOverlayDistanceInput;
+        Check(input.Value == 200 && input.LastValidValue == 200 && input.Minimum == 1 && input.Maximum == 1000 && !input.IntegerOnly,
+            "Entity annotation starts at 200 m with an inclusive 1–1000 m decimal range");
+        var views = new[] { mainView, overlayView };
+        var cards = views.Select(view => {
+            var title = Find<TextBlock>(view).Single(t => t.Text == "实体标注");
+            DependencyObject card = title;
+            while (card is not Border) card = VisualTreeHelper.GetParent(card);
+            return (Border)card;
+        }).ToArray();
+        Check(cards.All(card => Find<TextBlock>(card).Any(t => t.Text.Contains("角标") && t.Text.Contains("右 Ctrl"))),
+            "Main and floating entity cards describe the lock marker and the right Ctrl hold shortcut");
+        var editors = views.Select(view => Find<TextBox>(Find<NumericInputBox>(view).Single(n => ReferenceEquals(n.Input,input))).Single()).ToArray();
+        var actions = cards.Select(card => Find<Button>(card).Single(b => Equals(b.Content,"应用显示距离"))).ToArray();
+        for (int i=0;i<editors.Length;i++)
+        {
+            editors[i].BringIntoView(new Rect(0,0,150,editors[i].ActualHeight)); Pump();
+            Render(i==0?mainView:overlayRoot,Path.Combine(output,i==0?"entity-overlay-main-default.png":"entity-overlay-panel-default.png"),i==0?1400:620,i==0?800:680);
+        }
+        Check(cards.All(c => c.Visibility == Visibility.Visible && c.ActualHeight > 0) && views.All(view => Find<NumericInputBox>(view).Count(n => ReferenceEquals(n.Input,input)) == 1)
+            && ReferenceEquals(vm.AimAssist.EntityOverlayDistanceInput,input)
+            && ReferenceEquals(vm.AllFeatures.Single(f => f.Descriptor.Id == "combat.silent_aim").EntityOverlayDistanceInput,input),
+            "Main and floating combat pages each contain one entity card bound to the same display-distance owner");
+        Check(editors.All(e => e.Text == "200") && actions.All(b => b.IsEnabled), "Both entity-card editors show the shared default and an available display-only apply action");
+        int startCalls = runtime.Calls.Count;
+        editors[1].Text = "-"; Pump();
+        editors[1].BringIntoView(new Rect(0,0,150,editors[1].ActualHeight)); Pump();
+        Render(overlayRoot,Path.Combine(output,"entity-overlay-shared-incomplete.png"),620,680);
+        Check(editors.All(e => e.Text == "-") && input.HasError && input.LastValidValue == 200 && actions.All(b => !b.IsEnabled),
+            "An unfinished floating-card draft appears unchanged in both views and disables both apply actions without losing 200 m");
+        foreach (string value in new[] { "1", "275.5", "1000" })
+        {
+            editors[0].Text=value; Pump();
+            Check(editors.All(e => e.Text == value) && !input.HasError && actions.All(b => b.IsEnabled)
+                && input.LastValidValue == double.Parse(value,System.Globalization.CultureInfo.InvariantCulture),
+                "Both entity-card editors accept and synchronize the inclusive endpoint or decimal: " + value);
+        }
+        foreach (string value in new[] { "0.5", "1000.5" })
+        {
+            editors[1].Text=value; Pump();
+            editors[1].BringIntoView(new Rect(0,0,150,editors[1].ActualHeight)); Pump();
+            Render(overlayRoot,Path.Combine(output,"entity-overlay-invalid-"+value+".png"),620,680);
+            Check(editors.All(e => e.Text == value) && input.HasError && input.LastValidValue == 1000 && actions.All(b => !b.IsEnabled),
+                "Both entity cards preserve an out-of-range decimal draft and keep the last valid 1000 m: " + value);
+        }
+        editors[0].Text="275.5"; Pump();
+        for (int i=0;i<views.Length;i++)
+        {
+            string host=i==0?"main":"panel";
+            FrameworkElement root=i==0?mainView:overlayRoot;
+            Render(root,Path.Combine(output,"entity-overlay-"+host+"-600.png"),600,380);
+            var explanations = Find<TextBlock>(cards[i]).Where(t => t.Text.StartsWith("辅助瞄准或魔法子弹开启时显示") ||
+                t.Text.StartsWith("显示距离与两个功能的攻击距离独立")).ToArray();
+            Check(explanations.Length == 2 && explanations.All(t => t.TextWrapping == TextWrapping.Wrap && t.TextTrimming == TextTrimming.None && t.ActualHeight > 0),
+                "600 by 380 " + host + " entity-card explanations retain their complete wrapping text");
+            actions[i].BringIntoView(); Pump();
+            Render(root,Path.Combine(output,"entity-overlay-"+host+"-apply-600.png"),600,380);
+            Check(actions[i].IsEnabled && actions[i].ActualWidth > 0 && actions[i].ActualHeight > 0 &&
+                InsideScrollViewports(actions[i],new Rect(0,0,actions[i].ActualWidth,actions[i].ActualHeight)),
+                "600 by 380 " + host + " scrolls the complete entity display apply button through every enclosing viewport");
+            for (int text=0;text<explanations.Length;text++)
+            foreach (bool last in new[] { false,true })
+            {
+                var explanation=explanations[text];
+                var pointer=last?explanation.ContentEnd:explanation.ContentStart;
+                var direction=last?LogicalDirection.Backward:LogicalDirection.Forward;
+                Rect character=pointer.GetInsertionPosition(direction)!.GetCharacterRect(direction);
+                character.Width=Math.Max(2,character.Width);
+                explanation.BringIntoView(character); Pump();
+                Render(root,Path.Combine(output,$"entity-overlay-{host}-text-{text}-{(last?"last":"first")}-600.png"),600,380);
+                Check(!character.IsEmpty && character.Height > 0 && InsideScrollViewports(explanation,character),
+                    "600 by 380 " + host + " can scroll to the " + (last?"last":"first") + " characters of entity explanation " + text);
+            }
+        }
+        var gameplay = runtime.Calls.Skip(startCalls).Where(id => !new[] { "players.catalog", "players.inspect", "catalog.items", "catalog.islands", "features.proofs", "fun.event.catalog", "fun.event.availability", "casino.status" }.Contains(id)).ToArray();
+        Check(gameplay.Length == 0,"Editing, validating and scrolling the shared entity card dispatches no runtime write commands");
+    }
+
+    private static void VerifyGullChallenge(MainViewModel vm, OverlayUiRuntime runtime, TrainerContentView mainView,
+        TrainerContentView overlayView, FrameworkElement overlayRoot, string output)
+    {
+        int before = runtime.Calls.Count;
+        vm.SelectedPage = vm.Pages.Single(p => p.Category == "趣味小功能");
+        var views = new[] { mainView, overlayView };
+        var roots = new FrameworkElement[] { mainView, overlayRoot };
+        Render(mainView,null,1400,800);
+        Render(overlayRoot,null,600,380);
+        var editors = new List<TextBox>();
+        var starts = new List<Button>();
+        for (int i = 0; i < views.Length; i++)
+        {
+            DependencyObject card = Find<TextBlock>(views[i]).Single(t => t.Text == "海鸥飞靶挑战");
+            while (card is not Border) card = VisualTreeHelper.GetParent(card);
+            var start = Find<Button>(card).Single(b => Equals(b.Content,"开始本轮"));
+            var stop = Find<Button>(card).Single(b => Equals(b.Content,"结束本轮"));
+            var editor = Find<NumericInputBox>(card).Single();
+            starts.Add(start);
+            editors.Add(Find<TextBox>(editor).Single());
+            string host = i == 0 ? "main" : "panel";
+            Check(ReferenceEquals(editor.Input,vm.GullMigration.CountInput) && start.IsEnabled && !stop.IsEnabled
+                && Find<TextBlock>(card).Any(t => t.Text.Contains("60 秒")),
+                "Ready host shows the shared wave size, timed challenge, enabled start and inactive stop in " + host);
+            start.BringIntoView(); Pump();
+            Render(roots[i],Path.Combine(output,"gull-challenge-"+host+".png"),i==0?1400:600,i==0?800:380);
+            if (i == 1)
+                Check(InsideScrollViewports(start,new Rect(0,0,start.ActualWidth,start.ActualHeight)),
+                    "The complete start-round button is reachable in the 600 by 380 floating panel");
+        }
+        editors[1].Text = "-"; Pump();
+        Check(editors.All(e => e.Text == "-") && starts.All(b => !b.IsEnabled),
+            "An unfinished wave size is shared across both windows and disables both start buttons");
+        editors[0].Text = "6"; Pump();
+        Check(editors.All(e => e.Text == "6") && starts.All(b => b.IsEnabled),
+            "Valid shared wave size makes each start button available again");
+        Check(!runtime.Calls.Skip(before).Any(id => id == "fun.challenge.start" || id == "fun.challenge.stop" || id == "fun.event.execute"),
+            "Navigation, scrolling and count editing do not start, stop or spawn a gull round");
     }
 
     [STAThread]
@@ -486,10 +628,12 @@ static class OverlayUiVerification
         var longStatusText = Find<TextBlock>(overlayExperience).Single(t => t.Text == longExperienceStatus);
         Check(longStatusText.ActualHeight <= 32 && Equals(longStatusText.ToolTip, longExperienceStatus),
             "Experience feedback keeps a compact height and retains the complete multiline error in its tooltip");
+        VerifyEntityOverlay(vm,runtime,secondView,overlayView,content,tabs,output);
+        VerifyGullChallenge(vm,runtime,secondView,overlayView,content,output);
         listener.Flush(); string bindingErrors = errors.ToString(); File.WriteAllText(Path.Combine(output, "binding-errors.txt"), bindingErrors);
         Check(string.IsNullOrWhiteSpace(bindingErrors), "No WPF binding errors during all overlay and feature-page rendering");
         vm.CloseExperience(); vm.ClosePreferences(); main.Close();
-        File.WriteAllText(Path.Combine(output, "ui-verification.json"), JsonSerializer.Serialize(new { verificationVersion = "20261107-overlay-ui-v9", appAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(StatusWidget).Assembly.Location))), runnerAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(OverlayUiVerification).Assembly.Location))), checks = Checks, images = Images, realGameOpened = false, desktopInputSent = false, formalPreferencesUsed = false }, new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(Path.Combine(output, "ui-verification.json"), JsonSerializer.Serialize(new { verificationVersion = "20261109-combat-challenge-ui-v11", appAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(StatusWidget).Assembly.Location))), runnerAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(OverlayUiVerification).Assembly.Location))), checks = Checks, images = Images, realGameOpened = false, desktopInputSent = false, formalPreferencesUsed = false }, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine("PASS " + Checks.Count + " UI checks; " + Images.Count + " rendered images");
         return 0;
     }

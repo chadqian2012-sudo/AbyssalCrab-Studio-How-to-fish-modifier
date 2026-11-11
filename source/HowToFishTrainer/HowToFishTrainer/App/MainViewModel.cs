@@ -535,9 +535,50 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
 	public AimAssistViewModel AimAssist { get; }
 
+    public NumericInput EntityOverlayDistanceInput { get; } = new("显示距离（米）", 200, 1, 1000);
+    private bool _entityOverlayBusy;
+    private string _entityOverlayStatus = "等待连接 · 显示距离尚未应用";
+    public string EntityOverlayStatus { get => _entityOverlayStatus; private set => Set(ref _entityOverlayStatus, value); }
+    public bool CanApplyEntityOverlay => CanEditParameters && _runtime != null && _capabilities.CanExecute(Capability.OwnedPlayer)
+        && !_entityOverlayBusy && !EntityOverlayDistanceInput.HasError;
+    public ICommand ApplyEntityOverlayCommand { get; }
+
 	public CrosshairViewModel Crosshair { get; } = new CrosshairViewModel();
 
 	public event PropertyChangedEventHandler? PropertyChanged;
+
+    public async Task ApplyEntityOverlayAsync()
+    {
+        if (!CanApplyEntityOverlay) return;
+        var runtime = _runtime!;
+        int epoch = _connectionEpoch, actionEpoch = _featureActionEpoch;
+        bool Current() => runtime == _runtime && epoch == _connectionEpoch && actionEpoch == _featureActionEpoch;
+        _entityOverlayBusy = true;
+        OnPropertyChanged(nameof(CanApplyEntityOverlay));
+        try
+        {
+            var result = await runtime.ExecuteAsync(new FeatureCommand("view.entity_overlay.configure",
+                JsonSerializer.SerializeToElement(new { distance = EntityOverlayDistanceInput.LastValidValue }), Capability.OwnedPlayer), CancellationToken.None);
+            if (!Current()) return;
+            if (result.Succeeded && result.Applied is JsonElement applied && applied.ValueKind == JsonValueKind.Object
+                && applied.TryGetProperty("distance", out var distance) && distance.ValueKind == JsonValueKind.Number && distance.TryGetDouble(out double actual)
+                && EntityOverlayDistanceInput.IsValidValue(actual))
+                EntityOverlayStatus = FormattableString.Invariant($"显示距离应用成功 · {actual:G} 米");
+            else EntityOverlayStatus = "实体标注应用失败 · " + result.Message;
+        }
+        catch (Exception ex)
+        {
+            if (Current()) EntityOverlayStatus = "实体标注应用失败 · " + ex.Message;
+        }
+        finally
+        {
+            if (Current())
+            {
+                _entityOverlayBusy = false;
+                OnPropertyChanged(nameof(CanApplyEntityOverlay));
+            }
+        }
+    }
 
     public MainViewModel(IToggleSoundPlayer? soundPlayer = null, ISponsorAccessGate? sponsorAccessGate = null, Action<string, string>? showFeatureNotice = null, IUserPreferencesStore? preferencesStore = null, string? experiencePath = null)
 	{
@@ -561,7 +602,12 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		};
 		FunEventsPage = new FunEventsViewModel(_sponsorAccessGate);
 		RoomMembersPage = new RoomMembersViewModel(OpenRoomMemberInTeleport, _sponsorAccessGate);
-		AimAssist = new AimAssistViewModel();
+		AimAssist = new AimAssistViewModel(EntityOverlayDistanceInput);
+        ApplyEntityOverlayCommand = new RelayCommand(() => _ = ApplyEntityOverlayAsync());
+        EntityOverlayDistanceInput.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(NumericInput.HasError)) OnPropertyChanged(nameof(CanApplyEntityOverlay));
+        };
 		_selectedPage = Pages[0];
 		Features = new ObservableCollection<FeatureItemViewModel>();
         InitializePerformanceCaches();
@@ -622,6 +668,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		RoomMembersPage.Connect(runtime, capabilities);
 		AimAssist.Connect(runtime, capabilities);
 		Crosshair.Connect(runtime);
+        EntityOverlayStatus = capabilities.CanExecute(Capability.OwnedPlayer) ? "已连接 · 显示距离待应用" : "当前会话无法配置实体标注";
+        OnPropertyChanged(nameof(CanApplyEntityOverlay));
 		RebuildFeatureModels();
 		ReplayEnabledTogglesAsync(runtime, capabilities, connectionEpoch);
 		if (capabilities.CanExecute(Capability.HostWorld))
@@ -665,6 +713,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 		Crosshair.Disconnect();
 		_runtime = null;
 		_capabilities = CapabilitySet.Empty;
+        EntityOverlayStatus = "运行时已断开 · 显示距离尚未确认";
+        OnPropertyChanged(nameof(CanApplyEntityOverlay));
 		ResetWorldContext(message);
 		_itemCatalog = Array.Empty<CatalogOption>();
 		_fishCatalog = Array.Empty<CatalogOption>();
@@ -704,6 +754,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
 	public void MarkAllLocksDisabled(string message)
 	{
+        ResetGullChallenge(message);
 		StopExperienceAutomation();
         FunEventsPage.Roulette.Disconnect();
         FunEventsPage.SlotMachine.Disconnect();
@@ -804,7 +855,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
                 int actionEpoch = _featureActionEpoch;
                 _toggleStates.TryGetValue(item.Id, out var state);
                 var feature = new FeatureItemViewModel(item, _runtime, _capabilities, options, state,
-                    source => { if (actionEpoch == _featureActionEpoch) RememberToggleState(source); }, PlayEnabledSound, _sponsorAccessGate, _showFeatureNotice);
+                    source => { if (actionEpoch == _featureActionEpoch) RememberToggleState(source); }, PlayEnabledSound, _sponsorAccessGate, _showFeatureNotice, EntityOverlayDistanceInput);
                 AttachExperience(feature);
                 RestoreFeatureParameters(feature);
                 AllFeatures.Add(feature);
@@ -885,6 +936,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
     private void InvalidateFeatureActions()
     {
         _featureActionEpoch++;
+        _entityOverlayBusy = false;
+        OnPropertyChanged(nameof(CanApplyEntityOverlay));
         foreach(var pair in _toggleStates.Where(p=>p.Value.IsBusy).ToArray())
             _toggleStates[pair.Key]=pair.Value with { IsBusy=false, IsSuccessful=false, StateLabel="等待确认", Status="连接或操作已切换，请重新确认功能状态" };
     }
@@ -909,11 +962,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
 	private async Task ReplayEnabledTogglesAsync(IGameRuntimeClient runtime, CapabilitySet capabilities, int connectionEpoch)
 	{
-		KeyValuePair<string, FeatureToggleState>[] array = _toggleStates.Where((KeyValuePair<string, FeatureToggleState> keyValuePair) => keyValuePair.Value.Enabled).ToArray();
-		KeyValuePair<string, FeatureToggleState>[] array2 = array;
-		for (int num = 0; num < array2.Length; num++)
+		foreach (var pair in _toggleStates.Where(entry => entry.Value.Enabled).ToArray())
 		{
-			KeyValuePair<string, FeatureToggleState> pair = array2[num];
 			if (!ReplayIsCurrent(runtime, connectionEpoch))
 			{
 				break;
@@ -936,7 +986,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 			try
 			{
 				RuntimeCommandResult runtimeCommandResult = await runtime.ExecuteAsync(new FeatureCommand(featureDescriptor.Id,
-                    featureDescriptor.Id == "player.spin.lock" ? FeatureItemViewModel.SpinArguments(true, value.AppliedSpinSpeed, value.AppliedSpinAutoJump) : featureDescriptor.Id == "combat.silent_aim" && value.AppliedMagicArguments.HasValue ? value.AppliedMagicArguments.Value : JsonSerializer.SerializeToElement(new
+                    featureDescriptor.Id == "player.spin.lock" ? FeatureItemViewModel.SpinArguments(true, value.AppliedSpinSpeed, value.AppliedSpinAutoJump) : featureDescriptor.Id == "combat.silent_aim" && value.AppliedMagicArguments.HasValue ? TargetingArguments.WithTeammates(value.AppliedMagicArguments.Value, value.MagicTargetTeammates, EntityOverlayDistanceInput.LastValidValue) : JsonSerializer.SerializeToElement(new
 				{
 					enabled = true
 				}), featureDescriptor.RequiredCapability), CancellationToken.None);
@@ -948,33 +998,8 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 				{
 					continue;
 				}
-				int num2;
-				if (runtimeCommandResult.Succeeded)
-				{
-					JsonElement? applied = runtimeCommandResult.Applied;
-					if (applied.HasValue)
-					{
-						JsonElement valueOrDefault = applied.GetValueOrDefault();
-						if (valueOrDefault.ValueKind == JsonValueKind.Object && valueOrDefault.TryGetProperty("applied", out var value2))
-						{
-							num2 = ((value2.ValueKind == JsonValueKind.False) ? 1 : 0);
-							goto IL_026c;
-						}
-					}
-				}
-				num2 = 0;
-				goto IL_026c;
-				IL_026c:
-				bool flag = (byte)num2 != 0;
-				string stateLabel;
-				if (runtimeCommandResult.Succeeded)
-				{
-					stateLabel = (flag ? "等待条件" : "已开启");
-				}
-				else
-				{
-					stateLabel = "恢复失败";
-				}
+				string stateLabel = !runtimeCommandResult.Succeeded ? "恢复失败"
+					: FeatureItemViewModel.IsWaitingForCondition(runtimeCommandResult.Applied) ? "等待条件" : "已开启";
 				ApplyRememberedToggleState(pair.Key, new FeatureToggleState(runtimeCommandResult.Succeeded, runtimeCommandResult.Message, stateLabel, runtimeCommandResult.Succeeded));
 			}
 			catch (Exception ex)
@@ -993,11 +1018,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
 	private bool ReplayIsCurrent(IGameRuntimeClient runtime, int connectionEpoch)
 	{
-		if (connectionEpoch == Volatile.Read(in _connectionEpoch))
-		{
-			return _runtime == runtime;
-		}
-		return false;
+		return connectionEpoch == Volatile.Read(in _connectionEpoch) && _runtime == runtime;
 	}
 
 	private void ApplyRememberedToggleState(string id, FeatureToggleState state)
@@ -1421,15 +1442,15 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
 	private static IReadOnlyList<PerformanceStat> PerformanceStats(double damage, double interval, double speed, double spread, double recoil, double magazine)
 	{
-		return new _003C_003Ez__ReadOnlyArray<PerformanceStat>(new PerformanceStat[6]
-		{
+		return
+		[
 			new PerformanceStat("伤害", damage.ToString("0.##"), Math.Clamp(damage / 100.0, 0.0, 1.0)),
 			new PerformanceStat("射速", (interval <= 0.0) ? "—" : ((1.0 / interval).ToString("0.##") + "/秒"), (interval <= 0.0) ? 0.0 : Math.Clamp(1.0 / interval / 15.0, 0.0, 1.0)),
 			new PerformanceStat("精准度", spread.ToString("0.##"), Math.Clamp(1.0 - spread / 12.0, 0.0, 1.0)),
 			new PerformanceStat("后坐力控制", recoil.ToString("0.##"), Math.Clamp(1.0 - recoil / 20.0, 0.0, 1.0)),
 			new PerformanceStat("弹速", speed.ToString("0.##"), Math.Clamp(speed / 150.0, 0.0, 1.0)),
 			new PerformanceStat("弹匣", magazine.ToString("0"), Math.Clamp(magazine / 50.0, 0.0, 1.0))
-		});
+		];
 	}
 
 	private async Task ReadPositionAsync()

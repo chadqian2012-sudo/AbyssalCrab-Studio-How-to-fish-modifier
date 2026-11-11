@@ -145,7 +145,7 @@ public sealed class FunEventsViewModel : INotifyPropertyChanged
 		Interlocked.Increment(ref _connectionEpoch);
 		_runtime = runtime;
 		_capabilities = capabilities;
-        SetBusy(false,null);
+        SetBusy(false);
 		Roulette.Connect(runtime, capabilities);
 		SlotMachine.Connect(runtime, capabilities);
 		int currentWaveCount = (TotalEntityCount = 0);
@@ -162,7 +162,7 @@ public sealed class FunEventsViewModel : INotifyPropertyChanged
 		_capabilities = CapabilitySet.Empty;
 		Roulette.Disconnect();
 		SlotMachine.Disconnect();
-        SetBusy(false,null);
+        SetBusy(false);
 		HostSyncStatus = "等待房主运行时";
 		CurrentWaveStatus = "运行时已断开";
 		int currentWaveCount = (TotalEntityCount = 0);
@@ -254,7 +254,7 @@ public sealed class FunEventsViewModel : INotifyPropertyChanged
 			CurrentWaveStatus = "此操作需要激活赞助版；未向游戏发送命令。";
 			return false;
 		}
-		SetBusy(busy: true, card);
+		SetBusy(true);
 		CurrentWaveStatus = $"正在生成：{card.Title} 0/{card.RequestedCount}";
 		try
 		{
@@ -293,7 +293,7 @@ public sealed class FunEventsViewModel : INotifyPropertyChanged
 		{
 			if (epoch == Volatile.Read(in _connectionEpoch) && runtime == _runtime)
 			{
-				SetBusy(busy: false, card);
+				SetBusy(false);
 				await RefreshAvailabilityAsync(epoch);
 			}
 		}
@@ -312,44 +312,28 @@ public sealed class FunEventsViewModel : INotifyPropertyChanged
 			CurrentWaveStatus = "此操作需要激活赞助版；未向游戏发送命令。";
 			return;
 		}
-		SetBusy(busy: true, null);
+		SetBusy(true);
 		try
 		{
-			try
+			var result = await runtime.ExecuteAsync(Command("fun.event.cleanup", new { scope = "all" }), CancellationToken.None);
+			if (epoch != Volatile.Read(in _connectionEpoch) || runtime != _runtime) return;
+			if (result.Applied is JsonElement applied) ApplyStatus(applied);
+			CurrentWaveStatus = TotalEntityCount > 0
+				? $"清理未完成 · 剩余 {TotalEntityCount} 个趣味实体 · {result.Message}"
+				: result.Message;
+		}
+		catch (Exception ex)
+		{
+			if (epoch == Volatile.Read(in _connectionEpoch) && runtime == _runtime)
 			{
-				RuntimeCommandResult runtimeCommandResult = await runtime.ExecuteAsync(Command("fun.event.cleanup", new
-				{
-					scope = "all"
-				}), CancellationToken.None);
-				if (epoch != Volatile.Read(in _connectionEpoch) || runtime != _runtime)
-				{
-					goto end_IL_0097;
-				}
-				JsonElement? applied = runtimeCommandResult.Applied;
-				if (applied.HasValue)
-				{
-					JsonElement valueOrDefault = applied.GetValueOrDefault();
-					ApplyStatus(valueOrDefault);
-				}
-				CurrentWaveStatus = ((TotalEntityCount > 0) ? $"清理未完成 · 剩余 {TotalEntityCount} 个趣味实体 · {runtimeCommandResult.Message}" : runtimeCommandResult.Message);
-				goto end_IL_0091;
-				end_IL_0097:;
+				CurrentWaveStatus = "清理失败 · " + ex.Message;
 			}
-			catch (Exception ex)
-			{
-				if (epoch == Volatile.Read(in _connectionEpoch) && runtime == _runtime)
-				{
-					CurrentWaveStatus = "清理失败 · " + ex.Message;
-				}
-				goto end_IL_0091;
-			}
-			end_IL_0091:;
 		}
 		finally
 		{
 			if (epoch == Volatile.Read(in _connectionEpoch) && runtime == _runtime)
 			{
-				SetBusy(busy: false, null);
+				SetBusy(false);
 				await RefreshAvailabilityAsync(epoch);
 			}
 		}
@@ -364,12 +348,12 @@ public sealed class FunEventsViewModel : INotifyPropertyChanged
 		}
 	}
 
-	private void SetBusy(bool busy, FunEventCardViewModel? active)
+	private void SetBusy(bool busy)
 	{
 		_busy = busy;
-		foreach (FunEventCardViewModel @event in Events)
+		foreach (var card in Events)
 		{
-			@event.Busy = (busy && @event != active) || ((@event == active) & busy);
+			card.Busy = busy;
 		}
 		OnPropertyChanged("CanExecuteWave");
 		OnPropertyChanged("CanCleanup");

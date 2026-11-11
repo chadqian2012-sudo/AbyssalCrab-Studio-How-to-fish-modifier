@@ -66,6 +66,7 @@ public sealed class AimAssistViewModel : INotifyPropertyChanged
     public NumericInput StrengthInput { get; } = new("辅助强度", 60, 0, 100, true);
     public NumericInput AngleInput { get; } = new("静默瞄准角度", 8, 2, 18);
     public NumericInput DistanceInput { get; } = new("最大距离", 35, 10, 80);
+    public NumericInput EntityOverlayDistanceInput { get; }
 
 	public ObservableCollection<AimAssistTriggerOption> TriggerModes { get; }
 
@@ -177,8 +178,9 @@ public sealed class AimAssistViewModel : INotifyPropertyChanged
 
 	public event PropertyChangedEventHandler? PropertyChanged;
 
-	public AimAssistViewModel()
+	public AimAssistViewModel(NumericInput? entityOverlayDistanceInput = null)
 	{
+        EntityOverlayDistanceInput = entityOverlayDistanceInput ?? new NumericInput("显示距离（米）", 200, 1, 1000);
 		int num = 1;
 		List<AimAssistTriggerOption> list = new List<AimAssistTriggerOption>(num);
 		CollectionsMarshal.SetCount(list, num);
@@ -248,7 +250,7 @@ public sealed class AimAssistViewModel : INotifyPropertyChanged
                 if (Enabled == desiredEnabled) Set(ref _enabled, _lastAppliedEnabled, nameof(Enabled));
                 return;
             }
-            JsonElement arguments = teammateOnly ? TargetingArguments.WithTeammates(_lastAppliedArguments!.Value, desiredTeammates) : JsonSerializer.SerializeToElement(new
+            JsonElement arguments = teammateOnly ? TargetingArguments.WithTeammates(_lastAppliedArguments!.Value, desiredTeammates, EntityOverlayDistanceInput.LastValidValue) : JsonSerializer.SerializeToElement(new
 			{
 				enabled = desiredEnabled,
 				strength = desiredEnabled ? Strength : (int)StrengthInput.LastValidValue,
@@ -257,7 +259,8 @@ public sealed class AimAssistViewModel : INotifyPropertyChanged
 				trigger = SelectedTrigger.Value,
                 leadEnabled = LeadEnabled,
                 headLockEnabled = HeadLockEnabled,
-                targetTeammates = TargetTeammates
+                targetTeammates = TargetTeammates,
+                entityOverlayDistance = EntityOverlayDistanceInput.LastValidValue
             });
             RuntimeCommandResult runtimeCommandResult = await runtime.ExecuteAsync(new FeatureCommand("combat.aim_assist", arguments, Capability.OwnedPlayer), CancellationToken.None);
 			if (epoch == Volatile.Read(in _connectionEpoch) && runtime == _runtime)

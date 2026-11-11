@@ -51,7 +51,7 @@ public sealed partial class MainViewModel
         ObserveParameters(FunEventsPage.Roulette, new[] { "SelectedOutcomeMode", "SelectedRoundMode", "UseOriginalMultiplier" });
         ObserveParameters(FunEventsPage.SlotMachine, new[] { "SelectedRarity", "TargetRarity" });
         ObserveParameters(RoomMembersPage, new[] { "HealthScope", "FullnessScope", "PoisonScope", "FireScope", "DropScope", "RareScope", "SearchText" });
-        foreach (var input in new[] { CurrentXInput, CurrentYInput, CurrentZInput, AimAssist.StrengthInput, AimAssist.AngleInput, AimAssist.DistanceInput, FunEventsPage.Roulette.MultiplierInput, RefillLimitInput })
+        foreach (var input in new[] { CurrentXInput, CurrentYInput, CurrentZInput, AimAssist.StrengthInput, AimAssist.AngleInput, AimAssist.DistanceInput, FunEventsPage.Roulette.MultiplierInput, RefillLimitInput, EntityOverlayDistanceInput })
             ObserveParameters(input, new[] { nameof(NumericInput.Text) });
         foreach (var card in FunEventsPage.Events.Where(card => card.HasAnimalCount))
             ObserveParameters(card.CountInput, new[] { nameof(NumericInput.Text) });
@@ -78,6 +78,7 @@ public sealed partial class MainViewModel
             }
             if(p.General.Text("spinCurve") is string curve && SpinCurves.Contains(curve)) SpinCurve=curve;
             RestoreNumber(p.General,"refillLimit",RefillLimitInput);
+            RestoreNumber(p.General,"entityOverlayDistance",EntityOverlayDistanceInput);
             var t = p.Teleport;
             TeleportPointQuery = t.Text("query") ?? TeleportPointQuery;
             string group = t.Text("selectedGroup") ?? SelectedTeleportGroup;
@@ -203,6 +204,7 @@ public sealed partial class MainViewModel
             var p = _preferences;
             p.General.Put("soundEnabled", SoundEnabled); p.General.Put("page", SelectedPage.Category);
             p.General.Put("spinCurve", SpinCurve);p.General.Put("refillLimit",RefillLimitInput.LastValidValue);
+            p.General.Put("entityOverlayDistance",EntityOverlayDistanceInput.LastValidValue);
             p.General.Put("combatFeedback",CombatFeedback.Capture());
             p.General.Put("animalCounts",FunEventsPage.Events.Where(c=>c.HasAnimalCount).ToDictionary(c=>c.Id,c=>c.RequestedCount));
             var t = p.Teleport;
@@ -260,7 +262,7 @@ public sealed partial class MainViewModel
             if (!current()) return failures;
             if (session.Boolean("toggle:" + descriptor.Id) != true || DiagnosticOnly && descriptor.Id == "combat.silent_aim") continue;
             var feature = new FeatureItemViewModel(descriptor, runtime, _capabilities,
-                stateChanged: source => { if (current()) RememberToggleState(source); }, sponsorAccessGate: _sponsorAccessGate);
+                stateChanged: source => { if (current()) RememberToggleState(source); }, sponsorAccessGate: _sponsorAccessGate, entityOverlayDistanceInput: EntityOverlayDistanceInput);
             if (parameters.Features.TryGetValue(descriptor.Id, out var values)) feature.RestoreParameters(values);
             await feature.SetEnabledAsync(true);
             if (!current()) return failures;
