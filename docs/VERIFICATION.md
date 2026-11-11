@@ -1,5 +1,14 @@
 # 当前交付验证范围 | Current Verification Scope
 
+## 维护版的离线表现与 r24 修订版一致，游戏手感待核对
+
+从默认包提取的程序通过 596 项行为检查和 123 项离屏界面检查。114 张截图与 r24 修订版相同。两版注入的 Runtime 与 Harmony 内容一致。单独读取这两个内嵌文件时，测试线程的托管内存分配减少 8.75 MiB；这项测量不涉及游戏帧率。
+
+- [ ] 测试世界中首次连接，再断线重连。检查需要装备的功能能否显示待命，在装备可用后恢复，以及连接失败时的提示。
+- [ ] 在主窗口和悬浮窗连续切换分类、滚动后重选，并试一次“减少动态效果”。核对选中背景停在当前分类。
+
+The maintenance build passed offline behavior and UI checks. First connection, reconnection, equipment-wait feedback, and navigation motion still require in-game acceptance.
+
 ## r24 代码修订已通过离线检查 | Post-r24 code checks
 
 海鸥自动补充已开启时，清空波次上限或输入无效的每波数量会暂停生成。两项都填好后，下次检测到海鸥耗尽即可继续。相同操作下，旧版误关开关，修正数字后生成了 0 波；修订版收到 1 波确认。

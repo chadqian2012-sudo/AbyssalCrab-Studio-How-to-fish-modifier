@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -99,94 +98,45 @@ public partial class TrainerContentView : UserControl
 		NavCapsule.Width = width;
 		NavCapsule.Height = height;
 
-		// 胶囊的 RenderTransform 是 TransformGroup：[ScaleTransform, TranslateTransform]。
-		// TranslateTransform 负责 X/Y 位移（基值写法与"追随最新项"策略不变），
-		// ScaleTransform 负责到位时"轻微放大到 1"的收束感。
-		if (NavCapsule.RenderTransform is not TransformGroup navTransform)
-		{
-			return;
-		}
-		TranslateTransform? transform = navTransform.Children.OfType<TranslateTransform>().FirstOrDefault();
-		if (transform == null)
-		{
-			return;
-		}
-		// 缩放中心取胶囊自身中心：宽高每帧都在变，所以每次都要跟着更新。
-		ScaleTransform? settle = navTransform.Children.OfType<ScaleTransform>().FirstOrDefault();
-		if (settle != null)
-		{
-			settle.CenterX = width / 2;
-			settle.CenterY = height / 2;
-		}
-        double currentX = transform.X;
-        double currentY = transform.Y;
-        int animationVersion = ++_navAnimationVersion;
+		NavScale.CenterX = width / 2;
+		NavScale.CenterY = height / 2;
+		double currentX = NavOffset.X;
+		double currentY = NavOffset.Y;
+		int animationVersion = ++_navAnimationVersion;
+		// The final position is the base value, including when clocks are removed.
+		NavOffset.X = origin.X;
+		NavOffset.Y = origin.Y;
 
-		if (!animate)
+		Duration duration = animate
+			? TryFindResource("MotionSelect") as Duration? ?? new Duration(TimeSpan.FromMilliseconds(250))
+			: new Duration(TimeSpan.Zero);
+		if (duration.HasTimeSpan && duration.TimeSpan == TimeSpan.Zero)
 		{
-			// 首帧直接就位，避免窗口刚显示时胶囊从左上角滑过来。
-			transform.BeginAnimation(TranslateTransform.XProperty, null);
-			transform.BeginAnimation(TranslateTransform.YProperty, null);
-			transform.X = origin.X;
-			transform.Y = origin.Y;
-			if (settle != null)
-			{
-				settle.BeginAnimation(ScaleTransform.ScaleXProperty, null);
-				settle.BeginAnimation(ScaleTransform.ScaleYProperty, null);
-				settle.ScaleX = 1;
-				settle.ScaleY = 1;
-			}
+			ClearNavAnimations();
 			return;
 		}
 
-		// 先把目标写进基值，再交给动画做过渡。
-		// 这一步是必要的：动画只存在于时钟上，基值不变。一旦时钟被释放（窗口关闭的清理路径、
-		// 或任何 BeginAnimation(prop, null)），属性会回落到基值——不写基值的话胶囊会弹回初始位置。
-		// Capture the current animated position before updating the base target; an
-        // explicit From also makes the first selection animate instead of jumping.
-		transform.X = origin.X;
-		transform.Y = origin.Y;
-
-		Duration duration = TryFindResource("MotionSelect") as Duration? ?? new Duration(TimeSpan.FromMilliseconds(250));
 		IEasingFunction easing = TryFindResource("EaseSelect") as IEasingFunction
 			?? new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.18 };
-
-        var xAnimation = new DoubleAnimation(currentX, origin.X, duration) { EasingFunction = easing, FillBehavior = FillBehavior.Stop };
-        var yAnimation = new DoubleAnimation(currentY, origin.Y, duration) { EasingFunction = easing, FillBehavior = FillBehavior.Stop };
-        xAnimation.Completed += (_, _) =>
-        {
-            if (!_appearanceClosing && animationVersion == _navAnimationVersion)
-                transform.BeginAnimation(TranslateTransform.XProperty, null);
-        };
-        yAnimation.Completed += (_, _) =>
-        {
-            if (!_appearanceClosing && animationVersion == _navAnimationVersion)
-                transform.BeginAnimation(TranslateTransform.YProperty, null);
-        };
-        transform.BeginAnimation(TranslateTransform.XProperty, xAnimation);
-        transform.BeginAnimation(TranslateTransform.YProperty, yAnimation);
-
-		// 收束：从 0.97 轻微放大到 1，复用同一个 MotionSelect / EaseSelect（BackEase 带一点点过冲）。
-		// 与位移用同一套保护：新动画直接替换旧时钟（不排队），结束后按版本号释放时钟，且只在最新一次里释放。
-		if (settle != null)
+		var moveX = new DoubleAnimation(currentX, origin.X, duration) { EasingFunction = easing, FillBehavior = FillBehavior.Stop };
+		var moveY = new DoubleAnimation(currentY, origin.Y, duration) { EasingFunction = easing, FillBehavior = FillBehavior.Stop };
+		var scale = new DoubleAnimation(0.97, 1, duration) { EasingFunction = easing, FillBehavior = FillBehavior.Stop };
+		moveX.Completed += (_, _) =>
 		{
-			settle.ScaleX = 1;
-			settle.ScaleY = 1;
-			var scaleXAnimation = new DoubleAnimation(0.97, 1, duration) { EasingFunction = easing, FillBehavior = FillBehavior.Stop };
-			var scaleYAnimation = new DoubleAnimation(0.97, 1, duration) { EasingFunction = easing, FillBehavior = FillBehavior.Stop };
-			scaleXAnimation.Completed += (_, _) =>
-			{
-				if (!_appearanceClosing && animationVersion == _navAnimationVersion)
-					settle.BeginAnimation(ScaleTransform.ScaleXProperty, null);
-			};
-			scaleYAnimation.Completed += (_, _) =>
-			{
-				if (!_appearanceClosing && animationVersion == _navAnimationVersion)
-					settle.BeginAnimation(ScaleTransform.ScaleYProperty, null);
-			};
-			settle.BeginAnimation(ScaleTransform.ScaleXProperty, scaleXAnimation);
-			settle.BeginAnimation(ScaleTransform.ScaleYProperty, scaleYAnimation);
-		}
+			if (!_appearanceClosing && animationVersion == _navAnimationVersion) ClearNavAnimations();
+		};
+		NavOffset.BeginAnimation(TranslateTransform.XProperty, moveX);
+		NavOffset.BeginAnimation(TranslateTransform.YProperty, moveY);
+		NavScale.BeginAnimation(ScaleTransform.ScaleXProperty, scale);
+		NavScale.BeginAnimation(ScaleTransform.ScaleYProperty, scale);
+	}
+
+	private void ClearNavAnimations()
+	{
+		NavOffset.BeginAnimation(TranslateTransform.XProperty, null);
+		NavOffset.BeginAnimation(TranslateTransform.YProperty, null);
+		NavScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+		NavScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
 	}
 
     private void ExportTeleport_Click(object sender,RoutedEventArgs args)

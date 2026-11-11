@@ -30,8 +30,6 @@ public partial class MainWindow : Window, IComponentConnector
 
 	private readonly BridgeAttachPolicy _attachPolicy = new BridgeAttachPolicy();
 
-	private readonly HashSet<string> _shownPrivilegeWarnings = new HashSet<string>(StringComparer.Ordinal);
-
 	private readonly CompatibilityUpdateNoticeTracker _compatibilityNotice = new CompatibilityUpdateNoticeTracker();
 
 	private readonly DispatcherTimer _timer;
@@ -107,7 +105,6 @@ public partial class MainWindow : Window, IComponentConnector
 		{
 			_timer.Start();
 		}
-		LocalTestNoticeUi.Install(this);
         InitializeExperienceUi();
 	}
 
@@ -276,15 +273,6 @@ public partial class MainWindow : Window, IComponentConnector
 		if (!processLocateResult.IsSuccess)
 		{
 			_viewModel.ModeStatus = (processLocateResult.AccessDenied ? "进程信息访问被拒绝 · 未执行附加" : "未连接 · 只读保护");
-			if (processLocateResult.AccessDenied)
-			{
-				int? candidateProcessId = processLocateResult.CandidateProcessId;
-				if (candidateProcessId.HasValue)
-				{
-					int valueOrDefault = candidateProcessId.GetValueOrDefault();
-					ShowPrivilegeAdvice(valueOrDefault, ProcessPrivilegeProbe.ForProcess(valueOrDefault), accessDenied: true);
-				}
-			}
 			_attachPolicy.Reset();
 			if (_bridge != null && !_attaching)
 			{
@@ -377,10 +365,6 @@ public partial class MainWindow : Window, IComponentConnector
             if (!IsCurrentBridge(connected)) return;
 			await ApplySessionModeAsync(connected, snapshot);
             if (!IsCurrentBridge(connected)) return;
-			if (RuntimeSessionMode.From(snapshot.Host, snapshot.Client, snapshot.Lobby) != SessionMode.MainMenu)
-			{
-				ShowPrivilegeAdvice(processId, ProcessPrivilegeProbe.ForProcess(processId), accessDenied: false);
-			}
 			_attachedProcessId = processId;
 			_attachPolicy.RecordSuccess(processId);
 		}
@@ -391,10 +375,6 @@ public partial class MainWindow : Window, IComponentConnector
 			string text = BridgeConnectionDiagnostics.Describe(exception);
 			_attachPolicy.RecordFailure(processId, text);
 			TryLogBridgeFailure(processId, exception);
-			if (RuntimeBridgeClient.IsAccessDenied(exception))
-			{
-				ShowPrivilegeAdvice(processId, ProcessPrivilegeProbe.ForProcess(processId), accessDenied: true);
-			}
 			_viewModel.ModeStatus = "运行时桥失败 · " + text;
 			if (_bridge != null)
 			{
@@ -411,11 +391,6 @@ public partial class MainWindow : Window, IComponentConnector
 		{
 			_attaching = false;
 		}
-	}
-
-	private void ShowPrivilegeAdvice(int processId, PrivilegeLevel gameLevel, bool accessDenied)
-	{
-
 	}
 
     private bool IsCurrentBridge(RuntimeBridgeClient bridge) => !_appearanceClosing && ReferenceEquals(_bridge, bridge);
@@ -577,15 +552,6 @@ public partial class MainWindow : Window, IComponentConnector
 		}
 		_sessionMode = mode;
 		_sceneHandle = snapshot.SceneHandle;
-		if (mode != SessionMode.MainMenu)
-		{
-			int? attachedProcessId = _attachedProcessId;
-			if (attachedProcessId.HasValue)
-			{
-				int valueOrDefault2 = attachedProcessId.GetValueOrDefault();
-				ShowPrivilegeAdvice(valueOrDefault2, ProcessPrivilegeProbe.ForProcess(valueOrDefault2), accessDenied: false);
-			}
-		}
 		MainViewModel viewModel = _viewModel;
 		viewModel.ModeStatus = mode switch
 		{
