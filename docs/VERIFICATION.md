@@ -1,5 +1,47 @@
 # 当前交付验证范围 | Current Verification Scope
 
+## 维护版的离线表现与 r24 修订版一致，游戏手感待核对
+
+从默认包提取的程序通过 596 项行为检查和 123 项离屏界面检查。114 张截图与 r24 修订版相同。两版注入的 Runtime 与 Harmony 内容一致。单独读取这两个内嵌文件时，测试线程的托管内存分配减少 8.75 MiB；这项测量不涉及游戏帧率。
+
+- [ ] 测试世界中首次连接，再断线重连。检查需要装备的功能能否显示待命，在装备可用后恢复，以及连接失败时的提示。
+- [ ] 在主窗口和悬浮窗连续切换分类、滚动后重选，并试一次“减少动态效果”。核对选中背景停在当前分类。
+
+The maintenance build passed offline behavior and UI checks. First connection, reconnection, equipment-wait feedback, and navigation motion still require in-game acceptance.
+
+## r24 代码修订已通过离线检查 | Post-r24 code checks
+
+海鸥自动补充已开启时，清空波次上限或输入无效的每波数量会暂停生成。两项都填好后，下次检测到海鸥耗尽即可继续。相同操作下，旧版误关开关，修正数字后生成了 0 波；修订版收到 1 波确认。
+
+实体框现在直接绘制四条一像素的边。第一个可见框才查询准心，同帧的其余连线共用结果。与已交付 r24 逐方法比较，运行时只改变了实体绘制方法。应用离线检查 596 项通过（原有 593 项加 3 项补群检查），运行时检查 75 项通过（原有 74 项加 1 项准心检查）。
+
+- [ ] 游戏中编辑两格数量，确认输入期间暂停，改正后只补一波，到达上限后停止。
+- [ ] 在第一、第三人称观察贴屏边的框线和移动目标连线；比较空场景及 24、64、128 个实体时的帧耗时。
+
+The rebuilt app passed all 596 offline behavior checks with the revised runtime embedded. All 75 runtime checks passed. Frame time and appearance still need in-game measurement.
+
+## r24 的成品已通过离线检查，实机结果待记录 | r24 candidate verification
+
+2026-11-09，在 r23 上新增锁定角标、右 Ctrl 临时隐藏和一轮 60 秒的海鸥飞靶挑战。两种发布包均已解包，450 个有效文件逐项相同。两份主程序都嵌入本次运行时。
+
+- 运行时 74 项通过。直接执行候选 DLL 的计分、截止时间、重复击落和弹丸编号算术；对照当前游戏程序集检查枪械发射、伤害、预制体筛选及生成登记/回滚入口。相对 r23 保持 1159 个原方法，改变 17 个，新增 25 个。
+- 成品应用行为 593 项通过。其中 150 项是体验功能检查，包括重复开局、丢失回执、断线、换世界和旧回包。真实本机测试管道把回复延迟 14 秒，新开局成功，普通趣味操作仍使用 12 秒时限。低帧率下游戏能否完成 50 只海鸥的实际登记仍待验收。
+- 离屏界面 123 项通过，生成 114 张图，未发现 WPF 绑定错误。检查包括两处界面共享数量、非法草稿不能开局及小窗滚动后可操作。
+
+The packaged application passed 593 behavior checks and 123 off-screen UI checks. The runtime passed 74 checks spanning executable scoring math and static inspection of the installed game's native weapon and entity interfaces. A local named-pipe fixture delayed both replies by 14 seconds: the challenge start succeeded while a normal wave retained its original timeout. Both packages have 450 identical entries. No game process was launched or injected.
+
+本轮新增 C-16、C-17、C-18 后，人工验收共 64 项。优先核对开镜、开枪与角标是否同步，按住与松开右 Ctrl 的效果，以及本机命中、其他玩家击落和飞靶离场时的最终计分。
+
+### r24 证据附录 | Evidence appendix
+
+- Runtime audit and checks: `build/staging/combat-challenge/runtime-audit.json`, `build/staging/combat-challenge/verification/entity-overlay-verification.json`.
+- Application and off-screen checks: `build/behavior-r24/behavior-manifest.json`, `build/ui-r24-packaged/ui-verification.json`.
+- Package comparison: `build/package-audit-r24/package-payload-equivalence.json`.
+- Runtime SHA-256: `66c58648ef441d98c3b0212414fc409571a5f1cd85293b39e1bf096828bc75b6`.
+- Application SHA-256: `2af44ab3346cc4090b3542e7ef33b3a681bc9d31df81955aee06df2a157d657a`.
+- single-file SHA-256: `23ee5db898edd70c81735bf3e0ed61c08a8ac99dd289f9e3601da4f1ea670a3c`.
+- compressed-single-file SHA-256: `11c394508cf496adea987ba78e486d0de13c5d3b3f083647e3e0b5b8e85691de`.
+
 ## r23 两种候选包的内容一致，游戏画面待验收 | r23 package verification
 
 2026-11-08，默认版和压缩版解出的 450 个文件逐项相同。两份主程序都嵌入经核对的新 Runtime 和 Harmony。以下检查直接使用候选运行时或从成品提取的应用程序集。

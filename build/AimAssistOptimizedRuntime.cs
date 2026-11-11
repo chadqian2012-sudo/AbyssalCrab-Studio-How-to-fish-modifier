@@ -89,6 +89,17 @@ namespace AbyssalCrab.Runtime
 
         public static bool Enabled => _enabled && _host != null && _host.IsLockEnabled("combat.aim_assist");
 
+        public static Component CurrentLock()
+        {
+            var selection = _target;
+            var weapon = _weapon;
+            if (selection == null || !_wasAds || _handledFrame != Time.frameCount || !Enabled || !weapon || !weapon.IsAds)
+                return null;
+            var player = Player.LocalPlayer;
+            var held = player && player.Holding ? player.Holding.HeldItem : null;
+            return held && held.Weapon == weapon ? selection.Target : null;
+        }
+
         public static void Validate(string id,JObject args)
         {
             if(id!="combat.aim_assist")return;

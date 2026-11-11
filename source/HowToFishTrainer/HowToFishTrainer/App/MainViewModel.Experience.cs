@@ -89,7 +89,7 @@ public sealed partial class MainViewModel
     public ParameterPreset? SelectedPreset { get => _selectedPreset; set => Set(ref _selectedPreset,value); }
     public string PresetName { get => _presetName; set => Set(ref _presetName,value ?? ""); }
     public string ExperienceStatus { get => _experienceStore.Warning ?? _experienceStatus; private set => Set(ref _experienceStatus,value); }
-    public bool PresetBusy { get => _presetBusy; private set { if(Set(ref _presetBusy,value)){OnPropertyChanged(nameof(CanRestoreLastSession));OnPropertyChanged(nameof(CanEditParameters));OnPropertyChanged(nameof(CanApplyEntityOverlay));OnPropertyChanged(nameof(CanPositionAction));OnPropertyChanged(nameof(CanLoadSelectedIsland));foreach(var f in AllFeatures)f.RefreshExperienceAvailability();} } }
+    public bool PresetBusy { get => _presetBusy; private set { if(Set(ref _presetBusy,value)){OnPropertyChanged(nameof(CanRestoreLastSession));OnPropertyChanged(nameof(CanEditParameters));OnPropertyChanged(nameof(CanApplyEntityOverlay));NotifyGullActions();OnPropertyChanged(nameof(CanPositionAction));OnPropertyChanged(nameof(CanLoadSelectedIsland));foreach(var f in AllFeatures)f.RefreshExperienceAvailability();} } }
     public bool CanEditParameters => !PresetBusy;
     private int _presetApplyVersion;
     private void InvalidatePresetApply()
@@ -138,12 +138,121 @@ public sealed partial class MainViewModel
     public NumericInput RefillLimitInput { get; } = new("自动补充波次上限",3,1,20,true);
     public int AutoRefillCount { get => _autoRefillCount; private set => Set(ref _autoRefillCount,value); }
     public string AutoRefillStatus { get => _autoRefillStatus; private set => Set(ref _autoRefillStatus,value); }
+    private enum GullRoundState { Idle, Starting, StartUnconfirmed, Active, Stopping, StopUnconfirmed }
+    private GullRoundState _gullState;
+    private string? _gullRoundId;
+    private int _gullRequestedCount;
+    private string _gullChallengeStatus = "手持枪械开始，限时 60 秒。使用海鸥迁徙的每波数量，自动补充需先关闭。";
+    public string GullChallengeStatus { get => _gullChallengeStatus; private set => Set(ref _gullChallengeStatus,value); }
+    public FunEventCardViewModel GullMigration => FunEventsPage.Events.Single(card => card.Id == "seagull-migration");
+    private bool CanControlChallenge => !_closedExperience && !PresetBusy && _runtime != null && _capabilities.CanExecute(Capability.HostWorld);
+    public bool CanStartGullChallenge => CanControlChallenge && !AutoRefill && GullMigration.CanExecute &&
+        _gullState is GullRoundState.Idle or GullRoundState.StartUnconfirmed;
+    public bool CanStopGullChallenge => CanControlChallenge && _gullState is GullRoundState.Active or GullRoundState.StartUnconfirmed or GullRoundState.StopUnconfirmed;
+    internal string? GullRoundForInspection => _gullState is GullRoundState.Active or GullRoundState.StopUnconfirmed ? _gullRoundId : null;
+    public ICommand StartGullChallengeCommand => new RelayCommand(() => _ = RunGullChallengeAsync(true));
+    public ICommand StopGullChallengeCommand => new RelayCommand(() => _ = RunGullChallengeAsync(false));
+
+    private void NotifyGullActions()
+    {
+        OnPropertyChanged(nameof(CanStartGullChallenge));
+        OnPropertyChanged(nameof(CanStopGullChallenge));
+    }
+
+    private void ResetGullChallenge(string status)
+    {
+        if (_gullState == GullRoundState.Idle) return;
+        _gullRoundId = null;
+        _gullState = GullRoundState.Idle;
+        GullChallengeStatus = status;
+        NotifyGullActions();
+    }
+
+    private bool ApplyGullResult(JsonElement envelope)
+    {
+        if (_gullRoundId == null || envelope.ValueKind != JsonValueKind.Object ||
+            !envelope.TryGetProperty("gullChallenge", out var round) || round.ValueKind != JsonValueKind.Object ||
+            !round.TryGetProperty("roundId", out var id) || id.ValueKind != JsonValueKind.String || id.GetString() != _gullRoundId ||
+            !round.TryGetProperty("active",out var active) || active.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
+            !round.TryGetProperty("total",out var total) || total.ValueKind != JsonValueKind.Number || !total.TryGetInt32(out int targets) || targets is < 0 or > 50 || targets == 0 && active.GetBoolean() ||
+            !round.TryGetProperty("hits",out var hits) || hits.ValueKind != JsonValueKind.Number || !hits.TryGetInt32(out int hitCount) || hitCount < 0 ||
+            !round.TryGetProperty("kills",out var kills) || kills.ValueKind != JsonValueKind.Number || !kills.TryGetInt32(out int killCount) || killCount < 0 || killCount > targets || killCount > hitCount)
+            return false;
+        string firstHit = "尚未命中";
+        if (hitCount > 0)
+        {
+            if (!round.TryGetProperty("firstHitSeconds",out var first) || first.ValueKind != JsonValueKind.Number ||
+                !first.TryGetDouble(out double seconds) || !double.IsFinite(seconds) || seconds < 0) return false;
+            firstHit = FormattableString.Invariant($"首中 {seconds:0.00} 秒");
+        }
+        bool running = active.GetBoolean();
+        string label = running ? "进行中" : round.TryGetProperty("reason",out var reason) && reason.ValueKind == JsonValueKind.String
+            && !string.IsNullOrWhiteSpace(reason.GetString()) ? reason.GetString()! : "本轮结束";
+        var previous = _gullState;
+        _gullState = running ? GullRoundState.Active : GullRoundState.Idle;
+        if (!running) _gullRoundId = null;
+        GullChallengeStatus = targets == 0 ? label : $"{label} · {firstHit} · 有效命中 {hitCount} 次 · 击落 {killCount}/{targets}";
+        if (_gullState != previous) NotifyGullActions();
+        return true;
+    }
+
+    public async Task RunGullChallengeAsync(bool start)
+    {
+        if (start ? !CanStartGullChallenge : !CanStopGullChallenge) return;
+        if (_gullRoundId == null)
+        {
+            _gullRoundId = Guid.NewGuid().ToString("N");
+            _gullRequestedCount = GullMigration.RequestedCount;
+        }
+        var runtime = _runtime!;
+        string roundId = _gullRoundId;
+        int epoch = _connectionEpoch, context = _positionContextEpoch;
+        bool Current() => !_closedExperience && _gullRoundId == roundId && IsCurrentPositionContext(runtime,epoch,context);
+        var previous = _gullState;
+        _gullState = start ? GullRoundState.Starting : GullRoundState.Stopping;
+        GullChallengeStatus = start ? "等待游戏登记本轮海鸥…" : "正在结束本轮…";
+        NotifyGullActions();
+        try
+        {
+            var args = start ? JsonSerializer.SerializeToElement(new { roundId, count = _gullRequestedCount })
+                             : JsonSerializer.SerializeToElement(new { roundId });
+            var result = await runtime.ExecuteAsync(new FeatureCommand(start ? "fun.challenge.start" : "fun.challenge.stop",
+                args,Capability.HostWorld),CancellationToken.None);
+            if (!Current()) return;
+            if (result.Succeeded)
+            {
+                if (result.Applied is JsonElement data && data.ValueKind == JsonValueKind.Object)
+                {
+                    if (ApplyGullResult(data)) return;
+                    if (!start && data.TryGetProperty("roundId",out var id) && id.ValueKind == JsonValueKind.String && id.GetString() == roundId &&
+                        data.TryGetProperty("missing",out var missing) && missing.ValueKind == JsonValueKind.True)
+                    {
+                        ResetGullChallenge("本轮已不存在，最终成绩未知");
+                        return;
+                    }
+                }
+                throw new InvalidDataException("游戏未返回本轮成绩");
+            }
+            if (start && previous == GullRoundState.Idle) ResetGullChallenge(result.Message);
+            else { _gullState = previous; GullChallengeStatus = result.Message; NotifyGullActions(); }
+        }
+        catch (Exception error)
+        {
+            if (!Current()) return;
+            _gullState = start ? GullRoundState.StartUnconfirmed : GullRoundState.StopUnconfirmed;
+            GullChallengeStatus = "本轮状态待确认，可重试 · " + error.Message;
+            NotifyGullActions();
+        }
+    }
+
     public bool AutoRefill
     {
         get => _autoRefill;
         set {
+            if(value && _gullState != GullRoundState.Idle){AutoRefillStatus="先结束当前飞靶挑战";OnPropertyChanged();return;}
             if(value && (_runtime==null || !_capabilities.CanExecute(Capability.HostWorld) || RefillLimitInput.HasError)) { AutoRefillStatus="进入世界并填写 1–20 的整数上限后再开启"; OnPropertyChanged(); return; }
             if(!Set(ref _autoRefill,value))return;
+            NotifyGullActions();
             _autoGeneration++; if(value)AutoRefillCount=0; _lastRefill=DateTimeOffset.MinValue;
             AutoRefillStatus=value?"等待海鸥存活数量；耗尽后按海鸥迁徙的数量设置补充":"自动补充已停止";
             OnPropertyChanged(nameof(ActiveFeaturesText));
@@ -186,6 +295,7 @@ public sealed partial class MainViewModel
         RefillLimitInput.PropertyChanged+=(_,e)=>{if(e.PropertyName==nameof(NumericInput.Text)){_experience.RefillLimit=(int)RefillLimitInput.LastValidValue; ScheduleExperienceSave();}};
         _experienceSaveTimer=new DispatcherTimer(DispatcherPriority.Background){Interval=TimeSpan.FromMilliseconds(500)};
         _experienceSaveTimer.Tick+=SaveExperienceTick;
+        GullMigration.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(GullMigration.CanExecute)) NotifyGullActions(); };
         FunEventsPage.CleanupRequested+=()=>AutoRefill=false;
         AimAssist.PropertyChanged+=(_,e)=>{if(e.PropertyName==nameof(AimAssist.Enabled)){if(DiagnosticOnly&&AimAssist.Enabled)AimAssist.Enabled=false; OnPropertyChanged(nameof(ActiveFeaturesText));}};
         Crosshair.PropertyChanged+=(_,e)=>{if(e.PropertyName==nameof(Crosshair.Enabled))OnPropertyChanged(nameof(ActiveFeaturesText));};
@@ -378,6 +488,12 @@ public sealed partial class MainViewModel
     }
     internal void StopExperienceAutomation()
     {
+        if (_gullState is GullRoundState.Starting or GullRoundState.Stopping)
+        {
+            _gullState = _gullState == GullRoundState.Starting ? GullRoundState.StartUnconfirmed : GullRoundState.StopUnconfirmed;
+            GullChallengeStatus = "等待游戏确认飞靶挑战状态";
+            NotifyGullActions();
+        }
         FunEventsPage.SlotMachine.CancelPendingOperation();
         AutoRefill = false;
         CombatFeedback.ResetSession();
@@ -390,10 +506,21 @@ public sealed partial class MainViewModel
         _curveAppliedSpeed = null;
     }
     private void ResetPendingSessionWork(){_positionContextEpoch++;_islandLoadBusy=false;Volatile.Write(ref _proofRefreshBusy,0);_positionActionBusy=false;_deathSampleBusy=false;OnPropertyChanged(nameof(CanPositionAction));OnPropertyChanged(nameof(CanLoadSelectedIsland));}
-    internal void ResetExperienceWorld(){InvalidatePresetApply();StopExperienceAutomation();CombatFeedback.ResetSession();ResetPendingSessionWork();_safePosition=null;_lastLivingPosition=_deathPosition=null;_lastSampleAlive=false;TrackDeathPosition=false;DeathPositionStatus="世界已切换，临时位置已清空";CombatDiagnostics="世界已切换，等待读取新会话";}
-    public void UpdateExperienceSession(JsonElement? raw)
+    internal void ResetExperienceWorld(){ResetGullChallenge("已离开本轮飞靶挑战");InvalidatePresetApply();StopExperienceAutomation();CombatFeedback.ResetSession();ResetPendingSessionWork();_safePosition=null;_lastLivingPosition=_deathPosition=null;_lastSampleAlive=false;TrackDeathPosition=false;DeathPositionStatus="世界已切换，临时位置已清空";CombatDiagnostics="世界已切换，等待读取新会话";}
+    public void UpdateExperienceSession(JsonElement? raw) => UpdateExperienceSession(raw, null);
+    public void UpdateExperienceSession(JsonElement? raw, string? inspectedGullRound)
     {
-        if(raw is JsonElement feedbackSession)CombatFeedback.UpdateSession(feedbackSession);
+        if(raw is JsonElement feedbackSession)
+        {
+            CombatFeedback.UpdateSession(feedbackSession);
+            if (_gullState is GullRoundState.Active or GullRoundState.StartUnconfirmed or GullRoundState.StopUnconfirmed)
+            {
+                if (inspectedGullRound != null && inspectedGullRound == GullRoundForInspection &&
+                    feedbackSession.ValueKind == JsonValueKind.Object && feedbackSession.TryGetProperty("gullChallenge",out var round) && round.ValueKind == JsonValueKind.Null)
+                    ResetGullChallenge("本轮已从运行时清除，最终成绩未知");
+                else ApplyGullResult(feedbackSession);
+            }
+        }
         if(raw is not JsonElement session||session.ValueKind!=JsonValueKind.Object){CombatDiagnostics="当前运行时未提供诊断数据";if(AutoRefill){AutoRefill=false;AutoRefillStatus="缺少会话计数，自动补充已停止";}return;}
         if(!session.TryGetProperty("predictiveAim",out var aim)||aim.ValueKind!=JsonValueKind.Object){CombatDiagnostics="当前运行时未提供瞄准诊断";if(AutoRefill){AutoRefill=false;AutoRefillStatus="缺少迁徙海鸥计数，自动补充已停止";}return;}
         static JsonElement Field(JsonElement p,string key)=>p.ValueKind==JsonValueKind.Object&&p.TryGetProperty(key,out var v)?v:default;
@@ -405,19 +532,29 @@ public sealed partial class MainViewModel
         CombatDiagnostics=$"状态：{label}    目标：{TextValue(aim,"lockedTarget")}\n当前武器：{weaponName}    弹速：{Num(weapon,"speed")} m/s\n最近跟踪距离：{Num(last,"distance")} m    预计飞行：{Num(last,"flightTime")} s\n提前量 XYZ：{Num(lead,"x")}, {Num(lead,"y")}, {Num(lead,"z")}\n跟踪平均：{Num(perf,"trackingMeanUs")} μs    P95 ≤ {Num(perf,"trackingP95UpperUs")} μs    异常：{Num(perf,"exceptions","0")}\n更新：{DateTime.Now:HH:mm:ss}（复用每秒会话读取；跟踪数据仅在辅助运行时更新）";
         if(AutoRefill){var waves=Field(aim,"seagullWaves");if(waves.ValueKind!=JsonValueKind.Array){AutoRefill=false;AutoRefillStatus="缺少海鸥存活数据，自动补充已停止";}else{
             int alive=0;bool valid=true;foreach(var wave in waves.EnumerateArray()){var count=Field(wave,"alive");if(count.ValueKind!=JsonValueKind.Number||!count.TryGetInt32(out int n)||n<0||n>100000){valid=false;break;}alive+=n;}
-            if(valid){AutoRefillStatus=$"存活 {alive} 只 · 已补充 {AutoRefillCount}/{RefillLimitInput.LastValidValue:0} 波";if(alive==0)_=RefillSeagullsAsync();}
+            if(valid)
+            {
+                var migration = GullMigration;
+                string error = NumericInput.FirstError(RefillLimitInput, migration.CountInput);
+                if (error.Length != 0) AutoRefillStatus = "自动补充暂停 · " + error;
+                else
+                {
+                    AutoRefillStatus=$"存活 {alive} 只 · 已补充 {AutoRefillCount}/{RefillLimitInput.LastValidValue:0} 波";
+                    if (alive == 0) _ = RefillSeagullsAsync(migration);
+                }
+            }
             else{AutoRefill=false;AutoRefillStatus="海鸥数量数据无效，自动补充已停止";}
         }}
         OnPropertyChanged(nameof(ActiveFeaturesText));
     }
-    private async Task RefillSeagullsAsync()
+    private async Task RefillSeagullsAsync(FunEventCardViewModel migration)
     {
         if(!AutoRefill||_closedExperience||_experienceWorkBusy||DateTimeOffset.UtcNow-_lastRefill<TimeSpan.FromSeconds(3))return;
-        if(RefillLimitInput.HasError||AutoRefillCount>=RefillLimitInput.LastValidValue){AutoRefill=false;AutoRefillStatus="已达到补充上限，请手动重新开启";return;}
+        if(AutoRefillCount>=RefillLimitInput.LastValidValue){AutoRefill=false;AutoRefillStatus="已达到补充上限，请手动重新开启";return;}
         var runtime=_runtime;int epoch=_connectionEpoch,generation=_autoGeneration;
-        var card=FunEventsPage.Events.FirstOrDefault(e=>e.Id=="seagull-migration");if(runtime==null||card?.CanExecute!=true||!FunEventsPage.CanExecuteWave)return;
+        if(runtime==null||!migration.CanExecute||!FunEventsPage.CanExecuteWave)return;
         int work=++_experienceWorkVersion;_experienceWorkBusy=true;_lastRefill=DateTimeOffset.UtcNow;
-        try{var result=await FunEventsPage.ExecuteWaveAsync("seagull-migration");if(runtime!=_runtime||epoch!=_connectionEpoch||generation!=_autoGeneration)return;
+        try{var result=await FunEventsPage.ExecuteWaveAsync(migration.Id);if(runtime!=_runtime||epoch!=_connectionEpoch||generation!=_autoGeneration)return;
             if(result){AutoRefillCount++;AutoRefillStatus=$"已补充第 {AutoRefillCount} 波（按本波实际数量生成）";}
             else{AutoRefill=false;AutoRefillStatus="补充未成功，已停止；请检查趣味事件结果";}
         }catch(Exception e){if(runtime==_runtime&&epoch==_connectionEpoch){AutoRefill=false;AutoRefillStatus="自动补充失败 · "+e.Message;}}

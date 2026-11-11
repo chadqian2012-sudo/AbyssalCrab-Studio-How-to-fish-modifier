@@ -1,5 +1,17 @@
 # 功能指南 | Feature Guide
 
+## r24 可以查看实际锁定目标，也可以打一轮飞靶 | Lock indicators and gull challenge
+
+在「武器战斗」开启辅助瞄准或魔法子弹。原有红框继续显示，实际锁定或受引导的目标另有金色短角标。自瞄角标跟随当前开镜锁定；魔弹角标在真实开火修正方向或最新一轮飞行弹实际转向后短暂显示约 0.2 秒。这只表示发生过引导，不能据此判断子弹是否命中。两个功能锁定不同目标时，各自的角标都可见。
+
+按住键盘右侧 Ctrl 隐藏红框、骨骼、连线和角标，松开恢复。魔弹范围圈和原有瞄准功能继续工作。游戏需要在前台且能接收键盘输入。
+
+在「趣味小功能」使用海鸥迁徙的数量（1–50 只），手持要测试的枪，关闭自动补群，点击「开始本轮」。单人或房主世界确认整波海鸥已登记后开始计时，最多 60 秒。比较首中用时、有效枪击次数和击落数。命中以本机所选枪械造成的实际扣血为准，同一发散弹可能有多次有效命中。队友击落或飞靶离场不会给你加分。可以手动结束，再换枪开始新一轮。
+
+Aim assist marks its current ADS lock with gold corners. Magic bullets briefly mark an actual launch correction or guidance update from the latest volley. Hold **right Ctrl** in game to hide entity marks; releasing it restores them. The tracking circle and combat controls keep working.
+
+For a timed target challenge, enter a solo or host world, equip a gun, turn off automatic replenishment and choose 1–50 migration gulls in Fun Events. The 60-second clock starts after the game registers the wave. Compare time to first confirmed hit, damaging hits and kills from that gun. Shotgun pellets can cause separate damage events. Misses and shot accuracy are not estimated.
+
 ## r23 实体标注共享显示参数，攻击筛选保持独立 | Entity overlay shares display settings
 
 武器战斗中的“实体标注”卡由主窗口和悬浮页共用。辅助瞄准或魔法子弹至少一项开启时，显示距离内的所有可攻击活体和有效队友都可标注，墙后仍显示；是否显示队友不受两项“锁定队友”攻击开关控制。两项功能都关闭后隐藏标注。

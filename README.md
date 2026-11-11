@@ -8,6 +8,12 @@ AbyssalCrab Studio 是一款面向《How to Fish》的 Windows 桌面助手。�
 
 AbyssalCrab Studio is a Windows desktop assistant for *How to Fish*. It uses a WPF interface and an in-game runtime bridge for player, fishing, combat, teleport, item, and fun-event controls. The application has 11 feature categories, with search, parameter presets, favorites, recent generation settings, teleport-point management, aim-assist options, and a status widget.
 
+## r24 飞靶与锁定提示 | Timed gull challenge and lock indicators
+
+在武器战斗中，金色角标标出实际瞄准或魔弹引导的目标。按住右 Ctrl 可暂时隐藏标注。在趣味小功能里可以用当前枪械挑战一波海鸥，比较首中用时和击落数。此次交付为离线候选，桌面默认版仍为 r23。[玩法与控制](docs/FEATURES.md) · [验收记录](docs/VERIFICATION.md)
+
+Gold corners indicate the actual aim or recently guided target. Hold right Ctrl to hide the marks, or start a timed gull round with the equipped gun in Fun Events. The desktop remains on r23 while this candidate awaits in-game acceptance.
+
 ## r23 候选新增共享实体标注，实机验收仍待完成 | r23 entity-overlay candidate
 
 2026-11-08：武器战斗新增一张共享“实体标注”卡。辅助瞄准或魔法子弹开启时，标注显示距离内所有可攻击活体和有效队友，墙后仍显示。红框始终保留；有可用骨骼时叠加骨骼，并从当前准心投影位置连线到目标。准心连线宽 1 像素，不透明度为 55%。显示距离默认 200 米，可独立调整为 1–1000 米小数，不改变两个功能的攻击距离或锁定队友开关。

@@ -7,10 +7,10 @@ param(
 )
 $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSScriptRoot
-$stage=if($OutputDirectory){[IO.Path]::GetFullPath($OutputDirectory)}else{Join-Path $PSScriptRoot 'staging\entity-overlay'}
+$stage=if($OutputDirectory){[IO.Path]::GetFullPath($OutputDirectory)}else{Join-Path $PSScriptRoot 'staging\combat-challenge'}
 $runtime=Join-Path $root 'source\HowToFishTrainer\HowToFishTrainer.Runtime.dll'
-$parent=Join-Path $stage 'r22b-runtime.dll'
-$expected='b5bf1fb7fa166ec4c500d03231594862af4784d01805497446d425f99206f210'
+$parent=Join-Path $stage 'r23-runtime.dll'
+$expected='36d5f71f02f9dd21ffcd37aaf7f0266732c6783c84b86802d6186ffc37db56ee'
 $DotnetPath=(Resolve-Path -LiteralPath $DotnetPath).Path
 $GameManagedDirectory=(Resolve-Path -LiteralPath $GameManagedDirectory).Path
 $DnlibPath=(Resolve-Path -LiteralPath $DnlibPath).Path
@@ -22,10 +22,10 @@ $csc=Join-Path $sdk.FullName 'Roslyn\bincore\csc.dll'
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 if(!(Test-Path -LiteralPath $parent)){
     $parentSource=if($ParentRuntimePath){(Resolve-Path -LiteralPath $ParentRuntimePath).Path}else{$runtime}
-    if((Get-FileHash -LiteralPath $parentSource -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected){throw 'Provide the unchanged r22b Runtime with -ParentRuntimePath'}
+    if((Get-FileHash -LiteralPath $parentSource -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected){throw 'Provide the unchanged r23 Runtime with -ParentRuntimePath'}
     Copy-Item -LiteralPath $parentSource -Destination $parent
 }
-if((Get-FileHash -LiteralPath $parent -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected){throw 'The retained r22b parent hash changed'}
+if((Get-FileHash -LiteralPath $parent -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected){throw 'The retained r23 parent hash changed'}
 function Compile([string]$name,[string[]]$sources,[string[]]$references,[string]$main=''){
     $options=@('/nologo','/nowarn:0436','/langversion:12','/optimize+','/deterministic+','/nostdlib+')
     $options+=if($main){'/target:exe';'/main:'+$main}else{'/target:library'}
@@ -37,8 +37,8 @@ function Compile([string]$name,[string[]]$sources,[string[]]$references,[string]
     if($LASTEXITCODE -ne 0){throw "Compilation failed: $name"}
     if($main){'{"runtimeOptions":{"tfm":"net8.0","framework":{"name":"Microsoft.NETCore.App","version":"8.0.0"}}}'|Set-Content -LiteralPath (Join-Path $stage ($name+'.runtimeconfig.json')) -Encoding utf8}
 }
-$names=@('AimAssistOptimizedRuntime.cs','GameplayTargeting.cs','GameplayRuntime.cs','CombatBridgeRuntime.cs','MagicRangePolicy.cs','MagicRangeRenderer.cs')
-$gameReferences=@('mscorlib.dll','System.dll','System.Core.dll','System.Numerics.dll','System.Numerics.Vectors.dll','netstandard.dll','Assembly-CSharp.dll','FishNet.Runtime.dll','UnityEngine.CoreModule.dll','UnityEngine.PhysicsModule.dll','UnityEngine.IMGUIModule.dll','UnityEngine.AnimationModule.dll','Unity.InputSystem.dll','Newtonsoft.Json.dll')|ForEach-Object {Join-Path $GameManagedDirectory $_}
+$names=@('AimAssistOptimizedRuntime.cs','GameplayTargeting.cs','GameplayRuntime.cs','CombatBridgeRuntime.cs','CombatFeedbackRuntime.cs','CombatFeedbackState.cs','MagicRangeRenderer.cs')
+$gameReferences=@('mscorlib.dll','System.dll','System.Core.dll','System.Numerics.dll','System.Numerics.Vectors.dll','netstandard.dll','Assembly-CSharp.dll','FishNet.Runtime.dll','UnityEngine.CoreModule.dll','UnityEngine.PhysicsModule.dll','UnityEngine.IMGUIModule.dll','UnityEngine.AnimationModule.dll','UnityEngine.AudioModule.dll','UnityEngine.TextRenderingModule.dll','Unity.InputSystem.dll','Newtonsoft.Json.dll')|ForEach-Object {Join-Path $GameManagedDirectory $_}
 $gameReferences+=@($parent,(Join-Path $root 'source\HowToFishTrainer\0Harmony.dll'))
 Compile 'EntityOverlayRuntime' @($names|ForEach-Object {Join-Path $PSScriptRoot $_}) $gameReferences
 $netReferences=Get-ChildItem -LiteralPath (Join-Path $refs.FullName 'ref\net8.0') -Filter '*.dll' -File | Select-Object -ExpandProperty FullName
@@ -49,7 +49,7 @@ $candidate=Join-Path $stage 'candidate-runtime.dll'
 if($LASTEXITCODE -ne 0){throw 'Runtime method-preservation audit failed'}
 $fixture=Join-Path $root 'verification\EntityOverlayVerification.cs'
 Compile 'EntityOverlayVerification' @($fixture) ($netReferences+@($DnlibPath)) 'EntityOverlayVerification'
-& $DotnetPath (Join-Path $stage 'EntityOverlayVerification.dll') $parent $candidate (Join-Path $PSScriptRoot 'MagicRangeRenderer.cs') (Join-Path $stage 'verification')
+& $DotnetPath (Join-Path $stage 'EntityOverlayVerification.dll') $parent $candidate (Join-Path $PSScriptRoot 'MagicRangeRenderer.cs') (Join-Path $stage 'verification') $GameManagedDirectory
 if($LASTEXITCODE -ne 0){throw 'Entity-overlay geometry and runtime verification failed'}
 $auditPath=Join-Path $stage 'runtime-audit.json';$audit=Get-Content -LiteralPath $auditPath -Raw|ConvertFrom-Json
 $hashes=[ordered]@{}

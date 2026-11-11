@@ -11,61 +11,16 @@ public static class BridgeConnectionDiagnostics
 
 	public static string Describe(Exception exception)
 	{
-		RuntimeBridgeConnectStage? runtimeBridgeConnectStage = ((exception is RuntimeBridgeConnectException ex) ? new RuntimeBridgeConnectStage?(ex.Stage) : ((RuntimeBridgeConnectStage?)null));
-		Exception ex2 = RootCause(exception);
-		string text;
-		if (!(ex2 is TimeoutException))
+		Exception cause = RootCause(exception);
+		string message = cause switch
 		{
-			if (!(ex2 is OperationCanceledException))
-			{
-				if (!(ex2 is UnauthorizedAccessException))
-				{
-					if (ex2 is Win32Exception ex3)
-					{
-						if (ex3.NativeErrorCode != 5)
-						{
-							goto IL_00a1;
-						}
-						text = "访问被拒绝，请确保游戏与修改器权限一致";
-					}
-					else if (!(ex2 is EndOfStreamException))
-					{
-						if (!(ex2 is IOException))
-						{
-							goto IL_00a1;
-						}
-						text = "运行时通信中断";
-					}
-					else
-					{
-						text = "游戏内运行时已关闭管道";
-					}
-				}
-				else
-				{
-					text = "访问被拒绝，请确保游戏与修改器权限一致";
-				}
-			}
-			else
-			{
-				text = "连接超时";
-			}
-		}
-		else
-		{
-			text = "连接超时";
-		}
-		goto IL_00c3;
-		IL_00a1:
-		text = (string.IsNullOrWhiteSpace(ex2.Message) ? ex2.GetType().Name : ex2.Message);
-		goto IL_00c3;
-		IL_00c3:
-		string text2 = text;
-		if (runtimeBridgeConnectStage.HasValue)
-		{
-			return StageText(runtimeBridgeConnectStage.Value) + "：" + text2;
-		}
-		return text2;
+			TimeoutException or OperationCanceledException => "连接超时",
+			UnauthorizedAccessException or Win32Exception { NativeErrorCode: 5 } => "访问被拒绝，请确保游戏与修改器权限一致",
+			EndOfStreamException => "游戏内运行时已关闭管道",
+			IOException => "运行时通信中断",
+			_ => string.IsNullOrWhiteSpace(cause.Message) ? cause.GetType().Name : cause.Message
+		};
+		return exception is RuntimeBridgeConnectException bridge ? StageText(bridge.Stage) + "：" + message : message;
 	}
 
 	public static string Append(string directory, int processId, Exception exception, DateTimeOffset? timestamp = null)

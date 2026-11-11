@@ -129,12 +129,12 @@ public sealed class SlotMachineControlViewModel : INotifyPropertyChanged
 	public SlotMachineControlViewModel(ISponsorAccessGate sponsorAccessGate)
 	{
 		_sponsorAccessGate = sponsorAccessGate;
-		RarityOptions = new _003C_003Ez__ReadOnlyArray<SlotMachineRarityOption>(new SlotMachineRarityOption[3]
-		{
+		RarityOptions =
+		[
 			new SlotMachineRarityOption(1, "普通", "优先普通档，缺少时自动降级到可用档位"),
 			new SlotMachineRarityOption(2, "稀有", "优先稀有档，缺少时选择最接近的有效档位"),
 			new SlotMachineRarityOption(3, "传说", "优先传说档，缺少时选择最接近的有效档位")
-		});
+		];
 		ApplyCommand = new RelayCommand(() =>
 		{
 			ApplyAsync();
