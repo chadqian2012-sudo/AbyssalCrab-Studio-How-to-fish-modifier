@@ -1,7 +1,9 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Pipes;
 using System.Linq;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -228,6 +230,7 @@ static class OverlayUiVerification
         var type = typeof(MainWindow);
         var vm = (MainViewModel)type.GetField("_viewModel", instance)!.GetValue(window)!;
         var timer = (DispatcherTimer)type.GetField("_timer", instance)!.GetValue(window)!;
+        type.GetMethod("InitializeTray", instance)!.Invoke(window, null);
         Check(type.GetField("_trayIcon", instance)!.GetValue(window) == null && !timer.IsEnabled,
             "Preview creates neither a tray icon nor game polling");
         var runtime = new OverlayUiRuntime(); vm.Connect(runtime, CapabilityMatrix.For(SessionMode.Host, false));
@@ -242,7 +245,7 @@ static class OverlayUiVerification
         int saves = store.SaveCount, calls = runtime.Calls.Count;
         var cancel = new System.ComponentModel.CancelEventArgs();
         type.GetMethod("OnClosing", instance)!.Invoke(window, new object[] { cancel });
-        Check(cancel.Cancel && !window.IsVisible, "Close with a tray owner hides the window instead of exiting");
+        Check(cancel.Cancel && !window.IsVisible, "A tray close request is canceled without showing the test window");
         Check(timer.IsEnabled && ReferenceEquals(typeof(MainViewModel).GetField("_runtime", instance)!.GetValue(vm), runtime),
             "Hiding preserves the polling timer and the current runtime connection");
         Check(health.Enabled && runtime.Calls.Count == calls && store.SaveCount == saves &&
@@ -259,6 +262,53 @@ static class OverlayUiVerification
         var repeated = (Task)exit.Invoke(window, null)!;
         Check(repeated.IsCompletedSuccessfully && store.SaveCount == saves && store.Saved.ToJson() == saved,
             "Repeated tray exit leaves the saved session unchanged");
+    }
+
+    private static async Task VerifyPendingTrayExit(string output)
+    {
+        const BindingFlags instance = BindingFlags.Instance | BindingFlags.NonPublic;
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        string name = "AbyssalCrab.TrayFixture." + Guid.NewGuid().ToString("N");
+        using var server = new NamedPipeServerStream(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        using var client = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await Task.WhenAll(server.WaitForConnectionAsync(limit.Token), client.ConnectAsync(limit.Token));
+        // Exercise the real transport against a local fixture, with no game process gateway.
+        var bridge = (RuntimeBridgeClient)Activator.CreateInstance(typeof(RuntimeBridgeClient), instance,
+            null, new object?[] { client, null, Array.Empty<byte>() }, null)!;
+        using var license = new HowToFishTrainer.App.Licensing.LicenseService(Path.Combine(output, "tray-pending-license"), "test");
+        var store = new OverlayUiPreferenceStore();
+        var window = new MainWindow(license, store);
+        var type = typeof(MainWindow);
+        var vm = (MainViewModel)type.GetField("_viewModel", instance)!.GetValue(window)!;
+        vm.Connect(new OverlayUiRuntime(), CapabilityMatrix.For(SessionMode.Host, false));
+        vm.AllFeatures.Single(f => f.Descriptor.Id == "player.health.lock").Enabled = true;
+        type.GetField("_bridge", instance)!.SetValue(window, bridge);
+        var exitMethod = type.GetMethod("ExitFromTrayAsync", instance)!;
+        var exit = (Task)exitMethod.Invoke(window, null)!;
+        byte[] header = new byte[4];
+        await server.ReadExactlyAsync(header, limit.Token);
+        byte[] request = new byte[BinaryPrimitives.ReadInt32LittleEndian(header)];
+        await server.ReadExactlyAsync(request, limit.Token);
+        using var payload = JsonDocument.Parse(request);
+        var message = payload.RootElement;
+        Check(message.GetProperty("featureId").GetString() == "locks.disable_all" && !exit.IsCompleted,
+            "Tray exit sends the real framed disable-all request and waits for its receipt");
+        Check(store.Saved?.Session.Boolean("toggle:player.health.lock") == true && !window.IsEnabled &&
+            typeof(MainViewModel).GetField("_runtime", instance)!.GetValue(vm) == null,
+            "Pending exit has saved enabled switches and detached command producers before its receipt");
+        var repeated = (Task)exitMethod.Invoke(window, null)!;
+        Check(repeated.IsCompletedSuccessfully && !exit.IsCompleted,
+            "A second tray exit returns immediately while the original stop request is pending");
+        byte[] response = JsonSerializer.SerializeToUtf8Bytes(new { protocolVersion = 1,
+            session = message.GetProperty("session"), correlationId = message.GetProperty("correlationId"), ok = true, message = "offline stop acknowledged" });
+        // The fixture owns its pipe and has no gateway to dispose; native game-resource cleanup is not tested here.
+        type.GetField("_bridge", instance)!.SetValue(window, null);
+        BinaryPrimitives.WriteInt32LittleEndian(header, response.Length);
+        await server.WriteAsync(header, limit.Token); await server.WriteAsync(response, limit.Token);
+        await exit.WaitAsync(limit.Token);
+        Check(store.Saved?.Session.Boolean("toggle:player.health.lock") == true &&
+            (bool)type.GetField("_exitRequested", instance)!.GetValue(window)!,
+            "A delayed valid stop receipt completes tray exit without overwriting the saved switches");
     }
 
     [STAThread]
@@ -675,10 +725,13 @@ static class OverlayUiVerification
         VerifyEntityOverlay(vm,runtime,secondView,overlayView,content,tabs,output);
         VerifyGullChallenge(vm,runtime,secondView,overlayView,content,output);
         VerifyTrayLifecycle(output);
+        var pendingExit = VerifyPendingTrayExit(output);
+        while (!pendingExit.IsCompleted) { Pump(); Thread.Sleep(1); }
+        pendingExit.GetAwaiter().GetResult();
         listener.Flush(); string bindingErrors = errors.ToString(); File.WriteAllText(Path.Combine(output, "binding-errors.txt"), bindingErrors);
         Check(string.IsNullOrWhiteSpace(bindingErrors), "No WPF binding errors during all overlay and feature-page rendering");
         vm.CloseExperience(); vm.ClosePreferences(); main.Close();
-        File.WriteAllText(Path.Combine(output, "ui-verification.json"), JsonSerializer.Serialize(new { verificationVersion = "20261113-system-tray-ui-v12", appAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(StatusWidget).Assembly.Location))), runnerAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(OverlayUiVerification).Assembly.Location))), checks = Checks, images = Images, realGameOpened = false, desktopInputSent = false, formalPreferencesUsed = false }, new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(Path.Combine(output, "ui-verification.json"), JsonSerializer.Serialize(new { verificationVersion = "20261114-system-tray-ui-v13", appAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(StatusWidget).Assembly.Location))), runnerAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(OverlayUiVerification).Assembly.Location))), checks = Checks, images = Images, realGameOpened = false, desktopInputSent = false, formalPreferencesUsed = false }, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine("PASS " + Checks.Count + " UI checks; " + Images.Count + " rendered images");
         return 0;
     }

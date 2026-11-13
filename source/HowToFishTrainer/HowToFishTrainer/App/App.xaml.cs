@@ -169,9 +169,10 @@ public partial class App : Application
 	private bool TryEnterSingleInstance(out bool activatedExisting)
 	{
 		activatedExisting = false;
-		_singleInstanceMutex = new Mutex(initiallyOwned: true, "Local\\AbyssalCrabStudio.HowToFishTrainer.SingleInstance", out var createdNew);
-		_ownsSingleInstanceMutex = createdNew;
-		if (createdNew)
+		_singleInstanceMutex = new Mutex(initiallyOwned: false, "Local\\AbyssalCrabStudio.HowToFishTrainer.SingleInstance");
+		try { _ownsSingleInstanceMutex = _singleInstanceMutex.WaitOne(0); }
+		catch (AbandonedMutexException) { _ownsSingleInstanceMutex = true; }
+		if (_ownsSingleInstanceMutex)
 		{
 			_activationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivationEventName);
 			_activationWait = ThreadPool.RegisterWaitForSingleObject(_activationEvent, (_, _) =>

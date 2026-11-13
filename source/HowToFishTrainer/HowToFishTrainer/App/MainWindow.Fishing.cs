@@ -12,7 +12,7 @@ public partial class MainWindow
     {
         bool preview = Environment.GetCommandLineArgs().Contains("--ui-preview", StringComparer.OrdinalIgnoreCase);
         _fishingJournal ??= new FishingViewModel(preview ? null : ProductIdentity.AppDataDirectory, preview ? null : SaveBackupService.DefaultSaveRoot, startTimer: !preview);
-        if (_fishingWindow != null) { _fishingWindow.SelectTab(tab); _fishingWindow.Activate(); return; }
+        if (_fishingWindow != null) { _fishingWindow.SelectTab(tab); _fishingWindow.Show(); _fishingWindow.Activate(); return; }
         _fishingWindow = new FishingWindow(_fishingJournal, tab) { Owner = this };
         _fishingWindow.Closed += (_, _) => _fishingWindow = null;
         _fishingWindow.Show();
