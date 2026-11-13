@@ -20,8 +20,10 @@ using HowToFishTrainer.Core;
 sealed class OverlayUiPreferenceStore : IUserPreferencesStore
 {
     public string? Warning => null;
+    public TrainerUserPreferences? Saved { get; private set; }
+    public int SaveCount { get; private set; }
     public TrainerUserPreferences Load() => TrainerUserPreferences.Parse("{}");
-    public void Save(TrainerUserPreferences value) { }
+    public void Save(TrainerUserPreferences value) { Saved = value.Copy(); SaveCount++; }
 }
 
 sealed class OverlayUiRuntime : IGameRuntimeClient
@@ -215,6 +217,48 @@ static class OverlayUiVerification
             "Valid shared wave size makes each start button available again");
         Check(!runtime.Calls.Skip(before).Any(id => id == "fun.challenge.start" || id == "fun.challenge.stop" || id == "fun.event.execute"),
             "Navigation, scrolling and count editing do not start, stop or spawn a gull round");
+    }
+
+    private static void VerifyTrayLifecycle(string output)
+    {
+        const BindingFlags instance = BindingFlags.Instance | BindingFlags.NonPublic;
+        var store = new OverlayUiPreferenceStore();
+        using var license = new HowToFishTrainer.App.Licensing.LicenseService(Path.Combine(output, "tray-license"), "test");
+        var window = new MainWindow(license, store);
+        var type = typeof(MainWindow);
+        var vm = (MainViewModel)type.GetField("_viewModel", instance)!.GetValue(window)!;
+        var timer = (DispatcherTimer)type.GetField("_timer", instance)!.GetValue(window)!;
+        Check(type.GetField("_trayIcon", instance)!.GetValue(window) == null && !timer.IsEnabled,
+            "Preview creates neither a tray icon nor game polling");
+        var runtime = new OverlayUiRuntime(); vm.Connect(runtime, CapabilityMatrix.For(SessionMode.Host, false));
+        vm.SoundEnabled = false;
+        var health = vm.AllFeatures.Single(f => f.Descriptor.Id == "player.health.lock");
+        health.Enabled = true; Pump();
+        Check(health.Enabled && runtime.Calls.Contains("player.health.lock"), "Tray fixture starts with an enabled simulated health lock");
+        using var tray = new System.Windows.Forms.NotifyIcon { Visible = false };
+        type.GetField("_trayIcon", instance)!.SetValue(window, tray);
+        // Exercise the closing owner without showing a window, registering an icon, or polling a game.
+        timer.Interval = TimeSpan.FromDays(1); timer.Start();
+        int saves = store.SaveCount, calls = runtime.Calls.Count;
+        var cancel = new System.ComponentModel.CancelEventArgs();
+        type.GetMethod("OnClosing", instance)!.Invoke(window, new object[] { cancel });
+        Check(cancel.Cancel && !window.IsVisible, "Close with a tray owner hides the window instead of exiting");
+        Check(timer.IsEnabled && ReferenceEquals(typeof(MainViewModel).GetField("_runtime", instance)!.GetValue(vm), runtime),
+            "Hiding preserves the polling timer and the current runtime connection");
+        Check(health.Enabled && runtime.Calls.Count == calls && store.SaveCount == saves &&
+            !(bool)typeof(MainViewModel).GetField("_preferencesDisposed", instance)!.GetValue(vm)!,
+            "Hiding neither disables features nor closes the preference store");
+        var exit = type.GetMethod("ExitFromTrayAsync", instance)!;
+        var task = (Task)exit.Invoke(window, null)!;
+        Check(task.IsCompletedSuccessfully && !timer.IsEnabled && type.GetField("_trayIcon", instance)!.GetValue(window) == null,
+            "Local tray exit closes the window and releases the tray owner");
+        Check(store.Saved?.Session.Boolean("toggle:player.health.lock") == true &&
+            typeof(MainViewModel).GetField("_runtime", instance)!.GetValue(vm) == null,
+            "Exit and subsequent OnClosed cleanup retain pre-disconnect enabled switches in saved preferences");
+        string saved = store.Saved!.ToJson(); saves = store.SaveCount;
+        var repeated = (Task)exit.Invoke(window, null)!;
+        Check(repeated.IsCompletedSuccessfully && store.SaveCount == saves && store.Saved.ToJson() == saved,
+            "Repeated tray exit leaves the saved session unchanged");
     }
 
     [STAThread]
@@ -630,10 +674,11 @@ static class OverlayUiVerification
             "Experience feedback keeps a compact height and retains the complete multiline error in its tooltip");
         VerifyEntityOverlay(vm,runtime,secondView,overlayView,content,tabs,output);
         VerifyGullChallenge(vm,runtime,secondView,overlayView,content,output);
+        VerifyTrayLifecycle(output);
         listener.Flush(); string bindingErrors = errors.ToString(); File.WriteAllText(Path.Combine(output, "binding-errors.txt"), bindingErrors);
         Check(string.IsNullOrWhiteSpace(bindingErrors), "No WPF binding errors during all overlay and feature-page rendering");
         vm.CloseExperience(); vm.ClosePreferences(); main.Close();
-        File.WriteAllText(Path.Combine(output, "ui-verification.json"), JsonSerializer.Serialize(new { verificationVersion = "20261109-combat-challenge-ui-v11", appAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(StatusWidget).Assembly.Location))), runnerAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(OverlayUiVerification).Assembly.Location))), checks = Checks, images = Images, realGameOpened = false, desktopInputSent = false, formalPreferencesUsed = false }, new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(Path.Combine(output, "ui-verification.json"), JsonSerializer.Serialize(new { verificationVersion = "20261113-system-tray-ui-v12", appAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(StatusWidget).Assembly.Location))), runnerAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(OverlayUiVerification).Assembly.Location))), checks = Checks, images = Images, realGameOpened = false, desktopInputSent = false, formalPreferencesUsed = false }, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine("PASS " + Checks.Count + " UI checks; " + Images.Count + " rendered images");
         return 0;
     }

@@ -19,7 +19,12 @@ public partial class MainWindow
     }
     protected override void OnClosing(CancelEventArgs e)
     {
-        if (_fishingJournal?.Busy == true)
+        if (!_exitRequested && _trayIcon != null)
+        {
+            e.Cancel = true;
+            if (!_appearanceClosing) HideToTray();
+        }
+        else if (!_exitRequested && _fishingJournal?.Busy == true)
         { e.Cancel = true; MessageBox.Show(this, "钓鱼手记正在读取、备份或恢复，请等待完成后关闭。", "任务进行中"); }
         base.OnClosing(e);
     }

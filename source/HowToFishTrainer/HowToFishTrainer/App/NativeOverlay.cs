@@ -6,6 +6,10 @@ internal static class NativeOverlay
 {
 	[DllImport("user32.dll")]
 	[return: MarshalAs(UnmanagedType.Bool)]
+	internal static extern bool AllowSetForegroundWindow(uint processId);
+
+	[DllImport("user32.dll")]
+	[return: MarshalAs(UnmanagedType.Bool)]
 	internal static extern bool IsWindow(nint hwnd);
 
 	[DllImport("user32.dll")]

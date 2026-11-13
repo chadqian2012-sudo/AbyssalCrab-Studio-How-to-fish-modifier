@@ -15,6 +15,7 @@ using System.Windows.Threading;
 using HowToFishTrainer.App.Licensing;
 using HowToFishTrainer.Core;
 using HowToFishTrainer.Memory;
+using Forms = System.Windows.Forms;
 
 namespace HowToFishTrainer.App;
 
@@ -109,6 +110,102 @@ public partial class MainWindow : Window, IComponentConnector
 	}
 
     private bool _appearanceClosing;
+
+    private Forms.NotifyIcon? _trayIcon;
+    private Forms.ContextMenuStrip? _trayMenu;
+    private System.Drawing.Icon? _trayImage;
+    private bool _exitRequested;
+
+    private void InitializeTray()
+    {
+        if (Environment.GetCommandLineArgs().Contains("--ui-preview", StringComparer.OrdinalIgnoreCase)) return;
+        _trayMenu = new Forms.ContextMenuStrip();
+        _trayMenu.Items.Add("显示主窗口", null, (_, _) => RestoreFromTray());
+        _trayMenu.Items.Add(new Forms.ToolStripSeparator());
+        var sound = new Forms.ToolStripMenuItem("音效");
+        sound.Click += (_, _) => sound.Checked = _viewModel.SoundEnabled = !_viewModel.SoundEnabled;
+        _trayMenu.Items.Add(sound);
+        var widget = new Forms.ToolStripMenuItem("游戏悬浮窗");
+        widget.Click += (_, _) => widget.Checked = _viewModel.WidgetVisible = !_viewModel.WidgetVisible;
+        _trayMenu.Items.Add(widget);
+        var material = new Forms.ToolStripMenuItem("玻璃材质");
+        foreach (var (label, strength) in new[] { ("实色", MaterialStrength.Solid), ("着色玻璃", MaterialStrength.Tinted), ("通透", MaterialStrength.Clear) })
+        {
+            var item = new Forms.ToolStripMenuItem(label) { Tag = strength };
+            item.Click += (_, _) => SelectMaterial(strength);
+            material.DropDownItems.Add(item);
+        }
+        _trayMenu.Items.Add(material);
+        _trayMenu.Items.Add(new Forms.ToolStripSeparator());
+        _trayMenu.Items.Add("紧急停用全部持续功能", null, async (_, _) => await _viewModel.EmergencyDisableAsync(_bridge));
+        _trayMenu.Items.Add("退出修改器", null, async (_, _) => await ExitFromTrayAsync());
+        _trayMenu.Opening += (_, _) =>
+        {
+            sound.Checked = _viewModel.SoundEnabled;
+            widget.Checked = _viewModel.WidgetVisible;
+            foreach (Forms.ToolStripMenuItem item in material.DropDownItems)
+                item.Checked = (MaterialStrength)item.Tag! == App.EffectiveMaterialStrength;
+        };
+        _trayImage = System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath!)
+            ?? (System.Drawing.Icon)System.Drawing.SystemIcons.Application.Clone();
+        _trayIcon = new Forms.NotifyIcon { Text = "AbyssalCrab Studio · 右键设置与退出", Icon = _trayImage, ContextMenuStrip = _trayMenu, Visible = true };
+        _trayIcon.MouseClick += (_, e) => { if (e.Button == Forms.MouseButtons.Left) RestoreFromTray(); };
+    }
+
+    internal void RestoreFromTray()
+    {
+        if (_appearanceClosing) return;
+        Show();
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        _fishingWindow?.Show();
+        Activate();
+    }
+
+    private void HideToTray()
+    {
+        _fishingWindow?.Hide();
+        Hide();
+    }
+
+    internal void BeginSessionShutdown() => _exitRequested = true;
+
+    internal async Task ExitFromTrayAsync()
+    {
+        if (_appearanceClosing) return;
+        if (_fishingJournal?.Busy == true)
+        {
+            RestoreFromTray();
+            MessageBox.Show(this, "钓鱼手记正在读取、备份或恢复，请等待完成后退出。", "任务进行中");
+            return;
+        }
+        _appearanceClosing = true;
+        _timer.Stop();
+        IsEnabled = false;
+        if (_fishingWindow != null) _fishingWindow.IsEnabled = false;
+        if (_trayMenu != null) _trayMenu.Enabled = false;
+        // Save the user's enabled switches before disconnect invalidates pending operations.
+        CloseExperienceUi();
+        _viewModel.ClosePreferences();
+        _viewModel.Disconnect();
+        try
+        {
+            if (_bridge != null)
+            {
+                var result = await _bridge.ExecuteAsync(new FeatureCommand("locks.disable_all", JsonSerializer.SerializeToElement(new { }), Capability.OwnedPlayer), CancellationToken.None);
+                if (!result.Succeeded) throw new InvalidOperationException(result.Message);
+            }
+        }
+        catch (Exception error)
+        {
+            TryLogBridgeFailure(_attachedProcessId ?? 0, error);
+            MessageBox.Show("退出前未能确认游戏内持续功能已停用：" + error.Message + "\n修改器将断开连接并退出，请检查游戏中的效果。", "停用未确认", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _exitRequested = true;
+            Close();
+        }
+    }
 
 
 	// ---- 材质强度菜单（纯外观设置） ------------------------------------------------------
@@ -236,6 +333,7 @@ public partial class MainWindow : Window, IComponentConnector
 	protected override void OnSourceInitialized(EventArgs e)
 	{
 		base.OnSourceInitialized(e);
+		InitializeTray();
 		nint handle = new WindowInteropHelper(this).Handle;
 		HwndSource.FromHwnd(handle)?.AddHook(WindowHook);
 		if (!NativeHotkeys.RegisterHotKey(handle, 4740166, 6u, 123u))
@@ -566,6 +664,10 @@ public partial class MainWindow : Window, IComponentConnector
 	protected override void OnClosed(EventArgs e)
 	{
         _appearanceClosing = true;
+        _trayIcon?.Dispose();
+        _trayIcon = null;
+        _trayMenu?.Dispose();
+        _trayImage?.Dispose();
         _fishingJournal?.Dispose();
         CloseExperienceUi();
         _viewModel.ClosePreferences();

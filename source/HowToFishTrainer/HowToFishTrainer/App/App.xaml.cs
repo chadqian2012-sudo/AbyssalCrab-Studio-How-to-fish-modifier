@@ -15,16 +15,21 @@ public partial class App : Application
 
 	private bool _ownsSingleInstanceMutex;
 
+	private const string ActivationEventName = "Local\\AbyssalCrabStudio.HowToFishTrainer.Activate";
+	private EventWaitHandle? _activationEvent;
+	private RegisteredWaitHandle? _activationWait;
+
 	protected override void OnStartup(StartupEventArgs e)
 	{
 		base.OnStartup(e);
 		// 在创建任何窗口之前决定外观档：窗口一建就会读到 Motion*/Glass* token，之后再换就来不及了。
 		ApplyMotionPreference();
 		ApplyMaterialTier();
-		if (!e.Args.Contains("--ui-preview", StringComparer.OrdinalIgnoreCase) && !TryEnterSingleInstance())
+		if (!e.Args.Contains("--ui-preview", StringComparer.OrdinalIgnoreCase) && !TryEnterSingleInstance(out bool activatedExisting))
 		{
-			MessageBox.Show("检测到另一份AbyssalCrab Studio正在运行。请先退出所有旧版和新版修改器，并重启游戏后只运行当前版本。\n\n同时运行多个版本会导致运行时桥互相接管，表现为一直等待运行时管道。", "AbyssalCrab Studio", MessageBoxButton.OK, MessageBoxImage.Exclamation);
-			Shutdown(2);
+			if (!activatedExisting)
+				MessageBox.Show("另一份修改器正在启动，或仍在运行不支持托盘唤醒的旧版本。请从现有窗口继续使用；切换版本前请先退出旧版。", "AbyssalCrab Studio", MessageBoxButton.OK, MessageBoxImage.Information);
+			Shutdown(activatedExisting ? 0 : 2);
 			return;
 		}
 		_license = new LicenseService(ProductIdentity.AppDataDirectory, "1.1.37");
@@ -161,16 +166,34 @@ public partial class App : Application
 		Resources.MergedDictionaries.Add(replacement);
 	}
 
-	private bool TryEnterSingleInstance()
+	private bool TryEnterSingleInstance(out bool activatedExisting)
 	{
+		activatedExisting = false;
 		_singleInstanceMutex = new Mutex(initiallyOwned: true, "Local\\AbyssalCrabStudio.HowToFishTrainer.SingleInstance", out var createdNew);
 		_ownsSingleInstanceMutex = createdNew;
-		int? num = TrainerInstancePolicy.FindCompetingProcessId(Environment.ProcessId, TrainerInstancePolicy.SnapshotProcesses());
 		if (createdNew)
 		{
-			return !num.HasValue;
+			_activationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivationEventName);
+			_activationWait = ThreadPool.RegisterWaitForSingleObject(_activationEvent, (_, _) =>
+				Dispatcher.BeginInvoke(new Action(() => (MainWindow as MainWindow)?.RestoreFromTray())), null, Timeout.Infinite, false);
+			return true;
+		}
+		if (EventWaitHandle.TryOpenExisting(ActivationEventName, out var activation))
+		{
+			using (activation)
+			{
+				int? num = TrainerInstancePolicy.FindCompetingProcessId(Environment.ProcessId, TrainerInstancePolicy.SnapshotProcesses());
+				if (num.HasValue) NativeOverlay.AllowSetForegroundWindow((uint)num.Value);
+				activatedExisting = activation.Set();
+			}
 		}
 		return false;
+	}
+
+	protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+	{
+		base.OnSessionEnding(e);
+		if (!e.Cancel) (MainWindow as MainWindow)?.BeginSessionShutdown();
 	}
 
 	private static async Task InitializeLicenseAsync(MainWindow window, ILicenseClient license)
@@ -187,6 +210,8 @@ public partial class App : Application
 
 	protected override void OnExit(ExitEventArgs e)
 	{
+		_activationWait?.Unregister(null);
+		_activationEvent?.Dispose();
 		_license?.Dispose();
 		if (_ownsSingleInstanceMutex)
 		{
