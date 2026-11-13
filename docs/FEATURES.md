@@ -1,5 +1,13 @@
 # 功能指南 | Feature Guide
 
+## 关闭窗口后可从系统托盘快速打开 | Keep running in the system tray
+
+启动时显示主窗口，同时在 Windows 通知区域显示图标。点主窗口的 × 或按 Alt+F4 会隐藏窗口，已开启的功能、连接和游戏悬浮窗继续运行。左键点托盘图标，或再次打开同版本的桌面快捷方式，可恢复主窗口。
+
+右键菜单提供显示主窗口、音效、游戏悬浮窗、玻璃材质、紧急停用和退出。音效、悬浮窗及材质复用现有设置。选择「退出修改器」才保存退出前设置、停用持续功能、断开并退出；手记正在备份或恢复时需等待任务完成。图标是否放在箭头折叠区由 Windows 决定。没有新增开机自启。
+
+Startup shows the window and a notification-area icon. Closing the window keeps the connection and enabled features running. Left-click the tray icon or launch the same version again to restore it. The context menu reuses sound, game overlay and material settings, and offers emergency disable and Exit. Exit saves the pre-exit switches before disabling continuous effects and disconnecting. Active journal operations must finish first. Windows controls notification-area icon placement; this change does not enable startup at sign-in.
+
 ## r24 可以查看实际锁定目标，也可以打一轮飞靶 | Lock indicators and gull challenge
 
 在「武器战斗」开启辅助瞄准或魔法子弹。原有红框继续显示，实际锁定或受引导的目标另有金色短角标。自瞄角标跟随当前开镜锁定；魔弹角标在真实开火修正方向或最新一轮飞行弹实际转向后短暂显示约 0.2 秒。这只表示发生过引导，不能据此判断子弹是否命中。两个功能锁定不同目标时，各自的角标都可见。

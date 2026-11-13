@@ -210,7 +210,7 @@
             </Menu>
             <Button x:Name="MinimizeButton" Content="—" Style="{StaticResource WindowButton}" Click="Minimize_Click" ToolTip="最小化"/>
             <Button x:Name="MaximizeButton" Content="□" Style="{StaticResource WindowButton}" Click="Maximize_Click" ToolTip="最大化"/>
-            <Button x:Name="CloseButton" Content="×" Style="{StaticResource WindowButton}" Foreground="{StaticResource DangerBrush}" Click="Close_Click" ToolTip="关闭"/>
+            <Button x:Name="CloseButton" Content="×" Style="{StaticResource WindowButton}" Foreground="{StaticResource DangerBrush}" Click="Close_Click" ToolTip="隐藏到托盘，已开启功能继续运行；右键托盘图标可退出"/>
           </StackPanel>
         </Grid>
       </Border>
