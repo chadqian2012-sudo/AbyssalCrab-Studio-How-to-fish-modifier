@@ -28,7 +28,7 @@ public partial class App : Application
 		if (!e.Args.Contains("--ui-preview", StringComparer.OrdinalIgnoreCase) && !TryEnterSingleInstance(out bool activatedExisting))
 		{
 			if (!activatedExisting)
-				MessageBox.Show("另一份修改器正在启动，或仍在运行不支持托盘唤醒的旧版本。请从现有窗口继续使用；切换版本前请先退出旧版。", "AbyssalCrab Studio", MessageBoxButton.OK, MessageBoxImage.Information);
+				MessageBox.Show("另一份修改器正在启动、退出，或是旧版本。请等它启动或退出后再打开；切换版本前请先退出旧版。", "AbyssalCrab Studio", MessageBoxButton.OK, MessageBoxImage.Information);
 			Shutdown(activatedExisting ? 0 : 2);
 			return;
 		}
@@ -174,19 +174,16 @@ public partial class App : Application
 		catch (AbandonedMutexException) { _ownsSingleInstanceMutex = true; }
 		if (_ownsSingleInstanceMutex)
 		{
-			_activationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivationEventName);
+			_activationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, $"{ActivationEventName}.{Environment.ProcessId}");
 			_activationWait = ThreadPool.RegisterWaitForSingleObject(_activationEvent, (_, _) =>
 				Dispatcher.BeginInvoke(new Action(() => (MainWindow as MainWindow)?.RestoreFromTray())), null, Timeout.Infinite, false);
 			return true;
 		}
-		if (EventWaitHandle.TryOpenExisting(ActivationEventName, out var activation))
+		using var activation = TrainerInstancePolicy.OpenOwnerEvent(ActivationEventName, out int ownerPid);
+		if (activation != null)
 		{
-			using (activation)
-			{
-				int? num = TrainerInstancePolicy.FindCompetingProcessId(Environment.ProcessId, TrainerInstancePolicy.SnapshotProcesses());
-				if (num.HasValue) NativeOverlay.AllowSetForegroundWindow((uint)num.Value);
-				activatedExisting = activation.Set();
-			}
+			NativeOverlay.AllowSetForegroundWindow((uint)ownerPid);
+			activatedExisting = activation.Set();
 		}
 		return false;
 	}
@@ -209,10 +206,17 @@ public partial class App : Application
 		}
 	}
 
-	protected override void OnExit(ExitEventArgs e)
+	internal void StopTrayActivation()
 	{
 		_activationWait?.Unregister(null);
+		_activationWait = null;
 		_activationEvent?.Dispose();
+		_activationEvent = null;
+	}
+
+	protected override void OnExit(ExitEventArgs e)
+	{
+		StopTrayActivation();
 		_license?.Dispose();
 		if (_ownsSingleInstanceMutex)
 		{
