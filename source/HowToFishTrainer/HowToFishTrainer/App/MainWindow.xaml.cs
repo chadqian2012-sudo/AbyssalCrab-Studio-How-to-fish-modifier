@@ -96,6 +96,8 @@ public partial class MainWindow : Window, IComponentConnector
 		InitializeComponent();
 		DataContext = _viewModel;
         TrainerContent.OpenJournalRequested = OpenJournal;
+        SearchArea.RevealResult = TrainerContent.RevealSearchHit;
+        SearchArea.Dismissed = CloseSearch;
 		_crosshairOverlay = new CrosshairOverlay(_viewModel.Crosshair, () => _attachedProcessId, Dispatcher);
 		_viewModel.UpdateLicenseStatus(_license.Current);
         // The callback constructor starts immediately, including in preview windows.
@@ -163,8 +165,23 @@ public partial class MainWindow : Window, IComponentConnector
 
     private void HideToTray()
     {
+        SearchArea.Visibility = Visibility.Collapsed;
         _fishingWindow?.Hide();
         Hide();
+    }
+
+    private void Search_Click(object sender, RoutedEventArgs e) => SearchArea.ShowSearch();
+
+    private void CloseSearch()
+    {
+        SearchArea.Visibility = Visibility.Collapsed;
+        GlobalSearchButton.Focus();
+    }
+
+    protected override void OnPreviewKeyDown(KeyEventArgs e)
+    {
+        base.OnPreviewKeyDown(e);
+        if (!e.Handled) SearchArea.HandleWindowKey(e);
     }
 
     internal void BeginSessionShutdown() => _exitRequested = true;
@@ -785,17 +802,18 @@ public partial class MainWindow : Window, IComponentConnector
 		}
 	}
 
-	private static IEnumerable<T> EnumerateVisualTree<T>(DependencyObject root) where T : DependencyObject
+	internal static IEnumerable<T> EnumerateVisualTree<T>(DependencyObject root, bool visibleOnly = false) where T : DependencyObject
 	{
 		int count = VisualTreeHelper.GetChildrenCount(root);
 		for (int index = 0; index < count; index++)
 		{
 			DependencyObject child = VisualTreeHelper.GetChild(root, index);
+			if (visibleOnly && child is UIElement element && element.Visibility != Visibility.Visible) continue;
 			if (child is T typed)
 			{
 				yield return typed;
 			}
-			foreach (T nested in EnumerateVisualTree<T>(child))
+			foreach (T nested in EnumerateVisualTree<T>(child, visibleOnly))
 			{
 				yield return nested;
 			}

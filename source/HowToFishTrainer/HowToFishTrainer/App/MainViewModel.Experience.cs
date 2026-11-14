@@ -101,12 +101,40 @@ public sealed partial class MainViewModel
     public double WidgetLeft { get => _experience.WidgetLeft; set { _experience.WidgetLeft=value; ScheduleExperienceSave(); } }
     public double WidgetTop { get => _experience.WidgetTop; set { _experience.WidgetTop=value; ScheduleExperienceSave(); } }
     public bool CompactNavigation { get => _experience.CompactNavigation; set { if (_experience.CompactNavigation == value) return; _experience.CompactNavigation=value; OnPropertyChanged(); ScheduleExperienceSave(); } }
-    public string FeatureQuery { get => _featureQuery; set { if (Set(ref _featureQuery,value ?? "")) OnPropertyChanged(nameof(SearchResults)); } }
+    public string FeatureQuery
+    {
+        get => _featureQuery;
+        set
+        {
+            if (!Set(ref _featureQuery, value ?? "")) return;
+            if (SelectedSearchHit is { } selected && ResolveSearchHit(selected) == null) SelectedSearchHit = null;
+            OnPropertyChanged(nameof(SearchResults));
+            OnPropertyChanged(nameof(SearchHint));
+        }
+    }
     public IReadOnlyList<SearchHit> SearchResults => GetSearchResults();
+    public string SearchHint => string.IsNullOrWhiteSpace(FeatureQuery) ? "输入功能名称或关键词，例如「转速」「自瞄」。"
+        : SearchResults.Count == 0 ? "没有匹配的功能，请换个关键词。" : $"找到 {SearchResults.Count} 项功能";
     public SearchHit? SelectedSearchHit
     {
         get => _selectedSearchHit;
-        set { if (!Set(ref _selectedSearchHit,value) || value == null) return; var page=Pages.FirstOrDefault(p=>p.Category==value.Category); if(page!=null) SelectedPage=page; ExperienceStatus="已定位分类 · "+value.Title; }
+        set => Set(ref _selectedSearchHit, value == null ? null : ResolveSearchHit(value));
+    }
+
+    internal SearchHit? ResolveSearchHit(SearchHit hit)
+    {
+        var canonical = SearchResults.FirstOrDefault(result => result.Id == hit.Id);
+        if (canonical == null) return null;
+        if (AllFeatures.Any(feature => feature.Descriptor.Id == hit.Id) || HasDedicatedFeatureSection(hit.Id)) return canonical;
+        return FeatureRegistry.All.Any(feature => feature.Id == hit.Id) ? null : canonical;
+    }
+
+    public SearchHit? SelectSearchPage(SearchHit hit)
+    {
+        var canonical = ResolveSearchHit(hit);
+        if (canonical == null) return null;
+        SelectedPage = Pages.First(page => page.Category == canonical.Category);
+        return canonical;
     }
     public IReadOnlyList<FeatureItemViewModel> FeelFeatures { get { EnsureFeatureViews();return _feelView; } }
     public bool HasFeelFeatures => FeelFeatures.Count > 0;

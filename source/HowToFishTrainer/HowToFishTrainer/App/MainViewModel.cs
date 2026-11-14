@@ -849,7 +849,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         try
         {
             AllFeatures.Clear();
-            foreach (var item in FeatureRegistry.All.Where(x => x.Id != "fishing.skin_jackpot" && x.Id != "fun.slot_machine.rarity" && !TeleportCustomFeatureIds.Contains(x.Id) && !CombatCustomFeatureIds.Contains(x.Id)))
+            foreach (var item in FeatureRegistry.All.Where(x => !HasDedicatedFeatureSection(x.Id)))
             {
                 IReadOnlyList<CatalogOption> options = item.Id == "generation.item" ? _itemCatalog : item.Id == "generation.fish" ? _fishCatalog : Array.Empty<CatalogOption>();
                 int actionEpoch = _featureActionEpoch;

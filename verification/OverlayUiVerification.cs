@@ -11,8 +11,13 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -66,6 +71,14 @@ static class OverlayUiVerification
         if (root is T item) yield return item;
         for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
             foreach (var child in Find<T>(VisualTreeHelper.GetChild(root, i))) yield return child;
+    }
+    private static void ClickSearchResult(ListBox results, SearchHit hit, string action)
+    {
+        results.ScrollIntoView(hit); results.UpdateLayout(); Pump();
+        var row = (ListBoxItem)results.ItemContainerGenerator.ContainerFromItem(hit);
+        var button = Find<Button>(row).Single(b => AutomationProperties.GetName(b) == action);
+        ((IInvokeProvider)new ButtonAutomationPeer(button).GetPattern(PatternInterface.Invoke)!).Invoke();
+        Pump();
     }
     private static void Render(FrameworkElement root, string? path, int width = 1000, int height = 720)
     {
@@ -249,6 +262,30 @@ static class OverlayUiVerification
         Check(type.GetField("_trayIcon", instance)!.GetValue(window) == null && !timer.IsEnabled,
             "Preview creates neither a tray icon nor game polling");
         var runtime = new OverlayUiRuntime(); vm.Connect(runtime, CapabilityMatrix.For(SessionMode.Host, false));
+        var mainRoot = (FrameworkElement)window.Content;
+        var contentView = (TrainerContentView)window.FindName("TrainerContent");
+        var searchArea = (FrameworkElement)window.FindName("SearchArea");
+        var open = (Button)window.FindName("GlobalSearchButton");
+        var query = (TextBox)searchArea.FindName("FeatureSearch");
+        var results = (ListBox)searchArea.FindName("FeatureSearchResults");
+        var linkedOverlay = (StatusWidget)type.GetField("_statusWidget", instance)!.GetValue(window)!;
+        var linkedSearch = (FrameworkElement)linkedOverlay.FindName("SearchArea");
+        var linkedQuery = (TextBox)linkedSearch.FindName("FeatureSearch");
+        int beforeSearch = runtime.Calls.Count;
+        open.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        query.Text = "大陀螺"; Pump(); results.SelectedIndex = 0;
+        linkedQuery.Text = "红框";
+        Render(mainRoot, Path.Combine(output,"search-main-results.png"), 1200, 760);
+        var entityHit = vm.SearchResults.Single(h => h.Id == "view.entity_overlay.configure");
+        Check(searchArea.Visibility == Visibility.Visible && linkedSearch.Visibility == Visibility.Collapsed && query.Text == linkedQuery.Text &&
+            query.ActualWidth > 100 && results.Items.Contains(entityHit) && !vm.SearchResults.Any(h => h.Id == "player.spin.lock"),
+            "Rapid edits from both search fields share the current results without opening the other window");
+        ClickSearchResult(results, entityHit, "打开功能设置");
+        Render(mainRoot, Path.Combine(output,"search-main-entity-editor.png"), 1200, 760);
+        var distanceEditor = Find<TextBox>(Find<NumericInputBox>(contentView).Single(n => ReferenceEquals(n.Input,vm.EntityOverlayDistanceInput))).Single();
+        Check(searchArea.Visibility == Visibility.Collapsed && vm.SelectedPage.Category == "战斗" &&
+            distanceEditor.ActualHeight > 0 && InsideScrollViewports(distanceEditor,new Rect(distanceEditor.RenderSize)) &&
+            runtime.Calls.Count == beforeSearch, "Main-window keyword search reveals the entity distance editor without applying any control");
         vm.SoundEnabled = false;
         var health = vm.AllFeatures.Single(f => f.Descriptor.Id == "player.health.lock");
         health.Enabled = true; Pump();
@@ -382,18 +419,27 @@ static class OverlayUiVerification
         ((FrameworkElement)overlay.FindName("Launcher")).Visibility = Visibility.Collapsed;
         var tabs = (TabControl)overlay.FindName("OverlayTabs");
         var content = (FrameworkElement)overlay.Content;
+        var overlayView = (TrainerContentView)overlay.FindName("TrainerContent");
         int callsBeforeRender = runtime.Calls.Count;
         for (int i = 0; i < tabs.Items.Count; i++) { tabs.SelectedIndex = i; Render(content, Path.Combine(output, "overlay-tab-" + i + ".png")); }
         Check(tabs.Items.Count == 5, "Five overlay tabs construct and render");
         tabs.SelectedIndex = 1;
-        for (int i = 0; i < vm.Pages.Count; i++) { vm.SelectedPage = vm.Pages[i]; Render(content, Path.Combine(output, "all-page-" + i + ".png")); }
+        for (int i = 0; i < vm.Pages.Count; i++)
+        {
+            vm.SelectedPage = vm.Pages[i]; Render(content, Path.Combine(output, "all-page-" + i + ".png"));
+            vm.FeatureQuery = vm.SelectedPage.Title;
+            var hits = vm.SearchResults.Where(h => h.Category == vm.SelectedPage.Category).ToArray();
+            var missing = hits.Where(h => !overlayView.RevealSearchHit(h)).Select(h => h.Id).ToArray();
+            Check(hits.Length > 0 && missing.Length == 0, "Every indexed " + vm.SelectedPage.Title +
+                " result has a rendered destination; missing: " + string.Join(", ",missing));
+        }
+        vm.FeatureQuery = "";
         Check(vm.Pages.Count == 11, "All eleven dedicated and generic pages render from shared view");
         vm.SelectedPage = vm.Pages.First(p => p.Category == "玩家");
         var feature = vm.AllFeatures.First(f => f.Descriptor.Id == "player.move.multiplier");
         feature.ValueInput.Text = "2.75";
         Render(content, Path.Combine(output, "shared-overlay-player.png"));
         Render(secondView, Path.Combine(output, "shared-main-player.png"), 1400, 800);
-        var overlayView = (TrainerContentView)overlay.FindName("TrainerContent");
         Check(Find<NumericInputBox>(overlayView).Any(n => ReferenceEquals(n.Input, feature.ValueInput)), "Overlay uses the shared numeric input owner");
         Check(Find<NumericInputBox>(secondView).Any(n => ReferenceEquals(n.Input, feature.ValueInput)), "Main page uses the same numeric input owner");
         Check(feature.ValueInput.Text == "2.75", "Rendering both hosts preserves numeric draft");
@@ -515,54 +561,65 @@ static class OverlayUiVerification
         vm.OverlayPanelName = "搜索快捷检查"; vm.CreateOverlayPanelCommand.Execute(null); tabs.SelectedIndex = 0;
         Render(content, Path.Combine(output, "search-closed-620.png"), 620, 680);
         var searchArea = (FrameworkElement)overlay.FindName("SearchArea");
-        var featureSearch = (TextBox)overlay.FindName("FeatureSearch");
-        var featureSearchResults = (ComboBox)overlay.FindName("FeatureSearchResults");
-        var searchHint = (TextBlock)overlay.FindName("SearchHint");
-        var mainExperienceBar = Find<ExperienceBar>(secondView).Single();
-        var mainFeatureSearch = (TextBox)mainExperienceBar.FindName("FeatureSearch");
-        var mainExperienceExpander = Find<Expander>(mainExperienceBar).Single();
+        var searchButton = (Button)overlay.FindName("GlobalSearchButton");
+        var inputSource = HwndSource.FromHwnd(new WindowInteropHelper(overlay).Handle)!;
+        var featureSearch = (TextBox)searchArea.FindName("FeatureSearch");
+        var featureSearchResults = (ListBox)searchArea.FindName("FeatureSearchResults");
+        var searchHint = (TextBlock)searchArea.FindName("SearchHint");
         var activeSummary = (Expander)overlay.FindName("ActiveSummary");
         double closedSearchHeight = tabs.ActualHeight;
         Check(searchArea.Visibility == Visibility.Collapsed && !activeSummary.IsExpanded, "Search and active-feature details start collapsed");
-        Find<Button>(content).Single(b => Equals(b.Content, "搜索")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        searchButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         vm.SelectedOverlayFeatureChoice = vm.OverlayFeatureChoices.Single(choice => choice.Id == "player.health.lock");
         featureSearch.Text = "移动"; Pump();
         var searchHit = vm.SearchResults.Single(hit => hit.Id == "player.move.multiplier");
         featureSearchResults.SelectedItem = searchHit;
         Render(content, Path.Combine(output, "search-results-620.png"), 620, 680);
         Check(searchArea.Visibility == Visibility.Visible && featureSearch.ActualWidth > 100 && Equals(featureSearchResults.SelectedItem, searchHit) &&
-            vm.FeatureQuery == "移动" && featureSearch.Text == "移动" && mainFeatureSearch.Text == "移动",
-            "Header search opens a usable 620-wide search field with the shared selected result");
-        Check(searchHint.Text == "从列表选择结果，可打开分类或加入当前面板。", "Matching search explains how to select a result");
-        var addSearch = Find<Button>(searchArea).Single(b => Equals(b.Content, "加入面板"));
-        addSearch.Command!.Execute(addSearch.CommandParameter); Pump();
+            vm.FeatureQuery == "移动" && vm.SelectedPage.Category == "鱼类生成" && tabs.SelectedIndex == 0,
+            "Selecting a global result at 620 pixels leaves the original page and overlay tab visible");
+        var escape = new KeyEventArgs(Keyboard.PrimaryDevice,inputSource,0,Key.Escape) { RoutedEvent = Keyboard.PreviewKeyDownEvent };
+        featureSearch.RaiseEvent(escape);
+        Check(escape.Handled && searchArea.Visibility == Visibility.Collapsed && vm.SelectedPage.Category == "鱼类生成" && tabs.SelectedIndex == 0,
+            "Escape closes the search without navigating or changing overlay tabs");
+        searchButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Render(content,null,620,680);
+        featureSearchResults.SelectedIndex = -1;
+        var down = new KeyEventArgs(Keyboard.PrimaryDevice,inputSource,0,Key.Down) { RoutedEvent = Keyboard.PreviewKeyDownEvent };
+        featureSearch.RaiseEvent(down);
+        Check(featureSearch.Focusable && featureSearch.IsTabStop && down.Handled && featureSearchResults.SelectedIndex == 0 &&
+            tabs.SelectedIndex == 0 && vm.SelectedPage.Category == "鱼类生成",
+            "The keyboard-focusable query field selects a result with Down without opening it");
+        ClickSearchResult(featureSearchResults, searchHit, "加入当前快捷面板");
         Check(vm.SelectedOverlayPanel!.Items.Count == 1 && ReferenceEquals(vm.SelectedOverlayPanel.Items.Single().Feature, feature),
             "Search add action reuses the existing feature owner in the selected shortcut panel");
-        var openSearch = Find<Button>(searchArea).Single(b => Equals(b.Content, "打开分类"));
-        openSearch.Command!.Execute(openSearch.CommandParameter); Pump();
-        Check(tabs.SelectedIndex == 1 && vm.SelectedPage.Category == "玩家" && ReferenceEquals(vm.AllFeatures.Single(f => f.Descriptor.Id == searchHit.Id), feature),
-            "Search open action selects the full-feature tab without replacing the shared feature");
-        mainExperienceExpander.IsExpanded = true;
-        Render(secondView, Path.Combine(output, "search-main-results.png"), 1400, 800);
-        foreach (var editor in new[] { featureSearch, mainFeatureSearch })
+        string emptyMessage = "";
         foreach (string query in new[] { "", "no-matching-feature-78364" })
         {
-            editor.Text = "移动"; Pump(); featureSearchResults.SelectedItem = searchHit; Pump();
-            editor.Text = query; Pump();
-            string source = ReferenceEquals(editor, featureSearch) ? "overlay" : "main";
-            Render(content, Path.Combine(output, (source == "main" ? "main-input-" : "") + (query.Length == 0 ? "search-cleared-620.png" : "search-no-results-620.png")), 620, 680);
-            Check(vm.FeatureQuery == query && featureSearch.Text == query && mainFeatureSearch.Text == query,
-                "Editing " + source + " selected search preserves both inputs: expected=" + JsonSerializer.Serialize(query) +
-                ", model=" + JsonSerializer.Serialize(vm.FeatureQuery) + ", overlay=" + JsonSerializer.Serialize(featureSearch.Text) +
-                ", main=" + JsonSerializer.Serialize(mainFeatureSearch.Text));
-            Check(vm.SelectedSearchHit == null && !openSearch.IsEnabled && !addSearch.IsEnabled && vm.SelectedOverlayPanel!.Items.Count == 1 && vm.SelectedOverlayFeatureChoice?.Id == "player.health.lock",
-                (query.Length == 0 ? "Clearing " : "Unmatched ") + source + " search clears selection and disables both actions without adding the settings-page selection");
-            Check(searchHint.Text == (query.Length == 0 ? "输入功能名称、说明、分类或 ID 开始搜索。" : "没有匹配的功能，请换个关键词。"),
-                source + " search distinguishes an empty query from no matching result");
+            featureSearch.Text = searchHit.Id; Pump(); featureSearchResults.SelectedItem = vm.SearchResults.Single(); Pump();
+            featureSearch.Text = query;
+            Render(content, Path.Combine(output, query.Length == 0 ? "search-cleared-620.png" : "search-no-results-620.png"), 620, 680);
+            Check(vm.FeatureQuery == query && featureSearchResults.Items.Count == 0 && featureSearchResults.SelectedItem == null &&
+                vm.SelectedOverlayPanel!.Items.Count == 1 && vm.SelectedOverlayFeatureChoice?.Id == "player.health.lock",
+                "Cleared and unmatched searches remove stale result actions without changing existing shortcuts: " + query);
+            if (query.Length == 0) emptyMessage = searchHint.Text;
+            else Check(!string.IsNullOrWhiteSpace(emptyMessage) && !string.IsNullOrWhiteSpace(searchHint.Text) && emptyMessage != searchHint.Text,
+                "Empty and unmatched searches give distinct visible guidance");
         }
-        mainExperienceExpander.IsExpanded = false;
+        featureSearch.Text = "陀螺 转速"; Pump();
+        var spinHit = vm.SearchResults.Single(h => h.Id == "player.spin.lock");
+        var spinFeature = vm.AllFeatures.Single(f => f.Descriptor.Id == spinHit.Id);
+        string originalSpin = spinFeature.SpinSpeedText;
+        spinFeature.SpinSpeedText = "-";
+        Render(content, null, 620, 680);
+        ClickSearchResult(featureSearchResults, spinHit, "打开功能设置");
+        Render(content, Path.Combine(output, "search-spin-editor-620.png"), 620, 680);
+        var spinEditor = Find<TextBox>(overlayView).Single(b => ReferenceEquals(b.DataContext, spinFeature) && AutomationProperties.GetName(b) == "大陀螺转速");
+        Check(tabs.SelectedIndex == 1 && vm.SelectedPage.Category == "玩家" && searchArea.Visibility == Visibility.Collapsed &&
+            spinEditor.ActualHeight > 0 && spinEditor.Text == "-" && InsideScrollViewports(spinEditor,new Rect(spinEditor.RenderSize)),
+            "Opening the spin-speed result reveals its actual editor through the nested viewports and preserves its unfinished draft");
+        spinFeature.SpinSpeedText = originalSpin;
         tabs.SelectedIndex = 0;
-        Find<Button>(searchArea).Single(b => Equals(b.ToolTip, "收起搜索")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Render(content, Path.Combine(output, "search-hidden-620.png"), 620, 680);
         Check(searchArea.Visibility == Visibility.Collapsed && Math.Abs(tabs.ActualHeight - closedSearchHeight) < 1,
             "Closing search returns its vertical space to the tab content");
@@ -638,7 +695,7 @@ static class OverlayUiVerification
         Render(content, Path.Combine(output, "invalid-shortcut-620.png"), 620, 680);
         Check(!teleportAction.IsEnabled && Find<TextBlock>(content).Any(t => t.DataContext == teleportAction.DataContext && t.Text == "已失效，请重新添加"),
             "Missing saved-point reference disables its main action and shows how to repair it");
-        Find<Button>(content).Single(b => Equals(b.Content, "搜索")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        searchButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         activeSummary.IsExpanded = true;
         foreach (int shortWidth in new[] { 620, 600 })
         {
@@ -715,8 +772,6 @@ static class OverlayUiVerification
         Point hotkeyPosition = hotkeyEditor.TranslatePoint(new Point(), settingsViewport);
         Check(hotkeyEditor.IsEnabled && hotkeyEditor.Focusable && hotkeyEditor.IsTabStop && hotkeyEditor.ActualWidth >= 150 && hotkeyPosition.Y >= -1 && hotkeyPosition.Y + hotkeyEditor.ActualHeight <= settingsViewport.ActualHeight + 1,
             "600 by 380 settings scrolls the keyboard-focusable hotkey editor completely into view");
-        Check(featureSearch.Focusable && featureSearch.IsTabStop && featureSearchResults.Focusable && featureSearchResults.IsTabStop,
-            "Separate search input and result selector remain in keyboard tab navigation");
         Check(!Parses("Ctrl+F"), "Overlay toggle cannot reserve its local search shortcut Ctrl+F");
         tabs.SelectedIndex = 1;
         vm.SelectedPage = vm.Pages.First(p => p.Category == "玩家");
@@ -731,14 +786,14 @@ static class OverlayUiVerification
         Check(allFeaturesScroll.ScrollableHeight < 1, "600 by 680 full-feature page adds no outer scrollbar with the experience controls expanded");
         foreach (bool headerSearchOpen in new[] { false, true })
         {
-            if (headerSearchOpen) Find<Button>(content).Single(b => Equals(b.Content, "搜索")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            if (headerSearchOpen) searchButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Render(content, Path.Combine(output, "short-all-features-" + headerSearchOpen + ".png"), 600, 380);
-            var overlayFeatureSearch = (TextBox)overlayExperience.FindName("FeatureSearch");
-            overlayFeatureSearch.BringIntoView(); Pump();
-            Render(content, Path.Combine(output, "short-experience-search-" + headerSearchOpen + ".png"), 600, 380);
-            Point searchPosition = overlayFeatureSearch.TranslatePoint(new Point(), allFeaturesViewport);
-            Check(overlayFeatureSearch.ActualWidth > 100 && overlayFeatureSearch.ActualHeight > 0 && searchPosition.Y >= -1 && searchPosition.Y + overlayFeatureSearch.ActualHeight <= allFeaturesViewport.ActualHeight + 1,
-                "600 by 380 full-feature page scrolls its experience search input into view with header search " + headerSearchOpen);
+            var presetEditor = Find<TextBox>(overlayExperience).Single(b => b.GetBindingExpression(TextBox.TextProperty)?.ParentBinding.Path.Path == nameof(vm.PresetName));
+            presetEditor.BringIntoView(); Pump();
+            Render(content, Path.Combine(output, "short-experience-preset-" + headerSearchOpen + ".png"), 600, 380);
+            Point presetPosition = presetEditor.TranslatePoint(new Point(), allFeaturesViewport);
+            Check(presetEditor.ActualWidth > 0 && presetEditor.ActualHeight > 0 && presetPosition.Y >= -1 && presetPosition.Y + presetEditor.ActualHeight <= allFeaturesViewport.ActualHeight + 1,
+                "600 by 380 full-feature page scrolls its preset editor into view with header search " + headerSearchOpen);
             var feelEditor = Find<NumericInputBox>(overlayView).Single(n => ReferenceEquals(n.Input, feature.ValueInput));
             var feelTextbox = Find<TextBox>(feelEditor).Single();
             feelTextbox.BringIntoView(); Pump();
@@ -774,7 +829,7 @@ static class OverlayUiVerification
         listener.Flush(); string bindingErrors = errors.ToString(); File.WriteAllText(Path.Combine(output, "binding-errors.txt"), bindingErrors);
         Check(string.IsNullOrWhiteSpace(bindingErrors), "No WPF binding errors during all overlay and feature-page rendering");
         vm.CloseExperience(); vm.ClosePreferences(); main.Close();
-        File.WriteAllText(Path.Combine(output, "ui-verification.json"), JsonSerializer.Serialize(new { verificationVersion = "20261114-tray-lifecycle-ui-v14", appAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(StatusWidget).Assembly.Location))), runnerAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(OverlayUiVerification).Assembly.Location))), checks = Checks, images = Images, realGameOpened = false, desktopInputSent = false, formalPreferencesUsed = false }, new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(Path.Combine(output, "ui-verification.json"), JsonSerializer.Serialize(new { verificationVersion = "20261114-global-search-ui-v15", appAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(StatusWidget).Assembly.Location))), runnerAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(OverlayUiVerification).Assembly.Location))), checks = Checks, images = Images, realGameOpened = false, desktopInputSent = false, formalPreferencesUsed = false }, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine("PASS " + Checks.Count + " UI checks; " + Images.Count + " rendered images");
         return 0;
     }

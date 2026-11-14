@@ -168,7 +168,7 @@
                                 </Style.Triggers>
                               </Style>
 <DataTemplate x:Key="FeatureCardTemplate">
-                      <Border Style="{StaticResource FeatureCardStyle}">
+                      <Border AutomationProperties.AutomationId="{Binding Descriptor.Id}" Style="{StaticResource FeatureCardStyle}">
                         <Grid>
                           <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>

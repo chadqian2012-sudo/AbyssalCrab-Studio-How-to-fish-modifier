@@ -60,9 +60,13 @@ r22 的传送点和参数预设页保留列表的可见高度，内容较多时�
 
 In r22, teleport and preset pages keep a finite visible list area and let the outer page scroll to all buttons. In short windows, the full-feature page can also scroll to its search field and feature cards after the preset shortcut area expands; taller windows do not gain an unnecessary outer scrollbar. Status height is bounded so multiline errors cannot consume the editors, while tooltips retain the full message. Panel selectors and lists also expose complete panel names through tooltips.
 
-悬浮窗展开后，点击顶部搜索按钮或按 `Ctrl+F`。可按名称、说明、分类或 ID 搜索，选择结果后点击“打开分类”或“加入面板”。打开分类不会自动滚动并高亮具体卡片，也不会执行该功能；复杂功能进入其完整设置分类。主窗口与悬浮窗都用独立输入框填写搜索文字，再从结果列表选择。没有匹配结果时保留文字，方便继续修改；清空搜索或没有匹配结果时，两按钮不可用。搜索下方会提示未输入、已找到结果或没有匹配。`Ctrl+F` 只在展开面板收到按键时处理，不占用全局快捷键。
+在主窗口或展开的悬浮窗点击“搜索”，也可以按 `Ctrl+F`。输入名称、关键词、分类或功能 ID，例如“自瞄”或“陀螺 转速”。结果随输入更新。点击结果，或用 ↑ / ↓ 选择并按 Enter，会在当前窗口滚动到对应设置并短暂描边。有数值可编辑时，光标落到输入框。打开结果只定位，应用或开启功能仍由你操作。
 
-While the panel is expanded, use the search button or `Ctrl+F`. Search by name, description, category or ID, select a result, then open its category or add it to the selected panel. Opening a category does not execute the feature or scroll to and highlight a particular card; complex features lead to their full settings category. Both windows use a separate text field and result selector. Unmatched text stays visible for further editing; both buttons are disabled for an empty search or no matching result. The hint distinguishes empty input, matching results and no matches. `Ctrl+F` is local to the expanded panel, not a global hotkey.
+Click Search or press `Ctrl+F` in the main window or expanded overlay. Results update as you enter a feature name, keywords, category or feature ID. Click a result, or use the arrow keys and Enter, to scroll to its settings in the same window. A brief outline marks the destination, and an editable number field receives focus when available. Applying a setting or enabling a feature still takes a separate action.
+
+支持加入快捷面板的结果，可点右侧“＋”加入当前面板。Esc 收起搜索。两个窗口共享搜索文字，各自控制搜索栏的展开和收起。
+
+Use the plus button on a supported result to add it to the current shortcut panel. Esc closes search. Both windows share the query and open or close their search bars independently.
 
 快捷项直接显示原功能状态。断线时传送项会提示当前会话不可传送；操作进行中或引用已被删除时，也有对应提示，不能把“没有操作进行中”误当成已经连接。暂时不可执行的复杂功能仍能打开设置。快捷页可展开“当前持续功能开关”查看摘要；该摘要只反映程序记录的开关，不证明游戏中实际生效。载入预设等待期间，主窗口和快捷面板都不能编辑参数，结束后恢复编辑。
 
@@ -92,9 +96,9 @@ This guide summarizes V1.1.37 features and their boundaries from the delivery do
 
 ## 分类与搜索 | Categories and Search
 
-主界面有 11 个顶部分类。分类可以收起，功能说明默认折叠。全局搜索支持功能名称、说明、功能 ID 和分类，并可定位到匹配分类。
+主界面有 11 个顶部分类。分类可以收起，功能说明默认折叠。搜索结果可以直接定位到普通功能卡片或专用页面中的设置项。
 
-The main window has 11 top-level categories. Categories can be collapsed, and feature descriptions are collapsed by default. Global search matches feature names, descriptions, feature IDs, and categories, then navigates to a match.
+The main window has 11 top-level categories. Categories can be collapsed, and feature descriptions are collapsed by default. Search results lead directly to the feature card or the relevant control on a dedicated page.
 
 ## 参数预设 | Parameter Presets
 
