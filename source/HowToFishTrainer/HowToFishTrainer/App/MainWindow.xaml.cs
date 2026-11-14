@@ -179,10 +179,12 @@ public partial class MainWindow : Window, IComponentConnector
             return;
         }
         _appearanceClosing = true;
+        (Application.Current as App)?.StopTrayActivation();
         _timer.Stop();
         IsEnabled = false;
         if (_fishingWindow != null) _fishingWindow.IsEnabled = false;
         if (_trayMenu != null) _trayMenu.Enabled = false;
+        _fishingJournal?.Dispose();
         // Save the user's enabled switches before disconnect invalidates pending operations.
         CloseExperienceUi();
         _viewModel.ClosePreferences();
@@ -469,7 +471,7 @@ public partial class MainWindow : Window, IComponentConnector
 		catch (Exception exception)
 		{
             if (_appearanceClosing || (connected != null && !IsCurrentBridge(connected)))
-            { if (connected != null) await connected.DisposeAsync(); return; }
+                return;
 			string text = BridgeConnectionDiagnostics.Describe(exception);
 			_attachPolicy.RecordFailure(processId, text);
 			TryLogBridgeFailure(processId, exception);
@@ -509,7 +511,7 @@ public partial class MainWindow : Window, IComponentConnector
 		}
 		catch (Exception innerException)
 		{
-            if (!IsCurrentBridge(bridge)) { await bridge.DisposeAsync(); return; }
+            if (!IsCurrentBridge(bridge)) return;
 			RuntimeBridgeConnectException exception = new RuntimeBridgeConnectException(RuntimeBridgeConnectStage.SessionRefresh, innerException);
 			string text = BridgeConnectionDiagnostics.Describe(exception);
 			int? attachedProcessId = _attachedProcessId;
