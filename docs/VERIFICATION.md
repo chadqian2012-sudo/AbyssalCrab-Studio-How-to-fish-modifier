@@ -1,5 +1,16 @@
 # 当前交付验证范围 | Current Verification Scope
 
+## 功能搜索的键盘焦点与中文输入法仍待人工确认 | Search focus and Chinese IME need a desktop check
+
+离线界面检查逐项打开了 11 个分类中的 85 个搜索目标。搜索“红框”能定位显示距离，搜索“大陀螺”能定位转速输入框并保留正在编辑的草稿。两个打包版本的 450 个内部文件逐项一致。从成品提取的程序通过了全部 600 项行为检查和 145 项界面检查，界面绑定错误为零。
+
+All 85 search destinations across the 11 categories were located in the rendered interface. The entity-overlay and spin-speed cases also checked the editor's position and the unfinished spin-speed draft. All 450 payloads match between the default and compressed executables. The packaged application passed all 600 behavior checks and 145 off-screen UI checks with no binding errors.
+
+- [ ] 在主窗口按 `Ctrl+F`，用中文输入法输入“转速”。确认选字用的方向键、Enter 和 Esc 先交给输入法。选字结束后，用方向键选“大陀螺”，按 Enter 应看到转速输入框和短暂描边。能编辑时，直接输入应落在这个框里。
+- [ ] 在展开的小悬浮窗重复操作，搜索“红框”并打开“实体标注”。确认距离输入框在窗口内可见，主窗口没有被拉到前台；搜索与输入时游戏角色没有移动或攻击。
+
+In the main window, check Chinese IME candidate selection before testing arrow keys and Enter on the search results. Confirm that the spin-speed editor receives input when enabled. Repeat in a small overlay with the entity-display distance field. Verify that the field stays visible, the main window stays in the background, and text entry does not trigger movement or attacks.
+
 ## 系统托盘的真实桌面交互仍需人工确认 | Tray desktop acceptance remains manual
 
 托盘版沿用 r24 维护版的 Runtime。本轮只允许代码和离线检查；自动测试使用独立参数目录与预览模式，不连接游戏或向桌面发送输入。

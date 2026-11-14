@@ -41,11 +41,19 @@ public sealed partial class StatusWidget : Window, IDisposable
         ExpandedSurface.RenderTransform = _expandedScale;
         DataContext = vm;
         TrainerContent.OpenJournalRequested = tab => { SetExpanded(false, false); openJournal?.Invoke(tab); };
+        SearchArea.Dismissed = CloseSearch;
+        SearchArea.RevealResult = hit =>
+        {
+            OverlayTabs.SelectedIndex = 1;
+            OverlayTabs.UpdateLayout();
+            return TrainerContent.RevealSearchHit(hit);
+        };
         Width = Height = LauncherSize;
         _timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(200) };
         _timer.Tick += Tick;
         _vm.PropertyChanged += ModelChanged;
         _vm.OverlayNavigationRequested += Navigate;
+        PreviewKeyDown += HandleSearchKey;
         KeyDown += HandleKey;
         LostMouseCapture += HandleLostCapture;
         new WindowInteropHelper(this).EnsureHandle();
@@ -154,6 +162,7 @@ public sealed partial class StatusWidget : Window, IDisposable
         if (expanded && !hasGameClient) { _vm.OverlayStatus = "进入游戏窗口后可展开游戏面板"; return; }
         bool wasActive = IsActive;
         _expanded = expanded;
+        if (!expanded) SearchArea.Visibility = Visibility.Collapsed;
         int animationVersion = ++_expandAnimationVersion;
         StopExpansionAnimation();
         Launcher.Visibility = expanded ? Visibility.Collapsed : Visibility.Visible;
@@ -234,19 +243,16 @@ public sealed partial class StatusWidget : Window, IDisposable
         PlaceInsideGame(rect, origin, scale);
     }
     private void Navigate(string category) { OverlayTabs.SelectedIndex = category == "@presets" ? 3 : 1; SetExpanded(true, false); }
+    private void HandleSearchKey(object sender, KeyEventArgs e)
+    {
+        if (!e.Handled && _expanded) SearchArea.HandleWindowKey(e);
+    }
     private void HandleKey(object sender, KeyEventArgs e)
     {
-        if (e.Handled || !_expanded) return;
-        if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control) { ShowSearch(); e.Handled = true; }
-        else if (e.Key == Key.Escape) { SetExpanded(false, true); e.Handled = true; }
+        if (!e.Handled && _expanded && e.Key == Key.Escape) { SetExpanded(false, true); e.Handled = true; }
     }
-    private void ShowSearch()
-    {
-        SearchArea.Visibility = Visibility.Visible;
-        FeatureSearch.Focus(); FeatureSearch.SelectAll();
-    }
-    private void Search_Click(object sender, RoutedEventArgs e) => ShowSearch();
-    private void CloseSearch_Click(object sender, RoutedEventArgs e) { SearchArea.Visibility = Visibility.Collapsed; OverlayTabs.Focus(); }
+    private void Search_Click(object sender, RoutedEventArgs e) => SearchArea.ShowSearch();
+    private void CloseSearch() { SearchArea.Visibility = Visibility.Collapsed; GlobalSearchButton.Focus(); }
     private void Collapse_Click(object sender, RoutedEventArgs e) => SetExpanded(false, true);
     private void Settings_Click(object sender, RoutedEventArgs e) => OverlayTabs.SelectedIndex = 4;
     private void TeleportPage_Click(object sender, RoutedEventArgs e) { _vm.SelectedPage = _vm.Pages.First(p => p.Category == "世界传送"); OverlayTabs.SelectedIndex = 1; }
@@ -257,6 +263,6 @@ public sealed partial class StatusWidget : Window, IDisposable
         _disposed = true; _expandAnimationVersion++; StopExpansionAnimation(); _timer.Stop(); _timer.Tick -= Tick;
         SyncHotkey(false); _source?.RemoveHook(WindowMessage);
         _vm.PropertyChanged -= ModelChanged; _vm.OverlayNavigationRequested -= Navigate;
-        KeyDown -= HandleKey; LostMouseCapture -= HandleLostCapture; _dragElement?.ReleaseMouseCapture(); Close();
+        PreviewKeyDown -= HandleSearchKey; KeyDown -= HandleKey; LostMouseCapture -= HandleLostCapture; _dragElement?.ReleaseMouseCapture(); Close();
     }
 }

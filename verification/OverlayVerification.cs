@@ -144,10 +144,19 @@ static class OverlayVerification
         vm.AddFeatureToOverlayCommand.Execute(hit); vm.AddFeatureToOverlayCommand.Execute(hit);
         Check(panel.Items.Count == 1 && ReferenceEquals(panel.Items.Single().Feature, move),
             "Search pins reuse the existing feature instance and duplicate pin handling");
-        string? navigated = null; vm.OverlayNavigationRequested += category => navigated = category;
         Select(vm, "钓鱼");
-        vm.OpenOverlaySearchCommand.Execute(hit with { Category = "世界传送" });
-        Check(navigated == "玩家" && vm.SelectedPage.Category == "玩家",
+        var initialPage = vm.SelectedPage;
+        foreach (var (query, id) in new[] { ("锁血", "player.health.lock"), ("陀螺 转速", "player.spin.lock"),
+            ("武器战斗 自瞄", "combat.aim_assist"), ("红框", "view.entity_overlay.configure") })
+        {
+            vm.FeatureQuery = query;
+            vm.SelectedSearchHit = vm.SearchResults.Single(h => h.Id == id);
+            Check(vm.SelectedPage == initialPage && runtime.Commands.Count == sent,
+                "Selecting keyword match " + query + " leaves the page and game state unchanged");
+        }
+        vm.FeatureQuery = move.Descriptor.Id;
+        var resolved = vm.SelectSearchPage(hit with { Category = "世界传送" });
+        Check(resolved?.Id == hit.Id && resolved.Category == "玩家" && vm.SelectedPage.Category == "玩家",
             "Search navigation resolves the current feature category rather than trusting result text");
         foreach (string id in new[] { "world.position.read", "world.teleport", "world.island.load", "combat.aim_assist", "fishing.skin_jackpot", "fun.slot_machine.rarity" }) {
             vm.FeatureQuery = id;
@@ -156,15 +165,17 @@ static class OverlayVerification
         Check(panel.Shortcuts.Count == 4 && panel.Shortcuts.Count(s => s.Kind == "page") == 3 &&
             panel.Shortcuts.Where(s => s.Kind == "page").Select(s => s.Key).OrderBy(s => s).SequenceEqual(new[] { "世界传送", "战斗", "幸运娱乐" }.OrderBy(s => s)),
             "Dedicated controls map to their existing settings pages and deduplicate by page");
-        vm.FeatureQuery = "world.teleport"; vm.OpenOverlaySearchCommand.Execute(vm.SearchResults.Single(h => h.Id == "world.teleport"));
-        Check(navigated == "世界传送" && vm.SelectedPage.Category == "世界传送" && runtime.Commands.Count == sent,
+        vm.FeatureQuery = "world.teleport"; resolved = vm.SelectSearchPage(vm.SearchResults.Single(h => h.Id == "world.teleport"));
+        Check(resolved?.Id == "world.teleport" && vm.SelectedPage.Category == "世界传送" && runtime.Commands.Count == sent,
             "Search pinning and opening settings never executes a gameplay action");
-        int count = panel.Shortcuts.Count; navigated = null;
+        int count = panel.Shortcuts.Count;
         var missing = new SearchHit("Missing", "玩家", "missing.feature", "");
-        vm.AddFeatureToOverlayCommand.Execute(missing); vm.OpenOverlaySearchCommand.Execute(missing);
+        vm.AddFeatureToOverlayCommand.Execute(missing); var missingResult = vm.SelectSearchPage(missing);
+        vm.FeatureQuery = move.Descriptor.Id;
         vm.AllFeatures.Remove(move);
-        vm.AddFeatureToOverlayCommand.Execute(hit); vm.OpenOverlaySearchCommand.Execute(hit);
-        Check(panel.Shortcuts.Count == count && navigated == null && vm.OverlayStatus.Contains("已失效") && runtime.Commands.Count == sent,
+        vm.AddFeatureToOverlayCommand.Execute(hit); var removedResult = vm.SelectSearchPage(hit);
+        Check(panel.Shortcuts.Count == count && missingResult == null && removedResult == null && vm.SelectedPage.Category == "世界传送" &&
+            vm.OverlayStatus.Contains("已失效") && runtime.Commands.Count == sent,
             "Missing or removed ordinary features cannot become apparently valid page shortcuts");
         Close(vm);
     }

@@ -83,29 +83,12 @@
             </Grid>
           </Border>
           <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0">
-            <Button Content="搜索" Click="Search_Click" Style="{StaticResource GhostButton}" Padding="10,7" Margin="0,0,4,0" ToolTip="搜索功能并加入快捷面板 · Ctrl + F"/>
+            <Button x:Name="GlobalSearchButton" Content="搜索" Click="Search_Click" Style="{StaticResource GhostButton}" Padding="10,7" Margin="0,0,4,0" ToolTip="搜索功能并加入快捷面板 · Ctrl + F"/>
             <Button Content="紧急停用" Command="{Binding EmergencyDisableCommand}" Foreground="{DynamicResource DangerBrush}" Background="{DynamicResource GlassCardBrush}" Padding="10,7" ToolTip="立即停用持续功能 · Ctrl + Shift + F12"/>
             <Button Content="收起" Click="Collapse_Click" Style="{StaticResource GhostButton}" Padding="10,7" Margin="4,0,0,0" ToolTip="收起并返回游戏 · Esc"/>
           </StackPanel>
         </Grid>
-        <Border x:Name="SearchArea" Grid.Row="1" Visibility="Collapsed" Background="{DynamicResource GlassCardBrush}" BorderBrush="{DynamicResource GlassEdgeChromeBrush}" BorderThickness="1" CornerRadius="12" Padding="10" Margin="0,0,0,10">
-          <Grid>
-            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <TextBox x:Name="FeatureSearch" Grid.ColumnSpan="3" Text="{Binding FeatureQuery, UpdateSourceTrigger=PropertyChanged}" Height="36" Padding="10,3" VerticalContentAlignment="Center" ToolTip="搜索功能名称、说明、分类或 ID" AutomationProperties.Name="搜索修改功能"/>
-            <ComboBox x:Name="FeatureSearchResults" Grid.Row="1" ItemsSource="{Binding SearchResults}" SelectedItem="{Binding SelectedSearchHit}" DisplayMemberPath="Title" Height="34" Margin="0,6,0,0" ToolTip="选择搜索结果" AutomationProperties.Name="功能搜索结果"/>
-            <Button Grid.Row="1" Grid.Column="1" Content="打开分类" Command="{Binding OpenOverlaySearchCommand}" CommandParameter="{Binding SelectedSearchHit}" Padding="10,6" Margin="6,0,0,0"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource GhostButton}"><Style.Triggers><DataTrigger Binding="{Binding SelectedSearchHit}" Value="{x:Null}"><Setter Property="IsEnabled" Value="False"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
-            <Button Grid.Row="1" Grid.Column="2" Content="加入面板" Command="{Binding AddFeatureToOverlayCommand}" CommandParameter="{Binding SelectedSearchHit}" Padding="10,6" Margin="4,0,0,0"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource GhostButton}"><Style.Triggers><DataTrigger Binding="{Binding SelectedSearchHit}" Value="{x:Null}"><Setter Property="IsEnabled" Value="False"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
-            <Button Grid.Column="3" Content="×" Click="CloseSearch_Click" Style="{StaticResource IconButton}" Width="28" Height="28" Margin="4,0,0,0" ToolTip="收起搜索" AutomationProperties.Name="收起功能搜索"/>
-            <TextBlock x:Name="SearchHint" Grid.Row="2" Grid.ColumnSpan="4" FontSize="10" TextWrapping="Wrap" Margin="0,6,0,0"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource Muted}">
-              <Setter Property="Text" Value="从列表选择结果，可打开分类或加入当前面板。"/>
-              <Style.Triggers>
-                <DataTrigger Binding="{Binding SearchResults.Count}" Value="0"><Setter Property="Text" Value="没有匹配的功能，请换个关键词。"/></DataTrigger>
-                <DataTrigger Binding="{Binding FeatureQuery}" Value=""><Setter Property="Text" Value="输入功能名称、说明、分类或 ID 开始搜索。"/></DataTrigger>
-              </Style.Triggers>
-            </Style></TextBlock.Style></TextBlock>
-          </Grid>
-        </Border>
+        <app:FeatureSearchBox x:Name="SearchArea" Grid.Row="1" Visibility="Collapsed" MaxHeight="170" Margin="0,0,0,6"/>
         <TabControl x:Name="OverlayTabs" Grid.Row="2" Background="Transparent" BorderThickness="0" Padding="0,10,0,0">
           <TabControl.Template><ControlTemplate TargetType="TabControl"><Grid>
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition/></Grid.RowDefinitions>

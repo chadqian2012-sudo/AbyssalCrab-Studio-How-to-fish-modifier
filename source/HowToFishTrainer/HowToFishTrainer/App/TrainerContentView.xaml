@@ -120,7 +120,7 @@
           </Grid>
           <app:ExperienceBar Grid.Row="1"/>
           <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-          <Grid Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" IsEnabled="{Binding CanEditParameters}">
+          <Grid x:Name="FeatureWorkspace" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" IsEnabled="{Binding CanEditParameters}">
             <Grid.Style><Style TargetType="Grid"><Style.Triggers>
               <DataTrigger Binding="{Binding IsCatalogPage}" Value="True"><Setter Property="MinWidth" Value="1040"/><Setter Property="MinHeight" Value="520"/></DataTrigger>
               <DataTrigger Binding="{Binding IsRoomMembersPage}" Value="True"><Setter Property="MinWidth" Value="1040"/><Setter Property="MinHeight" Value="520"/></DataTrigger>
@@ -248,7 +248,7 @@
                         </Grid.ColumnDefinitions>
                         <StackPanel Margin="0,0,5,0">
                           <TextBlock Text="数量" Style="{StaticResource Caption}"/>
-                          <app:NumericInputBox Margin="0,5,0,0" Input="{Binding QuantityInput}"/>
+                          <app:NumericInputBox AutomationProperties.AutomationId="{Binding Descriptor.Id}" Margin="0,5,0,0" Input="{Binding QuantityInput}"/>
                         </StackPanel>
                         <StackPanel Grid.Column="1" Margin="5,0,0,0">
                           <TextBlock Text="眼前距离（米）" Style="{StaticResource Caption}"/>
@@ -346,7 +346,7 @@
                     </StackPanel>
                     <Button Grid.Column="1" Content="↻  刷新" Padding="11,5" Command="{Binding RoomMembersPage.RefreshCommand}" IsEnabled="{Binding RoomMembersPage.CanManage}"/>
                   </Grid>
-                  <TextBox Grid.Row="1" Margin="0,12,0,8" ToolTip="搜索玩家名称、会话尾号或角色" Text="{Binding RoomMembersPage.SearchText, UpdateSourceTrigger=PropertyChanged}"/>
+                  <TextBox AutomationProperties.AutomationId="players.catalog" Grid.Row="1" Margin="0,12,0,8" ToolTip="搜索玩家名称、会话尾号或角色" Text="{Binding RoomMembersPage.SearchText, UpdateSourceTrigger=PropertyChanged}"/>
                   <ListBox Grid.Row="2" Style="{StaticResource OptionListBox}" ScrollViewer.VerticalScrollBarVisibility="Auto" ItemsSource="{Binding RoomMembersPage.FilteredMembers}" SelectedItem="{Binding RoomMembersPage.SelectedMember}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate>
@@ -462,7 +462,7 @@
                           <Button Content="♥  全房恢复生命" Margin="0,3,4,3" Command="{Binding RoomMembersPage.RestoreRoomHealthCommand}" IsEnabled="{Binding RoomMembersPage.CanManage}"/>
                           <Button Content="◆  全房恢复饱食" Margin="4,3,0,3" Command="{Binding RoomMembersPage.RestoreRoomFullnessCommand}" IsEnabled="{Binding RoomMembersPage.CanManage}"/>
                           <Button Content="✦  全房清除异常" Margin="0,3,4,3" Command="{Binding RoomMembersPage.ClearRoomStatusCommand}" IsEnabled="{Binding RoomMembersPage.CanManage}"/>
-                          <Button Content="✓  全房一键补满" Style="{StaticResource PrimaryButton}" Margin="4,3,0,3" Command="{Binding RoomMembersPage.RestoreRoomAllCommand}" IsEnabled="{Binding RoomMembersPage.CanManage}"/>
+                          <Button AutomationProperties.AutomationId="players.restore_room" Content="✓  全房一键补满" Style="{StaticResource PrimaryButton}" Margin="4,3,0,3" Command="{Binding RoomMembersPage.RestoreRoomAllCommand}" IsEnabled="{Binding RoomMembersPage.CanManage}"/>
                         </UniformGrid>
                         <ItemsControl Margin="0,6,0,0" ItemsSource="{Binding RoomMembersPage.BatchResults}">
                           <ItemsControl.ItemTemplate>
@@ -616,7 +616,7 @@
               </Border>
               <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
-                  <Border Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="16" Margin="0,0,0,10">
+                  <Border AutomationProperties.AutomationId="fun.challenge.start" Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="16" Margin="0,0,0,10">
                     <StackPanel>
                       <TextBlock Text="海鸥飞靶挑战" FontSize="16" FontWeight="SemiBold"/>
                       <TextBlock Text="{Binding GullChallengeStatus}" Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,6,0,8"/>
@@ -636,7 +636,7 @@
                   </ItemsControl.ItemsPanel>
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                      <Border MinHeight="150">
+                      <Border MinHeight="150" AutomationProperties.AutomationId="{Binding Id, StringFormat='fun.event.{0}'}">
                         <FrameworkElement.Style>
                           <Style BasedOn="{StaticResource FeatureCardStyle}" TargetType="{x:Type Border}">
                             <Style.Triggers>
@@ -694,7 +694,7 @@
             </Grid>
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0" Visibility="{Binding IsEntertainmentPage, Converter={StaticResource BoolToVisibility}}">
               <StackPanel>
-                <Border Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="16" Margin="0,0,0,12" BorderBrush="{StaticResource AccentLineBrush}">
+                <Border AutomationProperties.AutomationId="fishing.skin_jackpot" Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="16" Margin="0,0,0,12" BorderBrush="{StaticResource AccentLineBrush}">
                   <Grid DataContext="{Binding FunEventsPage.SlotMachine}">
                     <Grid.RowDefinitions>
                       <RowDefinition Height="Auto"/>
@@ -731,7 +731,7 @@
                       </Grid.ColumnDefinitions>
                       <StackPanel Margin="0,0,8,0">
                         <TextBlock Text="目标稀有度" Style="{StaticResource Caption}" Margin="0,0,0,4"/>
-                        <ComboBox DisplayMemberPath="Label" ToolTip="缺少目标档位时自动选择最接近的有效档位" ItemsSource="{Binding RarityOptions}" SelectedItem="{Binding SelectedRarity}"/>
+                        <ComboBox AutomationProperties.AutomationId="fun.slot_machine.rarity" DisplayMemberPath="Label" ToolTip="缺少目标档位时自动选择最接近的有效档位" ItemsSource="{Binding RarityOptions}" SelectedItem="{Binding SelectedRarity}"/>
                       </StackPanel>
                       <StackPanel Grid.Column="1" Margin="8,0">
                         <TextBlock Text="待应用档位" Style="{StaticResource Caption}" Margin="0,0,0,4"/>
@@ -745,7 +745,7 @@
                     <TextBlock Grid.Row="2" Style="{StaticResource Muted}" FontSize="9" Margin="0,10,0,0" TextWrapping="Wrap" Text="{Binding SelectedRarity.Description}"/>
                   </Grid>
                 </Border>
-                <Border Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="16" Margin="0,0,0,12" BorderBrush="{StaticResource AccentLineBrush}">
+                <Border AutomationProperties.AutomationId="casino.roulette" Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="16" Margin="0,0,0,12" BorderBrush="{StaticResource AccentLineBrush}">
                   <Grid>
                     <Grid.RowDefinitions>
                       <RowDefinition Height="Auto"/>
@@ -867,14 +867,14 @@
               </FrameworkElement.Style>
               <StackPanel>
                 <app:FeelPanel Visibility="{Binding HasFeelFeatures,Converter={StaticResource BoolToVisibility}}"/>
-                <app:CombatFeedbackPanel Visibility="{Binding IsCombatPage,Converter={StaticResource BoolToVisibility}}" IsEnabled="{Binding CanEditParameters}"/>
-                <Border Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="18" Margin="0,0,8,12" Visibility="{Binding IsFishingPage,Converter={StaticResource BoolToVisibility}}">
+                <app:CombatFeedbackPanel AutomationProperties.AutomationId="combat.feedback" Visibility="{Binding IsCombatPage,Converter={StaticResource BoolToVisibility}}" IsEnabled="{Binding CanEditParameters}"/>
+                <Border AutomationProperties.AutomationId="journal.fishing" Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="18" Margin="0,0,8,12" Visibility="{Binding IsFishingPage,Converter={StaticResource BoolToVisibility}}">
                   <StackPanel><TextBlock Text="钓鱼手记" Style="{StaticResource SectionTitle}"/><TextBlock Text="补记鱼获、查看存档图鉴，并保存每局回顾。" Style="{StaticResource Muted}" Margin="0,6,0,12"/><WrapPanel><Button Content="日志与图鉴" Click="OpenJournal_Click" Margin="0,0,10,0"/><Button Content="每局回顾" Click="OpenRecap_Click"/></WrapPanel></StackPanel>
                 </Border>
-                <Border Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="18" Margin="0,0,8,12" Visibility="{Binding IsSavePage,Converter={StaticResource BoolToVisibility}}">
+                <Border AutomationProperties.AutomationId="journal.backups" Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="18" Margin="0,0,8,12" Visibility="{Binding IsSavePage,Converter={StaticResource BoolToVisibility}}">
                   <StackPanel><TextBlock Text="存档备份与恢复" Style="{StaticResource SectionTitle}"/><TextBlock Text="备份磁盘存档，校验后手动恢复；恢复前保留当前存档副本。" Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,6,0,12"/><Button Content="管理存档备份" Click="OpenSaveBackups_Click" HorizontalAlignment="Left"/></StackPanel>
                 </Border>
-                <Border Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="18" Margin="0,0,8,12" Visibility="{Binding IsCombatPage,Converter={StaticResource BoolToVisibility}}">
+                <Border AutomationProperties.AutomationId="combat.diagnostics" Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="18" Margin="0,0,8,12" Visibility="{Binding IsCombatPage,Converter={StaticResource BoolToVisibility}}">
                   <StackPanel><DockPanel><TextBlock Text="战斗诊断" FontSize="17" FontWeight="SemiBold"/><CheckBox DockPanel.Dock="Right" Content="仅观察诊断" IsChecked="{Binding DiagnosticOnly}" HorizontalAlignment="Right"/></DockPanel><TextBlock Text="{Binding CombatDiagnostics}" TextWrapping="Wrap" Margin="0,10,0,0" FontSize="11" Style="{StaticResource Muted}"/><TextBlock Text="观察模式暂停辅助瞄准与魔法子弹；取消后需手动开启。诊断只读取已发布的运行时状态。" TextWrapping="Wrap" Margin="0,7,0,0" FontSize="10" Style="{StaticResource Muted}"/></StackPanel>
                 </Border>
                 <Border Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="18" Margin="0,0,8,14" Visibility="{Binding IsTeleportPage, Converter={StaticResource BoolToVisibility}}">
@@ -887,7 +887,7 @@
                     <StackPanel>
                       <TextBlock Text="保存的坐标" FontSize="16" FontWeight="SemiBold"/>
                       <ComboBox Margin="0,11,10,0" ToolTip="按分组筛选" ItemsSource="{Binding TeleportGroups}" SelectedItem="{Binding SelectedTeleportGroup}"/>
-                      <TextBox Margin="0,7,10,0" ToolTip="搜索名称或分组" Text="{Binding TeleportPointQuery, UpdateSourceTrigger=PropertyChanged}"/>
+                      <TextBox AutomationProperties.AutomationId="world.teleport.points" Margin="0,7,10,0" ToolTip="搜索名称或分组" Text="{Binding TeleportPointQuery, UpdateSourceTrigger=PropertyChanged}"/>
                       <ComboBox ItemsSource="{Binding PointSortModes}" SelectedItem="{Binding PointSort}" Margin="0,7,10,0" ToolTip="坐标排序"/>
                       <ListBox Height="162" Margin="0,8,10,0" Style="{StaticResource OptionListBox}" BorderBrush="{StaticResource LineBrush}" ItemsSource="{Binding FilteredTeleportPoints}" SelectedItem="{Binding SelectedTeleportPoint}">
                         <ItemsControl.ItemTemplate>
@@ -905,22 +905,22 @@
                       <CheckBox Content="房主操作选中房间成员" Margin="0,10,0,5" IsChecked="{Binding TargetRoomMember}" IsEnabled="{Binding CanTargetRoomMember}"/>
                       <ComboBox DisplayMemberPath="DisplayName" ToolTip="好友房玩家只能传送自己；房主可选择在线成员" ItemsSource="{Binding RoomMembersPage.Members}" SelectedItem="{Binding SelectedTeleportMember}" IsEnabled="{Binding TargetRoomMember}"/>
                       <UniformGrid Columns="3" Margin="0,11,0,8">
-                        <app:NumericInputBox Margin="0,0,5,0" Input="{Binding CurrentXInput}"/>
+                        <app:NumericInputBox AutomationProperties.AutomationId="world.teleport" Margin="0,0,5,0" Input="{Binding CurrentXInput}"/>
                         <app:NumericInputBox Margin="5,0" Input="{Binding CurrentYInput}"/>
                         <app:NumericInputBox Margin="5,0,0,0" Input="{Binding CurrentZInput}"/>
                       </UniformGrid>
                       <CheckBox Content="安全落点校正（推荐）" Margin="0,2,0,7" IsChecked="{Binding SafeLanding}"/>
                       <UniformGrid Columns="2">
-                        <Button Margin="0,4,4,4" Content="读取目标位置" Command="{Binding ReadPositionCommand}"/>
+                        <Button AutomationProperties.AutomationId="world.position.read" Margin="0,4,4,4" Content="读取目标位置" Command="{Binding ReadPositionCommand}"/>
                         <Button Margin="4" Content="安全传送到目标" Style="{StaticResource PrimaryButton}" Command="{Binding TeleportSelectedCommand}"/>
                       </UniformGrid>
                       <Button Margin="0,4" Content="返回该目标上一次位置" Command="{Binding ReturnPreviousCommand}"/>
                       <UniformGrid Columns="2"><Button Content="记录安全位置" Command="{Binding RememberSafePositionCommand}" Margin="0,4,4,4"/><Button Content="填入安全位置" Command="{Binding SelectSafePositionCommand}" Margin="4"/></UniformGrid>
-                      <CheckBox Content="自动记录死亡前位置（本机）" IsChecked="{Binding TrackDeathPosition}" Margin="0,7,0,0"/>
+                      <CheckBox AutomationProperties.AutomationId="world.position.last_death" Content="自动记录死亡前位置（本机）" IsChecked="{Binding TrackDeathPosition}" Margin="0,7,0,0"/>
                       <Button Content="填入死亡前位置" Command="{Binding SelectDeathPositionCommand}" Margin="0,7,0,0"/>
                       <TextBlock Text="{Binding DeathPositionStatus}" Style="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,6,0,0"/>
                       <TextBlock Margin="2,8" Style="{StaticResource Muted}" FontSize="10" Text="{Binding PositionStatus}"/>
-                      <Border Name="IslandSelector" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="10" Padding="11" Margin="0,8,0,0">
+                      <Border AutomationProperties.AutomationId="world.island.load" Name="IslandSelector" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="10" Padding="11" Margin="0,8,0,0">
                         <StackPanel>
                           <TextBlock Text="载入岛屿" FontWeight="SemiBold"/>
                           <TextBox Margin="0,8,0,6" ToolTip="搜索中文名、原名、目录键或场景序号" Text="{Binding IslandQuery, UpdateSourceTrigger=PropertyChanged}"/>
@@ -946,7 +946,7 @@
                     </StackPanel>
                   </Grid>
                 </Border>
-                <Border Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="18" Margin="0,0,0,12" Visibility="{Binding IsCombatPage, Converter={StaticResource BoolToVisibility}}">
+                <Border AutomationProperties.AutomationId="view.entity_overlay.configure" Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="18" Margin="0,0,0,12" Visibility="{Binding IsCombatPage, Converter={StaticResource BoolToVisibility}}">
                   <StackPanel>
                     <TextBlock Text="实体标注" FontSize="17" FontWeight="SemiBold"/>
                     <TextBlock Text="辅助瞄准或魔法子弹开启时显示；两者关闭后隐藏。所有可攻击活体和有效队友均显示，墙后可见；红框与骨骼随目标移动，角标标出实际锁定目标。按住右 Ctrl 临时隐藏实体标注，松开恢复。" Style="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,7,0,0"/>
@@ -962,7 +962,7 @@
                     <TextBlock Text="显示距离与两个功能的攻击距离独立；此处只更新标注，不切换瞄准功能，也不改变锁定队友选项。" Style="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,5,0,0"/>
                   </StackPanel>
                 </Border>
-                <Border Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="18" Margin="0,0,0,12" Visibility="{Binding IsCombatPage, Converter={StaticResource BoolToVisibility}}">
+                <Border AutomationProperties.AutomationId="view.crosshair" Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="18" Margin="0,0,0,12" Visibility="{Binding IsCombatPage, Converter={StaticResource BoolToVisibility}}">
                   <StackPanel DataContext="{Binding Crosshair}">
                     <Grid>
                       <Grid.ColumnDefinitions>
@@ -1000,7 +1000,7 @@
                     <TextBlock Text="跟随本机枪口/视线方向投影，不预测散布与弹道下坠。支持第一、第三人称；只在游戏前台显示，不拦截鼠标。若独占全屏不可见，请使用无边框或窗口模式。" Style="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,6,0,0"/>
                   </StackPanel>
                 </Border>
-                <Border Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="18" Margin="0,0,0,12" Visibility="{Binding IsCombatPage, Converter={StaticResource BoolToVisibility}}">
+                <Border AutomationProperties.AutomationId="combat.aim_assist" Style="{StaticResource FeatureCardStyle}" MinHeight="0" Padding="18" Margin="0,0,0,12" Visibility="{Binding IsCombatPage, Converter={StaticResource BoolToVisibility}}">
                   <Grid DataContext="{Binding AimAssist}">
                     <Grid.RowDefinitions>
                       <RowDefinition Height="Auto"/>

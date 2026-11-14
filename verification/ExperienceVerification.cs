@@ -240,7 +240,13 @@ static class ExperienceVerification
         Check(runtime.Commands.Last(c=>c.FeatureId=="player.spin.lock").Arguments.GetProperty("autoJump").GetBoolean(),"Spin curve preserves applied cosmetic jump while another category is selected");
         vm.MarkAllLocksDisabled("fixture curve cleanup");vm.SpinCurve="固定";
         vm.SelectedPage=vm.Pages.Single(p=>p.Category=="战斗");vm.DiagnosticOnly=true;commands=runtime.Commands.Count;vm.AimAssist.Enabled=true;var silent=vm.Features.Single(f=>f.Descriptor.Id=="combat.silent_aim");silent.Enabled=true;Pump();Check(!vm.AimAssist.Enabled&&!silent.Enabled&&!runtime.Commands.Skip(commands).Any(c=>c.FeatureId is "combat.silent_aim" or "combat.aim_assist"&&c.Arguments.GetProperty("enabled").GetBoolean()),"Observation mode blocks aim and silent lock activation");
-        vm.FeatureQuery="大陀螺";Check(vm.SearchResults.Any(h=>h.Id=="player.spin.lock"),"Global search includes feature title");vm.SelectedSearchHit=vm.SearchResults.First();Check(vm.SelectedPage.Category=="玩家","Search navigates existing category");
+        vm.FeatureQuery = "大陀螺";
+        Check(vm.SearchResults.FirstOrDefault()?.Id == "player.spin.lock", "An exact feature title ranks first across all categories");
+        var searchPage = vm.SelectedPage;
+        commands = runtime.Commands.Count;
+        vm.SelectedSearchHit = vm.SearchResults.First();
+        Check(vm.SelectedPage == searchPage && runtime.Commands.Count == commands,
+            "Selecting a search result leaves the current page and game state alone until explicitly opened");
 
         if(codeOnly)
         {

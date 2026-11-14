@@ -13,7 +13,6 @@ namespace HowToFishTrainer.App;
 public sealed record ParameterPreset(string Name, string Parameters);
 public sealed record CatalogBookmark(string FeatureId, int Id, string Name, ParameterValues Parameters);
 public sealed record PointDecoration(string Group, string Name, string Color, string Icon, string Note, bool Favorite);
-public sealed record SearchHit(string Title, string Category, string Id, string Description);
 public sealed record OverlayShortcut(string Kind, string Key, string Group = "");
 public sealed class OverlayPanel : INotifyPropertyChanged
 {

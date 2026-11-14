@@ -196,6 +196,7 @@
             <TextBlock Grid.Column="2" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Style="{StaticResource Muted}" FontSize="10" VerticalAlignment="Center" Margin="14,0,0,0" Text="{Binding ModeStatus}" ToolTip="{Binding ModeStatus}"/>
           </Grid>
           <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+            <Button x:Name="GlobalSearchButton" Content="搜索" Click="Search_Click" Style="{StaticResource GhostButton}" Padding="10,5" Margin="0,0,6,0" ToolTip="全局搜索 · Ctrl + F" AutomationProperties.Name="全局搜索"/>
             <ToggleButton Content="音效" Style="{StaticResource ToolbarSoundToggle}" ToolTip="基础开关成功开启提示音" Margin="0,0,8,0" IsChecked="{Binding SoundEnabled}"/>
             <!-- 材质强度：纯外观设置，三档切换后立即整站生效并持久化到独立的 ui-appearance.json。
                  默认「着色玻璃」（交接文档 §7.3 要求偏可读）；低渲染能力时会被自动压到实色档。
@@ -215,6 +216,7 @@
         </Grid>
       </Border>
       <app:TrainerContentView x:Name="TrainerContent" Grid.Row="1"/>
+      <app:FeatureSearchBox x:Name="SearchArea" Grid.Row="1" Panel.ZIndex="2" Visibility="Collapsed" VerticalAlignment="Top" HorizontalAlignment="Stretch" MaxWidth="620" MaxHeight="320" Margin="12,5"/>
       <Border Grid.Row="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" Padding="18,0">
         <Grid>
           <!-- 左段用 * 列 + 省略号：原来左段是 HorizontalAlignment 为默认（撑满整行）的

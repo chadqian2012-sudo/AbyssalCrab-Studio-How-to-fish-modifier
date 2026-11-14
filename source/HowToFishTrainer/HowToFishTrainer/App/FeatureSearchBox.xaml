@@ -1,0 +1,42 @@
+<UserControl x:Class="HowToFishTrainer.App.FeatureSearchBox"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             PreviewKeyDown="Search_KeyDown">
+  <Border Background="{DynamicResource GlassCardBrush}" BorderBrush="{DynamicResource GlassEdgeChromeBrush}"
+          BorderThickness="1" CornerRadius="12" Padding="10">
+    <Grid>
+      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+      <DockPanel>
+        <Button DockPanel.Dock="Right" Content="×" Click="Close_Click" Style="{StaticResource IconButton}"
+                Width="30" Height="30" Margin="6,0,0,0" ToolTip="收起搜索" AutomationProperties.Name="收起功能搜索"/>
+        <TextBox x:Name="FeatureSearch" Text="{Binding FeatureQuery,UpdateSourceTrigger=PropertyChanged}"
+                 Height="34" MaxLength="180" VerticalContentAlignment="Center" Padding="10,3"
+                 AutomationProperties.Name="搜索修改功能" ToolTip="输入名称或关键词，按 Enter 打开设置"/>
+      </DockPanel>
+      <TextBlock Grid.Row="1" x:Name="SearchHint" Text="{Binding SearchHint}" Style="{StaticResource Muted}"
+                 Margin="2,4,0,2" FontSize="11" TextWrapping="Wrap"/>
+      <ListBox Grid.Row="2" x:Name="FeatureSearchResults" ItemsSource="{Binding SearchResults}"
+               SelectedItem="{Binding SelectedSearchHit,Mode=TwoWay}" IsSynchronizedWithCurrentItem="False"
+               HorizontalContentAlignment="Stretch" BorderThickness="0" Background="Transparent" Padding="0"
+               ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto"
+               AutomationProperties.Name="功能搜索结果">
+        <ListBox.ItemTemplate><DataTemplate>
+          <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <Button HorizontalContentAlignment="Stretch" Padding="8,4" Style="{StaticResource GhostButton}"
+                    Click="OpenResult_Click" ToolTip="{Binding Description}" AutomationProperties.Name="打开功能设置">
+              <DockPanel>
+                <TextBlock DockPanel.Dock="Right" Text="{Binding PageTitle}" Margin="8,0,0,0" Style="{StaticResource Muted}" VerticalAlignment="Center" FontSize="11"/>
+                <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+              </DockPanel>
+            </Button>
+            <Button Grid.Column="1" Content="＋" Style="{StaticResource GhostButton}" Padding="8,3"
+                    ToolTip="加入当前快捷面板" AutomationProperties.Name="加入当前快捷面板"
+                    Command="{Binding DataContext.AddFeatureToOverlayCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                    CommandParameter="{Binding}"/>
+          </Grid>
+        </DataTemplate></ListBox.ItemTemplate>
+      </ListBox>
+    </Grid>
+  </Border>
+</UserControl>

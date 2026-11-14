@@ -1,7 +1,10 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
@@ -18,14 +21,75 @@ public partial class TrainerContentView : UserControl
     private bool _navCapsuleMovePending;
     private bool _appearanceClosing;
     private int _navAnimationVersion;
+    private readonly DispatcherTimer _searchTimeout = new() { Interval = TimeSpan.FromSeconds(1.5) };
+    private SearchOutline? _searchOutline;
     private MainViewModel Model => (MainViewModel)DataContext;
     internal Action<int>? OpenJournalRequested { get; set; }
     public TrainerContentView()
     {
         InitializeComponent();
         Loaded += (_, _) => { _appearanceClosing = false; MoveNavCapsule(false); };
-        Unloaded += (_, _) => { _appearanceClosing = true; _navAnimationVersion++; };
+        _searchTimeout.Tick += (_, _) => ClearSearchOutline();
+        Unloaded += (_, _) => { _appearanceClosing = true; _navAnimationVersion++; ClearSearchOutline(); };
     }
+
+    public bool RevealSearchHit(SearchHit hit)
+    {
+        ClearSearchOutline();
+        UpdateLayout();
+        FrameworkElement? FindAnchor(DependencyObject root) => MainWindow.EnumerateVisualTree<FrameworkElement>(root, visibleOnly: true)
+            .FirstOrDefault(element => AutomationProperties.GetAutomationId(element) == hit.Id);
+        var card = FindAnchor(FeatureWorkspace);
+        if (card == null)
+        {
+            var section = MainWindow.EnumerateVisualTree<Expander>(FeatureWorkspace, visibleOnly: true)
+                .FirstOrDefault(group => group.Tag is string childIds && childIds.Split(' ').Contains(hit.Id));
+            if (section == null) return false;
+            section.IsExpanded = true;
+            UpdateLayout();
+            card = FindAnchor(section);
+        }
+        if (card == null) return false;
+        var editor = card as TextBox ?? MainWindow.EnumerateVisualTree<TextBox>(card, visibleOnly: true).FirstOrDefault(box => !box.IsReadOnly);
+        var target = (FrameworkElement?)editor ?? card;
+        target.BringIntoView(new Rect(0, 0, Math.Min(target.ActualWidth, 280), Math.Min(target.ActualHeight, 80)));
+        if (target is TextBox or ComboBox && target.IsEnabled) target.Focus();
+
+        if (AdornerLayer.GetAdornerLayer(target) is { } layer)
+        {
+            _searchOutline = new SearchOutline(target);
+            layer.Add(_searchOutline);
+            _searchTimeout.Start();
+        }
+        return true;
+    }
+
+    private void ClearSearchOutline()
+    {
+        _searchTimeout.Stop();
+        if (_searchOutline != null && VisualTreeHelper.GetParent(_searchOutline) is AdornerLayer layer)
+            layer.Remove(_searchOutline);
+        _searchOutline = null;
+    }
+
+    private sealed class SearchOutline : Adorner
+    {
+        private readonly Pen _pen;
+
+        public SearchOutline(FrameworkElement target) : base(target)
+        {
+            IsHitTestVisible = false;
+            _pen = new Pen((Brush)target.FindResource("AccentBrush"), 2);
+        }
+
+        protected override void OnRender(DrawingContext context)
+        {
+            var size = AdornedElement.RenderSize;
+            if (size.Width > 2 && size.Height > 2)
+                context.DrawRoundedRectangle(null, _pen, new Rect(1, 1, size.Width - 2, size.Height - 2), 6, 6);
+        }
+    }
+
     private void OpenJournal_Click(object sender, RoutedEventArgs e) => OpenJournalRequested?.Invoke(0);
     private void OpenRecap_Click(object sender, RoutedEventArgs e) => OpenJournalRequested?.Invoke(2);
     private void OpenSaveBackups_Click(object sender, RoutedEventArgs e) => OpenJournalRequested?.Invoke(3);

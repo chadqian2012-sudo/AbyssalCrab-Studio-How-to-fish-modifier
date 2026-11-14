@@ -101,9 +101,6 @@ public sealed partial class MainViewModel
         else if (parameter is FeatureItemViewModel feature) AddOverlayReference(new("feature", feature.Descriptor.Id));
         else if (choice != null) AddOverlayReference(new(choice.IsPage ? "page" : "feature", choice.Id));
     });
-    public ICommand OpenOverlaySearchCommand => new RelayCommand(parameter => {
-        if (parameter is SearchHit hit && ResolveOverlaySearchReference(hit) is { } reference) OpenOverlayReference(reference);
-    });
     public ICommand AddTeleportToOverlayCommand => new RelayCommand(parameter => {
         var point = parameter as TrainerTeleportPoint ?? SelectedTeleportPoint;
         if (point != null) AddOverlayReference(new("teleport", point.Name, point.Group));
@@ -217,13 +214,8 @@ public sealed partial class MainViewModel
     }
     private OverlayShortcut? ResolveOverlaySearchReference(SearchHit hit)
     {
-        if (AllFeatures.Any(f => f.Descriptor.Id == hit.Id)) return new("feature", hit.Id);
-        var descriptor = FeatureRegistry.All.FirstOrDefault(f => f.Id == hit.Id);
-        if (descriptor != null && (TeleportCustomFeatureIds.Contains(hit.Id) || CombatCustomFeatureIds.Contains(hit.Id) ||
-            hit.Id is "fishing.skin_jackpot" or "fun.slot_machine.rarity")) {
-            string category = DisplayCategory(descriptor.Id, descriptor.Category);
-            if (Pages.Any(p => p.Category == category)) return new("page", category);
-        }
+        if (ResolveSearchHit(hit) is { } current)
+            return AllFeatures.Any(f => f.Descriptor.Id == current.Id) ? new("feature", current.Id) : new("page", current.Category);
         OverlayStatus = "该搜索结果已失效，请重新搜索";
         return null;
     }
