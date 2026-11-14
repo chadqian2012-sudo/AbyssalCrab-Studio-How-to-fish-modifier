@@ -199,6 +199,7 @@ footer{border-top:1px solid var(--line);padding:16px 0 max(16px,env(safe-area-in
 @media(max-width:390px){.nav{gap:9px}.scene,.scenes>.scroll-slot:first-child>.scene,.scenes>.scroll-slot:last-child>.scene{grid-template-columns:60px minmax(0,1fr) 26px}.nav a{font-size:12px}}
 /* One interaction drives the marker, arrow and illustration together. */
 .scene,.nav a,.actions .btn{--engaged:0}
+.scene,.feature-link{-webkit-tap-highlight-color:transparent}
 :is(.scene,.nav a,.actions .btn):is(:focus-visible,:active,[data-pressed]){--engaged:1}
 @media(hover:hover) and (pointer:fine){
   :is(.scene,.nav a,.actions .btn):hover{--engaged:1}
