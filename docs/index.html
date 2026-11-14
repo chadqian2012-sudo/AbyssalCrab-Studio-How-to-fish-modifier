@@ -73,18 +73,18 @@ h1>span{display:block}.edition{display:inline-block;vertical-align:top;margin:6p
 .field.search{flex:1}.field input,.field select{box-sizing:border-box;border:0;border-radius:0;outline:none;background:transparent;color:var(--ink);min-width:0;width:100%;font-size:16px}.field select{min-height:46px}.field select option{color:var(--ink);background:var(--panel)}
 .counter{color:var(--quiet);font-weight:600;font-size:13px;min-height:24px;margin-bottom:3px}.rows{border-top:1px solid var(--ink)}details{border-bottom:1px solid var(--line)}
 summary{list-style:none;min-height:48px;display:flex;align-items:center;gap:15px;font-weight:670;padding:9px 3px}summary::-webkit-details-marker{display:none}.guides summary:hover{text-decoration:underline;text-underline-offset:4px}
-.cat{margin-left:auto;font-size:12px;color:var(--quiet);white-space:nowrap;font-weight:550}.pm{flex:none;display:grid;place-items:center;width:25px;height:25px;font-family:var(--sans);font-size:20px;line-height:1;background:var(--pale)}details[open]>summary .pm{background:var(--signal);color:var(--on-signal)}details[open]>summary .pm::after{content:"−"}.pm::after{content:"+"}
+.cat{margin-left:auto;font-size:12px;color:var(--quiet);white-space:nowrap;font-weight:550}.pm{flex:none;position:relative;width:25px;height:25px;background:var(--pale)}details[open]>summary .pm{background:var(--signal);color:var(--on-signal)}
 .detail{font-size:15px;color:var(--quiet);padding:0 42px 15px 3px;max-width:65em}.pager{display:flex;gap:7px;align-items:center;justify-content:flex-end;margin-top:15px}
 .pager button,.reset{min-width:44px;min-height:44px;background:var(--pale);clip-path:var(--cut);font-weight:700;padding-inline:10px}.pager button:disabled{opacity:.45}.pager button:enabled:hover,.reset:hover{background:var(--signal);color:var(--on-signal)}.pager .meta{min-width:68px;text-align:center}.empty{padding:15px 0}
-.guides .pm { position:relative; }
 .guides summary .pm::before, .guides summary .pm::after {
   content:""; position:absolute; inset:0; margin:auto;
   width:11px; height:2px; background:currentColor;
 }
 .guides summary .pm::after { transform:rotate(90deg); }
-.guides details[open] .pm::after { content:""; transform:rotate(0); }
+.guides details[open] .pm::after { transform:rotate(0); }
 @media (prefers-reduced-motion:no-preference) {
-  .guides .pm::after { transition:transform 260ms cubic-bezier(.16,1,.3,1); }
+  .guides .pm { transition:background-color 180ms,color 180ms; }
+  .guides .pm::after { transition:transform 220ms cubic-bezier(.16,1,.3,1); }
   .rows > * {
     transition:translate 340ms cubic-bezier(.16,1,.3,1),opacity 220ms ease-out;
     transition-delay:var(--row-delay,0ms);
@@ -99,17 +99,23 @@ summary{list-style:none;min-height:48px;display:flex;align-items:center;gap:15px
     .rows[data-turn="next"] > * { translate:min(3vw,28px) 0; }
     .rows[data-turn="prev"] > * { translate:max(-3vw,-28px) 0; }
   }
-  @supports selector(details::details-content) and (interpolate-size:allow-keywords) and (transition-behavior:allow-discrete) {
-    .guides { interpolate-size:allow-keywords; }
+  @supports selector(details::details-content) and (transition-behavior:allow-discrete) {
     .guides details::details-content {
-      block-size:0; overflow:clip; opacity:0;
-      transition:block-size 220ms cubic-bezier(.7,0,.2,1),opacity 150ms ease-out,
-                 content-visibility 220ms allow-discrete;
+      display:grid; grid-template-rows:0fr 0px; overflow:clip;
+      transition:grid-template-rows 240ms cubic-bezier(.45,0,.55,1),content-visibility 240ms allow-discrete;
     }
     .guides details[open]::details-content {
-      block-size:auto; opacity:1;
-      transition-duration:340ms,230ms,340ms;
-      transition-timing-function:cubic-bezier(.16,1,.3,1),ease-out,linear;
+      grid-template-rows:1fr 15px;
+      transition-duration:360ms;
+      transition-timing-function:cubic-bezier(.22,.75,.2,1),linear;
+    }
+    .guides .detail {
+      min-block-size:0; overflow:hidden; padding-bottom:0; opacity:0; transform:translateY(6px);
+      transition:opacity 150ms ease-out,transform 180ms ease-in;
+    }
+    .guides details[open] .detail {
+      opacity:1; transform:none;
+      transition:opacity 230ms ease-out 38ms,transform 300ms cubic-bezier(.16,1,.3,1) 38ms;
     }
   }
 }
@@ -242,19 +248,8 @@ html:has(#feature-sheet[open]){overflow:hidden}
   .feature-link:active::before{transition-duration:100ms}
   @supports (transition-behavior:allow-discrete){
     #feature-sheet{
-      --sheet-step:translateY(26px);--sheet-mask:inset(0 0 72% 0);
       --sheet-ease:cubic-bezier(.7,0,.2,1);
-      opacity:0;transform:var(--sheet-step);clip-path:var(--sheet-mask);
-      transition:opacity 220ms ease-in,transform 240ms var(--sheet-ease),
-        clip-path 240ms var(--sheet-ease),display 240ms allow-discrete,overlay 240ms allow-discrete;
-    }
-    #feature-sheet[open]{
-      opacity:1;transform:none;clip-path:inset(0);
-      transition-duration:180ms,390ms,390ms,390ms,390ms;
-      transition-timing-function:ease-out,cubic-bezier(.16,1,.3,1),cubic-bezier(.16,1,.3,1),linear,linear;
-    }
-    @media(max-width:480px){
-      #feature-sheet{--sheet-step:translateY(56px);--sheet-mask:inset(46% 0 0 0)}
+      transition:display 260ms allow-discrete,overlay 260ms allow-discrete;
     }
     #feature-sheet::backdrop{opacity:0;transition:opacity 240ms ease,display 240ms allow-discrete,overlay 240ms allow-discrete}
     #feature-sheet[open]::backdrop{opacity:1}
@@ -271,7 +266,6 @@ html:has(#feature-sheet[open]){overflow:hidden}
     .sheet-body #feature-description{--sheet-delay:90ms}
     .sheet-foot{--sheet-delay:135ms}
     @starting-style{
-      #feature-sheet[open]{opacity:0;transform:var(--sheet-step);clip-path:var(--sheet-mask)}
       #feature-sheet[open]::backdrop{opacity:0}
       #feature-sheet[open] :is(.sheet-bar > span,.sheet-body > *,.sheet-foot > *){opacity:0;transform:translateX(-14px)}
     }
@@ -304,7 +298,7 @@ html:has(#feature-sheet[open]){overflow:hidden}
 </div></header>
 <main id="overview">
 <section class="hero" aria-labelledby="title"><div class="wrap hero-inner">
-  <div><div class="kicker">HOW TO FISH / WINDOWS</div><h1 id="title"><span>渔力全开</span><span>修改器<b class="edition">R26</b></span></h1>
+<div><div class="kicker">HOW TO FISH / WINDOWS</div><h1 id="title" tabindex="-1"><span>渔力全开</span><span>修改器<b class="edition">R26</b></span></h1>
     <p class="lead">调整角色手感，生成物品与鱼类，保存常去的坐标。把常用功能放进悬浮窗，在游戏里随时调用。</p>
     <div class="actions"><a href="#catalog" class="btn cut">浏览功能目录<svg class="icon" aria-hidden="true"><use href="#arr"/></svg></a><a class="textlink" href="#guide">快速上手<svg class="icon" aria-hidden="true"><use href="#diag"/></svg></a></div>
   </div>
@@ -440,7 +434,7 @@ html:has(#feature-sheet[open]){overflow:hidden}
   </svg><h3>武器战斗</h3><span class="jump"><svg class="icon" aria-hidden="true"><use href="#diag"/></svg></span><p>分别设置辅助瞄准与魔法子弹，也可调整实体标注距离。</p></a>
 </div></section>
 <section class="catalogue section" id="catalog" aria-labelledby="catalog-title"><div class="wrap">
-  <div class="section-head"><div><div class="kicker">FEATURE INDEX</div><h2 id="catalog-title">功能目录</h2></div><span class="folio">HOW TO FISH / R26</span></div>
+  <div class="section-head"><div><div class="kicker">FEATURE INDEX</div><h2 id="catalog-title" tabindex="-1">功能目录</h2></div><span class="folio">HOW TO FISH / R26</span></div>
   <div class="tools"><label class="field search"><svg class="icon" aria-hidden="true"><use href="#look"/></svg><span class="sr">搜索功能名称或关键词</span><input id="query" type="search" maxlength="180" placeholder="名称或关键词，如「红框」" autocomplete="off"></label>
   <label class="field filter"><span class="sr">选择功能分类</span><select id="category"><option value="">全部分类</option></select></label></div>
   <p class="counter" id="count" role="status"></p><div class="rows" id="results"></div>
@@ -448,7 +442,7 @@ html:has(#feature-sheet[open]){overflow:hidden}
   <div class="pager" id="pager" aria-label="结果翻页"><button type="button" class="cut" id="prev" aria-label="上一页">←</button><span class="meta" id="page"></span><button type="button" class="cut" id="next" aria-label="下一页">→</button></div>
   <noscript>请在浏览器中启用 JavaScript，以使用可筛选的功能目录。</noscript>
 </div></section>
-<section id="guide" class="section wrap guide-grid" aria-labelledby="guide-title"><div><div class="kicker">QUICK START</div><h2 id="guide-title">使用指南</h2><p>第一次使用，可以从一次移动速度调整开始。</p></div>
+<section id="guide" class="section wrap guide-grid" aria-labelledby="guide-title"><div><div class="kicker">QUICK START</div><h2 id="guide-title" tabindex="-1">使用指南</h2><p>第一次使用，可以从一次移动速度调整开始。</p></div>
   <div class="guides">
     <details open><summary>连接游戏，应用第一个参数<span class="pm" aria-hidden="true"></span></summary><div class="detail">进入自己的单人或房主存档，打开修改器。等底部显示“运行时桥已连接”和当前世界模式，在“玩家状态”把移动速度倍率填为 1.25，再点“应用”。输入 1 并再次应用可恢复原速。</div></details>
     <details><summary>用关键词找到具体控件<span class="pm" aria-hidden="true"></span></summary><div class="detail">在主窗口或展开的悬浮窗按 <kbd>Ctrl+F</kbd>。搜“红框”可定位实体标注距离，搜“陀螺 转速”可定位转速输入框。点击结果后，再决定是否应用设置。</div></details>
@@ -1131,26 +1125,81 @@ document.querySelectorAll('[data-query]').forEach(link => {
   link.addEventListener('lostpointercapture', event => {
     if (event.isPrimary) delete link.dataset.pressed;
   });
-  link.addEventListener('click', () => {
-    field.value = link.dataset.query;
+});
+let sectionScroll;
+document.addEventListener('click', event => {
+  const link = event.target.closest('a[href="#overview"],a[href="#catalog"],a[href="#guide"]');
+  if (!link || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  const previousUrl = location.href;
+  const previousTop = window.scrollY;
+  const section = document.querySelector(link.hash);
+  if (link.hash === '#catalog') {
+    field.value = link.dataset.query || '';
     category.value = '';
     applyFilter();
-  });
+  }
+  if (location.hash !== link.hash) history.pushState(null,'',link.hash);
+  section.querySelector('h1,h2').focus({preventScroll:true});
+  sectionScroll?.abort();
+  const behavior = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+  if (behavior === 'smooth') {
+    const controller = new AbortController();
+    sectionScroll = controller;
+    const options = {passive:true, signal:controller.signal};
+    const interrupt = event => {
+      controller.abort();
+      const goingBack = event.type === 'popstate' && location.href === previousUrl;
+      window.scrollTo({top:goingBack ? previousTop : window.scrollY,behavior:'instant'});
+    };
+    window.addEventListener('wheel',interrupt,options);
+    window.addEventListener('touchstart',interrupt,options);
+    window.addEventListener('popstate',interrupt,options);
+    document.addEventListener('scrollend',() => controller.abort(),{...options,once:true});
+  }
+  if (link.hash === '#overview') window.scrollTo({top:0,behavior});
+  else section.scrollIntoView({block:'start',behavior});
 });
-document.querySelectorAll('a[href="#catalog"]:not([data-query])').forEach(link => link.addEventListener('click', () => {
-  field.value = '';
-  category.value = '';
-  applyFilter();
-}));
 // Keep the catalogue mounted underneath its addressable feature pages. The browser
 // owns modal focus and history so returning preserves the reader's place.
 const sheet = lookup('feature-sheet');
 let originLink = null;
+let tapFraction = null;
+let sheetMotion;
+function animateSheet(opening, id) {
+  const live = getComputedStyle(sheet);
+  const current = {transform:live.transform, clipPath:live.clipPath === 'none' ? 'inset(0px)' : live.clipPath, opacity:live.opacity};
+  sheetMotion?.cancel();
+  if (!matchMedia('(prefers-reduced-motion: no-preference)').matches || !sheet.animate) return;
+  const panel = sheet.getBoundingClientRect();
+  const full = {transform:'translate(0px,0px)', clipPath:'inset(0px)', opacity:1};
+  let closed = {...full, opacity:0};
+  if (originLink?.isConnected && originLink.hash === '#feature=' + id) {
+    const row = originLink.getBoundingClientRect();
+    const label = originLink.querySelector('.name').getBoundingClientRect();
+    const x = tapFraction ? row.left + row.width * tapFraction.x : label.left + label.width / 2;
+    const y = tapFraction ? row.top + row.height * tapFraction.y : label.top + label.height / 2;
+    const viewport = document.documentElement;
+    if (row.width && row.height && x >= 0 && x < viewport.clientWidth && y >= 0 && y < viewport.clientHeight) {
+      const dx = x - 22 - panel.left;
+      const dy = y - 22 - panel.top;
+      closed = {transform:'translate(' + dx + 'px,' + dy + 'px)',
+        clipPath:'inset(0px ' + Math.max(0,panel.width - 44) + 'px ' + Math.max(0,panel.height - 44) + 'px 0px)', opacity:1};
+    }
+  }
+  // Copy the visible frame before cancelling so Escape can reverse an unfinished reveal.
+  sheetMotion = sheet.animate(opening ? [closed, full] : [current, closed],
+    {duration:opening ? 420 : 260, easing:opening ? 'cubic-bezier(.22,.78,.18,1)' : 'cubic-bezier(.55,.02,.36,1)', fill:'backwards'});
+}
+function closeSheet() {
+  animateSheet(false,sheet.dataset.feature);
+  sheet.close();
+}
 function syncFeaturePage() {
   const id = location.hash.startsWith('#feature=') ? location.hash.slice(9) : '';
   const index = entries.findIndex(entry => entry.id === id);
   if (index < 0) {
-    if (sheet.open) sheet.close();
+    if (sheet.open) closeSheet();
     return;
   }
   const entry = entries[index];
@@ -1158,13 +1207,19 @@ function syncFeaturePage() {
   lookup('feature-category').textContent = entry.category;
   lookup('feature-number').textContent = String(index + 1).padStart(2,'0') + ' / ' + entries.length;
   lookup('feature-description').textContent = entry.description;
-  if (!sheet.open) sheet.showModal();
+  sheet.dataset.feature = id;
+  if (!sheet.open) {
+    sheet.showModal();
+    animateSheet(true,id);
+  }
 }
 results.addEventListener('click', event => {
   const link = event.target.closest('a.feature-link');
   if (!link || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
   originLink = link;
+  const row = link.getBoundingClientRect();
+  tapFraction = event.detail ? {x:(event.clientX - row.left) / row.width, y:(event.clientY - row.top) / row.height} : null;
   // Some browsers do not focus a link on a pointer click. Make the return
   // destination explicit before the native modal records it.
   link.focus({preventScroll:true});
@@ -1173,7 +1228,7 @@ results.addEventListener('click', event => {
 });
 function returnToIndex() {
   if (!sheet.open) return;
-  sheet.close();
+  closeSheet();
   if (originLink?.isConnected && history.state?.fromFeatureIndex) {
     // Returning to an existing fragment can move focus after the dialog closes.
     const link = originLink;
@@ -1190,7 +1245,10 @@ sheet.addEventListener('cancel', event => { event.preventDefault(); returnToInde
 function isBackdrop(event) {
   if (event.target !== sheet) return false;
   const rect = sheet.getBoundingClientRect();
-  return event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom;
+  // All visible interior content has its own event target. A clipped-out part
+  // of the border box still targets the dialog through its native backdrop.
+  return event.clientX <= rect.left || event.clientX >= rect.right ||
+    event.clientY <= rect.top || event.clientY >= rect.bottom || getComputedStyle(sheet).clipPath !== 'none';
 }
 let startedOnBackdrop = false;
 sheet.addEventListener('pointerdown', event => { startedOnBackdrop = isBackdrop(event); });
