@@ -56,10 +56,44 @@ h1>span{display:block}.edition{display:inline-block;vertical-align:top;margin:6p
 .field{display:flex;align-items:center;gap:10px;min-height:48px;border:1px solid var(--line);padding-inline:12px;background:var(--paper);min-width:0}.field:focus-within{border-color:var(--ink);outline:1px solid var(--ink)}
 .field.search{flex:1}.field input,.field select{box-sizing:border-box;border:0;border-radius:0;outline:none;background:transparent;color:var(--ink);min-width:0;width:100%;font-size:16px}.field select{min-height:46px}.field select option{color:var(--ink);background:var(--panel)}
 .counter{color:var(--quiet);font-weight:600;font-size:13px;min-height:24px;margin-bottom:3px}.rows{border-top:1px solid var(--ink)}details{border-bottom:1px solid var(--line)}
-summary{list-style:none;min-height:48px;display:flex;align-items:center;gap:15px;font-weight:670;padding:9px 3px}summary::-webkit-details-marker{display:none}.rows summary:hover,.guides summary:hover{text-decoration:underline;text-underline-offset:4px}
+summary{list-style:none;min-height:48px;display:flex;align-items:center;gap:15px;font-weight:670;padding:9px 3px}summary::-webkit-details-marker{display:none}.guides summary:hover{text-decoration:underline;text-underline-offset:4px}
 .cat{margin-left:auto;font-size:12px;color:var(--quiet);white-space:nowrap;font-weight:550}.pm{flex:none;display:grid;place-items:center;width:25px;height:25px;font-family:var(--sans);font-size:20px;line-height:1;background:var(--pale)}details[open]>summary .pm{background:var(--signal);color:var(--on-signal)}details[open]>summary .pm::after{content:"−"}.pm::after{content:"+"}
 .detail{font-size:15px;color:var(--quiet);padding:0 42px 15px 3px;max-width:65em}.pager{display:flex;gap:7px;align-items:center;justify-content:flex-end;margin-top:15px}
 .pager button,.reset{min-width:44px;min-height:44px;background:var(--pale);clip-path:var(--cut);font-weight:700;padding-inline:10px}.pager button:disabled{opacity:.45}.pager button:enabled:hover,.reset:hover{background:var(--signal);color:var(--on-signal)}.pager .meta{min-width:68px;text-align:center}.empty{padding:15px 0}
+.guides .pm { position:relative; }
+.guides summary .pm::before, .guides summary .pm::after {
+  content:""; position:absolute; inset:0; margin:auto;
+  width:11px; height:2px; background:currentColor;
+}
+.guides summary .pm::after { transform:rotate(90deg); }
+.guides details[open] .pm::after { content:""; transform:rotate(0); }
+@media (prefers-reduced-motion:no-preference) {
+  .guides .pm::after { transition:transform 200ms cubic-bezier(.16,1,.3,1); }
+  .rows > * {
+    transition:translate 260ms cubic-bezier(.16,1,.3,1),opacity 200ms ease-out;
+    transition-delay:var(--row-delay,0ms);
+  }
+  .rows[data-turn] > :nth-child(2) { --row-delay:38ms; }
+  .rows[data-turn] > :nth-child(n+3) { --row-delay:76ms; }
+  @starting-style {
+    .rows > * { opacity:.72; translate:0 4px; }
+    .rows[data-turn="next"] > * { translate:12px 0; }
+    .rows[data-turn="prev"] > * { translate:-12px 0; }
+  }
+  @supports selector(details::details-content) and (interpolate-size:allow-keywords) and (transition-behavior:allow-discrete) {
+    .guides { interpolate-size:allow-keywords; }
+    .guides details::details-content {
+      block-size:0; overflow:clip; opacity:0;
+      transition:block-size 180ms cubic-bezier(.7,0,.2,1),opacity 140ms ease-out,
+                 content-visibility 180ms allow-discrete;
+    }
+    .guides details[open]::details-content {
+      block-size:auto; opacity:1;
+      transition-duration:280ms,200ms,280ms;
+      transition-timing-function:cubic-bezier(.16,1,.3,1),ease-out,linear;
+    }
+  }
+}
 .guide-grid{display:grid;grid-template-columns:.8fr 1.4fr;gap:clamp(25px,6vw,90px)}.guides{border-top:1px solid var(--ink)}.guides .pm{margin-left:auto}.guides summary{padding-block:12px}.guide-grid p{color:var(--quiet);font-size:15px;margin-top:12px}
 kbd{font:600 .9em var(--sans);padding:1px 4px;border:1px solid var(--line);color:var(--ink);white-space:nowrap}
 footer{border-top:1px solid var(--line);padding:16px 0}footer .wrap{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}footer .meta{color:var(--quiet)}
@@ -71,8 +105,107 @@ footer{border-top:1px solid var(--line);padding:16px 0}footer .wrap{display:flex
 }
 @media(max-width:390px){.nav{gap:9px}.brand span{font-size:14px}.edition{display:table;margin:9px 0 0}.scene,.scene:first-child,.scene:last-child{grid-template-columns:60px minmax(0,1fr) 26px}.field input{font-size:16px}.nav a{font-size:12px}}
 @media(max-width:680px){.top .wrap{display:grid;grid-template-columns:minmax(0,1fr) auto 44px;gap:7px}.top .brand{min-width:0}.top .brand span{font-size:15px}.nav a{min-width:44px;justify-content:center}h1>span{display:block}h1 .edition{display:inline-block;margin:5px 0 0 10px}}
+/* One interaction drives the marker, arrow and illustration together. */
+.scene,.nav a,.actions .btn{--engaged:0}
+:is(.scene,.nav a,.actions .btn):is(:focus-visible,:active){--engaged:1}
+@media(hover:hover) and (pointer:fine){
+  :is(.scene,.nav a,.actions .btn):hover{--engaged:1}
+}
+.scene::before,.nav a::after{
+  content:"";position:absolute;pointer-events:none;left:0;height:3px;background:var(--ink);
+  transform-origin:left;transform:scaleX(var(--engaged));
+}
+.scene::before{top:-1px;width:44px}
+.nav a{position:relative}
+.nav a:hover{text-decoration:none}
+.nav a::after{bottom:4px;width:100%;height:2px}
+.actions .btn{position:relative;isolation:isolate;overflow:hidden}
+.actions .btn::before{
+  content:"";position:absolute;inset:0 0 0 auto;width:45px;z-index:-1;pointer-events:none;
+  background:color-mix(in srgb,var(--signal) 78%,var(--on-signal));clip-path:polygon(27% 0,100% 0,100% 100%,0 100%);
+  transform:translateX(calc(100% - var(--engaged) * 100%));
+}
+.route-progress{fill:none;stroke:var(--ink);stroke-width:2;stroke-dasharray:1;stroke-dashoffset:calc(1 - var(--engaged))}
+@media(prefers-reduced-motion:no-preference){
+  .scene,.nav a,.actions .btn{--control-ease:cubic-bezier(.16,1,.3,1);--wipe-ease:cubic-bezier(.7,0,.2,1)}
+  .scene::before,.nav a::after,.actions .btn::before{transition:transform 260ms var(--wipe-ease)}
+  .scene .jump .icon,.actions .btn .icon{transition:transform 280ms var(--control-ease)}
+  .scene .jump .icon{transform:translate(calc(var(--engaged) * 2px),calc(var(--engaged) * -2px))}
+  .actions .btn .icon{transform:translateX(calc(var(--engaged) * 3px))}
+  .slider-thumb,.slider-fill,.lock-brackets,.route-progress{transition:transform 360ms var(--control-ease),stroke-dashoffset 360ms var(--wipe-ease)}
+  .slider-thumb{transform:translateX(calc(var(--engaged) * var(--travel)))}
+  .slider-fill{transform-origin:left;transform-box:fill-box;transform:scaleX(calc(1 + var(--engaged) * var(--gain)))}
+  .lock-brackets{transform-origin:center;transform-box:fill-box;transform:scale(calc(1 - var(--engaged) * .22))}
+}
 @media(prefers-reduced-motion:no-preference){.plate-art{animation:arrive .42s cubic-bezier(.16,1,.3,1)}@keyframes arrive{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+.feature-link{
+  display:flex;align-items:center;gap:15px;padding:10px 8px 10px 4px;min-height:50px;
+  border-bottom:1px solid var(--line);position:relative;font-weight:670;
+}
+.feature-link::before{
+  content:"";position:absolute;inset:0;background:var(--pale);opacity:0;pointer-events:none;
+}
+.feature-link .name,.feature-link .cat,.feature-link .open-arrow{position:relative}
+.open-arrow{display:grid;place-items:center;width:27px;height:26px;flex:none;background:var(--pale);clip-path:var(--cut)}
+.open-arrow>.icon{width:16px;height:16px}
+.feature-link:is(:focus-visible,:active)::before{opacity:.72}
+.feature-link:is(:focus-visible,:active) .open-arrow{background:var(--signal);color:var(--on-signal)}
+@media (hover:hover) and (pointer:fine){
+  .feature-link:hover::before{opacity:.72}
+  .feature-link:hover .open-arrow{background:var(--signal);color:var(--on-signal)}
+}
+html{scrollbar-gutter:stable}
+html:has(#feature-sheet[open]){overflow:hidden}
+#feature-sheet{
+  position:fixed;inset:0;margin:auto;width:min(588px,calc(100% - 32px));max-width:none;
+  max-height:calc(100dvh - 40px);padding:0;color:var(--ink);background:var(--panel);
+  border:1px solid var(--ink);overflow:auto;overscroll-behavior:contain;
+}
+#feature-sheet::backdrop{background:rgb(17 20 16 / .63)}
+.sheet-bar{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 22px;background:var(--band);color:var(--band-ink)}
+.sheet-bar .meta{font-size:11px}.sheet-mark{display:inline-block;background:var(--signal);width:12px;height:6px;margin-right:9px;transform:skew(-18deg)}
+.sheet-body{padding:clamp(23px,4vw,43px);border-bottom:1px solid var(--line)}
+#feature-title{font-size:clamp(27px,4vw,45px);margin:12px 0;overflow-wrap:anywhere}
+#feature-description{color:var(--quiet);line-height:1.85;overflow-wrap:anywhere}
+.sheet-foot{padding:12px clamp(23px,4vw,43px);display:flex;align-items:center;justify-content:space-between;gap:16px}
+.sheet-foot p{color:var(--quiet);font-size:13px}.sheet-foot .btn{flex:none}
+@media(max-width:480px){
+  #feature-sheet{margin:auto auto 12px;width:calc(100% - 20px);max-height:calc(100dvh - 24px)}
+  .sheet-bar,.sheet-foot{padding-inline:16px}.sheet-foot{flex-wrap:wrap}.sheet-foot p{font-size:12px}
+}
+@media(prefers-reduced-motion:no-preference){
+  .feature-link::before,.feature-link .name,.feature-link .open-arrow .icon{transition:opacity 180ms ease,transform 240ms cubic-bezier(.16,1,.3,1)}
+  .feature-link::before{transform:scaleX(.98);transform-origin:left}
+  .feature-link:is(:focus-visible,:active)::before{transform:none}
+  .feature-link:is(:focus-visible,:active) .name{transform:translateX(6px)}
+  .feature-link:is(:focus-visible,:active) .open-arrow .icon{transform:translate(2px,-2px)}
+  @media(hover:hover) and (pointer:fine){
+    .feature-link:hover::before{transform:none}
+    .feature-link:hover .name{transform:translateX(6px)}
+    .feature-link:hover .open-arrow .icon{transform:translate(2px,-2px)}
+  }
+  @supports (transition-behavior:allow-discrete){
+    #feature-sheet{
+      opacity:0;transform:translateY(12px);clip-path:inset(0 0 12% 0);
+      transition:opacity 170ms ease-in,transform 200ms cubic-bezier(.7,0,.2,1),
+        clip-path 200ms cubic-bezier(.7,0,.2,1),display 200ms allow-discrete,overlay 200ms allow-discrete;
+    }
+    #feature-sheet[open]{
+      opacity:1;transform:none;clip-path:inset(0);
+      transition-duration:220ms,340ms,340ms,340ms,340ms;
+      transition-timing-function:ease-out,cubic-bezier(.16,1,.3,1),cubic-bezier(.16,1,.3,1),linear,linear;
+    }
+    #feature-sheet::backdrop{opacity:0;transition:opacity 200ms ease,display 200ms allow-discrete,overlay 200ms allow-discrete}
+    #feature-sheet[open]::backdrop{opacity:1}
+    @starting-style{
+      #feature-sheet[open]{opacity:0;transform:translateY(22px);clip-path:inset(0 0 18% 0)}
+      #feature-sheet[open]::backdrop{opacity:0}
+    }
+  }
+  .theme .icon{transition:transform 300ms cubic-bezier(.16,1,.3,1)}
+  [data-theme="dark"] .theme .icon{transform:rotate(180deg)}
+}
 </style>
 </head>
 <body>
@@ -193,9 +326,18 @@ footer{border-top:1px solid var(--line);padding:16px 0}footer .wrap{display:flex
 </div></div>
 <section class="section wrap" aria-labelledby="highlights"><div class="section-head"><div><div class="kicker">FEATURE HIGHLIGHTS</div><h2 id="highlights">常用功能</h2></div><a class="textlink" href="#catalog">全部项目<svg class="icon" aria-hidden="true"><use href="#arr"/></svg></a></div>
 <div class="scenes">
-  <a class="scene" href="#catalog" data-query="移动速度倍率"><svg class="scene-art" viewBox="0 0 180 68" preserveAspectRatio="xMinYMid meet" aria-hidden="true"><g fill="none" stroke="currentColor"><path d="M4 18h152M4 48h122" stroke-width="2"/><path d="M4 18h65M4 48h35" stroke="var(--ink)" stroke-width="4"/></g><g fill="var(--ink)"><path d="m61 8 14 0-3 20H58zM30 39h14l-3 18H27z"/></g></svg><h3>角色手感</h3><span class="jump"><svg class="icon" aria-hidden="true"><use href="#diag"/></svg></span><p>分别调整移动、冲刺与跳跃倍率，输入小数也可精细控制。</p></a>
-  <a class="scene" href="#catalog" data-query="传送点"><svg class="scene-art" viewBox="0 0 180 68" preserveAspectRatio="xMinYMid meet" aria-hidden="true"><g fill="none" stroke="currentColor"><path d="m4 47 24-28 43 5 32-19 57 5M5 56l27-27 41 4 31-18 49 1M15 61l18-21 43 2 35-16 32-1" opacity=".44"/><path d="M24 49h32l32-30h42" stroke="var(--ink)" stroke-width="2" stroke-dasharray="5 3"/></g><path d="m17 49 7-7 7 7-7 7zM123 12h14v14h-14z" fill="var(--ink)"/></svg><h3>世界传送</h3><span class="jump"><svg class="icon" aria-hidden="true"><use href="#diag"/></svg></span><p>给营地或钓点命名，在悬浮窗点选保存的位置即可返回。</p></a>
-  <a class="scene" href="#catalog" data-query="红框"><svg class="scene-art" viewBox="0 0 180 68" preserveAspectRatio="xMinYMid meet" aria-hidden="true"><g fill="none" stroke="currentColor"><path d="M7 48h15m-7-8v16m2-8 98-20" stroke-width="1.5"/><path d="M88 21v-9h13m26 0h13v9m0 13v9h-13m-26 0H88v-9" stroke="var(--ink)" stroke-width="3"/><path d="M110 27h9m-4-5v10"/></g></svg><h3>武器战斗</h3><span class="jump"><svg class="icon" aria-hidden="true"><use href="#diag"/></svg></span><p>分别设置辅助瞄准与魔法子弹，也可调整实体标注距离。</p></a>
+  <a class="scene" href="#catalog" data-query="移动速度倍率"><svg class="scene-art" viewBox="0 0 180 68" preserveAspectRatio="xMinYMid meet" aria-hidden="true">
+    <path d="M4 18h152M4 48h122" fill="none" stroke="currentColor" stroke-width="2"/>
+    <g style="--travel:26px;--gain:.4"><path class="slider-fill" d="M4 16h65v4H4z" fill="var(--ink)"/><path class="slider-thumb" d="m61 8 14 0-3 20H58z" fill="var(--ink)"/></g>
+    <g style="--travel:14px;--gain:.4"><path class="slider-fill" d="M4 46h35v4H4z" fill="var(--ink)"/><path class="slider-thumb" d="M30 39h14l-3 18H27z" fill="var(--ink)"/></g>
+  </svg><h3>角色手感</h3><span class="jump"><svg class="icon" aria-hidden="true"><use href="#diag"/></svg></span><p>分别调整移动、冲刺与跳跃倍率，输入小数也可精细控制。</p></a>
+  <a class="scene" href="#catalog" data-query="传送点"><svg class="scene-art" viewBox="0 0 180 68" preserveAspectRatio="xMinYMid meet" aria-hidden="true">
+    <g fill="none" stroke="currentColor"><path d="m4 47 24-28 43 5 32-19 57 5M5 56l27-27 41 4 31-18 49 1M15 61l18-21 43 2 35-16 32-1" opacity=".44"/><path id="route-path" d="M24 49h32l32-30h42" pathLength="1"/><use href="#route-path" class="route-progress"/></g>
+    <path d="m17 49 7-7 7 7-7 7zM123 12h14v14h-14z" fill="var(--ink)"/>
+  </svg><h3>世界传送</h3><span class="jump"><svg class="icon" aria-hidden="true"><use href="#diag"/></svg></span><p>给营地或钓点命名，在悬浮窗点选保存的位置即可返回。</p></a>
+  <a class="scene" href="#catalog" data-query="红框"><svg class="scene-art" viewBox="0 0 180 68" preserveAspectRatio="xMinYMid meet" aria-hidden="true">
+    <g fill="none" stroke="currentColor"><path d="M7 48h15m-7-8v16m2-8 98-20" stroke-width="1.5"/><path class="lock-brackets" d="M88 21v-9h13m26 0h13v9m0 13v9h-13m-26 0H88v-9" stroke="var(--ink)" stroke-width="3"/><path d="M110 27h9m-4-5v10"/></g>
+  </svg><h3>武器战斗</h3><span class="jump"><svg class="icon" aria-hidden="true"><use href="#diag"/></svg></span><p>分别设置辅助瞄准与魔法子弹，也可调整实体标注距离。</p></a>
 </div></section>
 <section class="catalogue section" id="catalog" aria-labelledby="catalog-title"><div class="wrap">
   <div class="section-head"><div><div class="kicker">FEATURE INDEX</div><h2 id="catalog-title">功能目录</h2></div><span class="folio">HOW TO FISH / R26</span></div>
@@ -215,6 +357,15 @@ footer{border-top:1px solid var(--line);padding:16px 0}footer .wrap{display:flex
     <details><summary>后台运行、紧急停用与退出<span class="pm" aria-hidden="true"></span></summary><div class="detail">点主窗口的 × 会隐藏到系统托盘，已开启的功能继续运行。按 <kbd>Ctrl+Shift+F12</kbd> 可紧急停用持续功能。要完全退出，右键托盘图标，选“退出修改器”。</div></details>
   </div>
 </section></main>
+<dialog id="feature-sheet" aria-labelledby="feature-title" aria-describedby="feature-description">
+  <div class="sheet-bar"><span class="meta"><i class="sheet-mark" aria-hidden="true"></i>FEATURE DETAILS</span><span class="meta" id="feature-number"></span></div>
+  <div class="sheet-body">
+    <p class="kicker" id="feature-category"></p>
+    <h2 id="feature-title"></h2>
+    <p id="feature-description"></p>
+  </div>
+  <div class="sheet-foot"><p>在修改器中按 <kbd>Ctrl+F</kbd> 搜索此名称。</p><button class="btn cut" type="button" id="feature-back" autofocus>返回目录 <span aria-hidden="true">↩</span></button></div>
+</dialog>
 <footer><div class="wrap"><span class="meta">How to Fish / Windows</span><a class="textlink" href="#overview">回到顶部 ↑</a></div></footer>
 <script type="application/json" id="entries">[
   {
@@ -822,7 +973,7 @@ function element(tag, className, text) {
   node.textContent = text;
   return node;
 }
-function draw() {
+function draw(turn) {
   const query = field.value.trim().toLowerCase();
   const terms = query.split(/\s+/).filter(Boolean);
   const matches = entries.filter(entry => {
@@ -837,16 +988,26 @@ function draw() {
   const pages = Math.ceil(matches.length / pageSize);
   pageNumber = Math.min(pageNumber, pages || 1);
   const start = (pageNumber - 1) * pageSize;
-  const fragment = document.createDocumentFragment();
-  for (const entry of matches.slice(start, start + pageSize)) {
-    const details = document.createElement('details'), summary = document.createElement('summary');
-    const plus = element('span','pm','');
-    plus.setAttribute('aria-hidden','true');
-    summary.append(element('span','name',entry.title),element('span','cat',entry.category),plus);
-    details.append(summary,element('div','detail',entry.description));
-    fragment.append(details);
+  if (turn) results.dataset.turn = turn;
+  else delete results.dataset.turn;
+  const visible = matches.slice(start, start + pageSize);
+  const ids = visible.map(entry => entry.id).join(' ');
+  if (results.dataset.ids !== ids) {
+    const fragment = document.createDocumentFragment();
+    for (const entry of visible) {
+      const link = element('a','feature-link','');
+      link.href = '#feature=' + entry.id;
+      link.setAttribute('aria-haspopup','dialog');
+      link.setAttribute('aria-controls','feature-sheet');
+      const arrow = element('span','open-arrow','');
+      arrow.setAttribute('aria-hidden','true');
+      arrow.innerHTML = '<svg class="icon"><use href="#diag"/></svg>';
+      link.append(element('span','name',entry.title),element('span','cat',entry.category),arrow);
+      fragment.append(link);
+    }
+    results.replaceChildren(fragment);
+    results.dataset.ids = ids;
   }
-  results.replaceChildren(fragment);
   lookup('count').textContent = matches.length ? '显示第 ' + (start + 1) + '–' + Math.min(start + pageSize, matches.length) + ' 项，共 ' + matches.length + ' 项' : '0 项结果';
   lookup('empty').hidden = matches.length > 0;
   lookup('pager').hidden = pages < 2;
@@ -857,8 +1018,8 @@ function draw() {
 function applyFilter() { pageNumber = 1; draw(); }
 field.addEventListener('input', applyFilter);
 category.addEventListener('change', applyFilter);
-lookup('prev').addEventListener('click', () => { pageNumber--; draw(); });
-lookup('next').addEventListener('click', () => { pageNumber++; draw(); });
+lookup('prev').addEventListener('click', () => { pageNumber--; draw('prev'); });
+lookup('next').addEventListener('click', () => { pageNumber++; draw('next'); });
 lookup('reset').addEventListener('click', () => { field.value = ''; category.value = ''; applyFilter(); field.focus(); });
 document.querySelectorAll('[data-query]').forEach(link => link.addEventListener('click', () => {
   field.value = link.dataset.query;
@@ -870,6 +1031,60 @@ document.querySelectorAll('a[href="#catalog"]:not([data-query])').forEach(link =
   category.value = '';
   applyFilter();
 }));
+// Keep the catalogue mounted underneath its addressable feature pages. The browser
+// owns modal focus and history so returning preserves the reader's place.
+const sheet = lookup('feature-sheet');
+let originLink = null;
+function syncFeaturePage() {
+  const id = location.hash.startsWith('#feature=') ? location.hash.slice(9) : '';
+  const index = entries.findIndex(entry => entry.id === id);
+  if (index < 0) {
+    if (sheet.open) sheet.close();
+    return;
+  }
+  const entry = entries[index];
+  lookup('feature-title').textContent = entry.title;
+  lookup('feature-category').textContent = entry.category;
+  lookup('feature-number').textContent = String(index + 1).padStart(2,'0') + ' / ' + entries.length;
+  lookup('feature-description').textContent = entry.description;
+  if (!sheet.open) sheet.showModal();
+}
+results.addEventListener('click', event => {
+  const link = event.target.closest('a.feature-link');
+  if (!link || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  originLink = link;
+  // Some browsers do not focus a link on a pointer click. Make the return
+  // destination explicit before the native modal records it.
+  link.focus({preventScroll:true});
+  history.pushState({fromFeatureIndex:true},'',link.hash);
+  syncFeaturePage();
+});
+function returnToIndex() {
+  if (!sheet.open) return;
+  sheet.close();
+  if (originLink?.isConnected && history.state?.fromFeatureIndex) {
+    history.back();
+  } else {
+    history.replaceState(null,'','#catalog');
+    lookup('catalog').scrollIntoView();
+    field.focus({preventScroll:true});
+  }
+}
+lookup('feature-back').addEventListener('click', returnToIndex);
+sheet.addEventListener('cancel', event => { event.preventDefault(); returnToIndex(); });
+function isBackdrop(event) {
+  if (event.target !== sheet) return false;
+  const rect = sheet.getBoundingClientRect();
+  return event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom;
+}
+let startedOnBackdrop = false;
+sheet.addEventListener('pointerdown', event => { startedOnBackdrop = isBackdrop(event); });
+sheet.addEventListener('click', event => {
+  if (startedOnBackdrop && isBackdrop(event)) returnToIndex();
+  startedOnBackdrop = false;
+});
+window.addEventListener('hashchange',syncFeaturePage);
 function theme(dark) {
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   lookup('theme').setAttribute('aria-pressed',String(dark));
@@ -881,6 +1096,7 @@ theme(preference.matches);
 preference.addEventListener('change', event => { if (!chosen) theme(event.matches); });
 lookup('theme').addEventListener('click', () => { chosen = true; theme(document.documentElement.dataset.theme !== 'dark'); });
 draw();
+syncFeaturePage();
 </script>
 <script id="font-license" type="text/plain">Copyright 2020 The Saira Project Authors (https://github.com/Omnibus-Type/Saira)
 
