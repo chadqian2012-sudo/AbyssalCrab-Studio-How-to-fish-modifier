@@ -75,48 +75,125 @@ h1>span{display:block}.edition{display:inline-block;vertical-align:top;margin:6p
 .btn:hover,.btn:focus-visible{background:var(--signal);color:var(--on-signal)}.btn:active{transform:translateY(1px)}.textlink{font-size:14px;font-weight:650;display:inline-flex;align-items:center;gap:7px;min-height:44px}
 .plate{min-width:0;position:relative}.plate-title,.plate-caption{display:flex;gap:15px;align-items:center;justify-content:space-between;color:var(--quiet)}
 .plate-title{padding:0 0 9px;border-bottom:1px solid var(--line)}.plate-title span:first-child{display:flex;align-items:center;gap:9px}.sq{display:inline-block;width:8px;height:8px;background:var(--ink)}
-.plate-art{position:relative;display:grid;align-items:center;isolation:isolate;padding:10px 2% 4px}.blueprint{position:absolute;width:100%;height:100%;inset:0;color:var(--line);z-index:-1;opacity:.65}
-.drawing{width:100%;display:block}.drawing>svg{display:block;width:100%;height:auto;max-height:420px}.plate-caption{border-top:1px solid var(--line);padding-top:7px;font-size:11px}.plate-caption .meta{font-size:9px}.plate-caption span:last-child{font-weight:600}
-.drawing{container-type:inline-size}.drawing>.preview-compact{display:none}
-.hero .lead{display:grid}
-.hero .lead>span{grid-area:1 / 1;align-self:center}
-.widget-copy{visibility:hidden}
-.story-readout{transform-box:fill-box;transform-origin:center bottom;transform:scaleY(var(--readout-mark,1))}
+.plate-art{
+  position:relative;isolation:isolate;container-type:inline-size;height:clamp(420px,33vw,500px)
+}
+.blueprint{position:absolute;inset:0;width:100%;height:100%;color:var(--line);opacity:.65;pointer-events:none}
+.plate-caption{border-top:1px solid var(--line);padding-top:7px;font-size:11px}.plate-caption .meta{font-size:9px}.plate-caption span:last-child{font-weight:600}
+.sim-window{
+  position:absolute;display:flex;flex-direction:column;min-width:0;min-height:0;container-type:inline-size;
+  color:var(--ink);background:var(--paper);border:1px solid var(--control-edge,var(--ink));
+}
+.sim-window::before,.sim-window::after{
+  content:"";position:absolute;pointer-events:none;background:repeating-linear-gradient(135deg,transparent 0 2px,var(--quiet) 2px 3px,transparent 3px 5px);
+}
+.sim-window::before{left:4px;right:-5px;top:100%;height:5px}
+.sim-window::after{top:4px;bottom:0;left:100%;width:5px}
+#sim-main{inset:12px 10% 45px 1%}
+#sim-widget{
+  right:1%;bottom:9px;width:54%;height:53%;color-scheme:dark;
+  --paper:var(--widget-paper,#292d26);--panel:var(--widget-bar,#353a31);--pale:#444a40;
+  --ink:var(--band-ink);--quiet:var(--band-soft);--line:var(--widget-rule,#59604f);--control-edge:var(--widget-edge,#909881);
+}
+#sim-stage[data-front="main"] #sim-main,#sim-stage[data-front="widget"] #sim-widget{z-index:2}
+#sim-stage .sim-window[data-max]{inset:7px;width:auto;height:auto;transform:none;z-index:3}
+#sim-stage:has(.sim-window[data-max]){height:max(clamp(420px,33vw,500px),min(72dvh,660px))}
+.sim-titlebar{display:flex;align-items:center;justify-content:space-between;gap:5px;flex:none;min-height:39px;padding-left:10px;background:var(--band);color:var(--band-ink)}
+.sim-titlebar h2{display:flex;align-items:center;gap:7px;margin:0;font-size:clamp(14px,2.8cqi,18px);line-height:1.2;letter-spacing:0;white-space:nowrap}
+.sim-titlebar svg{width:20px;height:20px;color:var(--signal);flex:none}
+#sim-widget .sim-titlebar{background:var(--panel)}
+.sim-ac-mark{padding:3px 5px;background:var(--signal);color:var(--on-signal);font:800 13px/1 var(--sans)}
+.sim-window-actions{align-self:stretch;display:flex}
+.sim-window-actions button{background:transparent;color:inherit;min-width:32px;padding:0 8px;font:600 17px/1 var(--sans)}
+#sim-widget [data-window-action="close"]{font-size:13px}
+.sim-window-actions button:is(:hover,:focus-visible){background:var(--signal);color:var(--on-signal)}
+.sim-window :is(button,input,select,summary):focus-visible{outline:2px solid currentColor;outline-offset:-2px}
+.sim-tabs{display:flex;gap:2px;align-items:stretch;flex:none;overflow-x:auto;scrollbar-width:thin;padding:5px 7px;background:var(--pale);border-bottom:1px solid var(--line)}
+.sim-tabs button{flex:none;min-height:28px;padding:3px 9px;background:transparent;color:var(--ink);font-size:12px;font-weight:650;white-space:nowrap}
+.sim-tabs button:is([aria-selected="true"],[aria-pressed="true"]){background:var(--signal);color:var(--on-signal);clip-path:var(--cut)}
+#sim-widget .sim-tabs{background:var(--paper)}
+.sim-body{flex:1;min-height:0;overflow:auto;scrollbar-width:thin;scrollbar-color:var(--control-edge,var(--quiet)) transparent;padding:8px 12px 15px;font-size:13px;line-height:1.45;overflow-wrap:anywhere}
+.sim-group{margin:0;padding:5px 0 9px;font-size:17px;line-height:1.3}
+.sim-body h4,.sim-name{margin:0;font-size:14px;line-height:1.4;font-weight:730}
+.sim-row,.sim-item{min-width:0;padding:7px 0;border-bottom:1px solid var(--line)}
+.sim-row:has(>.sim-limits){display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 8px;align-items:center}
+.sim-row>.sim-limits{grid-area:1 / 2;text-align:right}
+.sim-row>.sim-controls,.sim-row>.sim-status{grid-column:1/-1}
+#sim-main-body [data-sim-id="player.move.multiplier"]{position:relative;padding-inline:9px;background:var(--panel);border:1px solid var(--control-edge,var(--line))}
+#sim-main-body [data-sim-id="player.move.multiplier"]::before{content:"";position:absolute;top:-1px;left:-1px;width:19%;height:3px;background:var(--ink)}
+#sim-main-body [data-sim-id="player.move.multiplier"] input.sim-number{font-size:clamp(22px,5cqi,30px);width:4.15ch}
+.sim-bar,.sim-controls{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}
+.sim-controls{margin-top:5px}.sim-controls>*{min-width:0}
+.sim-range{-webkit-appearance:none;appearance:none;flex:1;min-width:30px;width:0;height:24px;padding:0;background:transparent;cursor:pointer}
+.sim-range::-webkit-slider-runnable-track{height:3px;background:linear-gradient(to right,var(--ink) 0 var(--fill,0%),var(--line) var(--fill,0%) 100%)}
+.sim-range::-moz-range-track{height:3px;background:var(--line)}.sim-range::-moz-range-progress{height:3px;background:var(--ink)}
+.sim-range::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:10px;height:17px;margin-top:-7px;border:1px solid var(--ink);border-radius:0;background:var(--ink);transform:skew(-9deg)}
+.sim-range::-moz-range-thumb{width:9px;height:16px;border:1px solid var(--ink);border-radius:0;background:var(--ink);transform:skew(-9deg)}
+.sim-reading{display:inline-flex;align-items:baseline;gap:2px;flex:none;border-bottom:1px solid var(--control-edge,var(--line))}
+.sim-body :is(input:not([type="range"]),select){max-width:100%;border:1px solid var(--control-edge,var(--line));border-radius:0;background:var(--panel);color:var(--ink);font:600 14px/1.35 var(--sans);padding:4px 6px}
+.sim-body .sim-reading input.sim-number{width:9.25ch;padding:1px 2px;border:0;text-align:right;font:720 20px/1.2 var(--sans);background:transparent;font-variant-numeric:tabular-nums}
+.sim-controls:has(.sim-range) .sim-reading input.sim-number{width:5ch}
+.sim-unit,.sim-limits,.sim-status{font-size:11px;color:var(--quiet)}.sim-status:empty{display:none}.sim-limits,.sim-status{margin:3px 0 0}
+.sim-apply,.sim-action,.sim-switch,.sim-choice,.sim-item button,.sim-fields button,.sim-body button:not(.sim-range){
+  min-height:30px;max-width:100%;padding:3px 9px;border:1px solid var(--control-edge,var(--line));background:var(--pale);color:var(--ink);font-weight:650;line-height:1.25;
+}
+.sim-body button.sim-apply,.sim-body button:is([aria-pressed="true"],[aria-checked="true"],[aria-selected="true"]){background:var(--signal);color:var(--on-signal);border-color:var(--on-signal)}
+.sim-body button:not(:disabled):is(:hover,:focus-visible){border-color:var(--ink)}
+.sim-body button:disabled{opacity:.54}
+.sim-body button.sim-switch{position:relative;padding-left:41px}
+.sim-switch::before,.sim-switch::after{content:"";position:absolute;top:50%}
+.sim-switch::before{left:6px;width:27px;height:12px;margin-top:-6px;border:1px solid currentColor}
+.sim-switch::after{left:9px;width:7px;height:6px;margin-top:-3px;background:currentColor}
+.sim-switch:is([aria-checked="true"],[aria-pressed="true"])::after{transform:translateX(14px)}
+.sim-tabs button{position:relative}
+.sim-apply{position:relative;isolation:isolate;overflow:hidden}
+.sim-apply[data-confirmed]::before{content:"";position:absolute;z-index:-1;inset:0;background:var(--on-signal);opacity:.15;transform-origin:left}
+.sim-body [aria-invalid="true"]{outline:1px dashed currentColor;outline-offset:-1px}
+.sim-fields{margin-top:4px;border:0}.sim-fields>summary{min-height:32px;padding:4px 0;color:var(--quiet);font-size:13px}
+.sim-field{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:5px;padding:4px 0}
+.sim-field :is(input:not([type="checkbox"]),select){min-width:0;max-width:65%}
+.sim-launch{position:absolute;z-index:4;bottom:4px;min-height:44px;padding:0 12px;background:var(--signal);color:var(--on-signal);font-weight:800}
+#sim-ac{right:4px;min-width:46px}#sim-reopen{left:4px}
+.hero .lead{display:grid}.hero .lead>span{grid-area:1/1;align-self:center}.widget-copy{visibility:hidden}
 @media(prefers-reduced-motion:no-preference){
-  .hero{--story:0;--handoff:clamp(0,calc((var(--story) - .08) * 1.18),1)}
-  .hero[data-scroll-demo] .lead>span{transition:translate 200ms cubic-bezier(.16,1,.3,1)}
-  .hero[data-scroll-demo] .widget-copy{translate:0 5px}
-  .hero[data-scroll-demo].show-widget .lead>span:first-child{visibility:hidden;translate:0 -5px}
-  .hero[data-scroll-demo].show-widget .widget-copy{visibility:visible;translate:0 0}
-  .hero[data-scroll-demo] .story-main{
-    transform-box:fill-box;transform-origin:left center;
-    transform:translateY(calc(var(--handoff) * 10px)) scale(calc(1 - var(--handoff) * .13));
-    opacity:clamp(0,calc(1.22 - var(--handoff) * 1.85),1);
-  }
-  .hero[data-scroll-demo] .story-widget{
-    transform-box:fill-box;transform-origin:center;
-    --readout-mark:clamp(0,calc((var(--handoff) - .56) * 2.5),1);
-    transform:translate(calc(var(--handoff) * -166px),calc(var(--handoff) * -89px)) scale(calc(.97 + var(--handoff) * .94));
-  }
-  .hero[data-scroll-demo] .preview-compact .story-widget{
-    transform-origin:bottom right;
-    transform:translate(calc(var(--handoff) * -5px),calc(var(--handoff) * -37px)) scale(calc(.93 + var(--handoff) * .12));
-  }
-  .hero[data-scroll-demo] .plate-caption{position:relative}
-  .hero[data-scroll-demo] .plate-caption::before{content:"";position:absolute;inset:-2px 0 auto;height:3px;background:var(--ink);transform:scaleX(var(--story));transform-origin:left}
-  @supports (animation-timeline:view()){
-    :is(.section-head,.guide-grid>div:first-child) h2{
-      animation:chapter-arrive linear both;animation-timeline:view();animation-range:entry 0% cover 15%;
-    }
-    @keyframes chapter-arrive{from{translate:0 10px;opacity:.78}to{translate:0 0;opacity:1}}
-  }
+ .hero[data-scroll-demo] #sim-widget:not([data-max]){transform-origin:bottom right;transform:translate(calc(var(--story,0) * -23px),calc(var(--story,0) * -50px)) scale(calc(1 + var(--story,0) * .11))}
+ .hero[data-scroll-demo].show-widget .widget-copy{visibility:visible}
+ .hero[data-scroll-demo].show-widget .lead>span:first-child{visibility:hidden}
+ .sim-switch::after{transition:transform 220ms cubic-bezier(.16,1,.3,1)}
+ .sim-range::-webkit-slider-thumb{transition:transform 160ms ease-out}
+ .sim-range:active::-webkit-slider-thumb{transform:skew(-9deg) scale(1.24)}
+ .sim-range::-moz-range-thumb{transition:transform 160ms ease-out}
+ .sim-range:active::-moz-range-thumb{transform:skew(-9deg) scale(1.24)}
+ .sim-apply[data-confirmed]::before{animation:sim-confirm 340ms cubic-bezier(.16,1,.3,1)}
+ @keyframes sim-confirm{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+ @supports (animation-timeline:view()){
+   :is(.section-head,.guide-grid>div:first-child) h2{animation:chapter-arrive linear both;animation-timeline:view();animation-range:entry 0% cover 15%}
+   @keyframes chapter-arrive{from{translate:0 10px;opacity:.78}to{translate:0 0;opacity:1}}
+ }
 }
-@container (max-width:510px){
-  .drawing>.preview-wide{display:none}
-  .drawing>.preview-compact{display:block;max-height:335px}
+@media(max-width:980px) and (min-width:681px){
+ .hero .hero-inner{grid-template-columns:1fr;gap:20px}
+ .hero .plate{width:100%;max-width:760px;justify-self:center}
+ .hero .lead{max-width:42em}
 }
-@media(orientation:landscape) and (max-height:360px){
-  .drawing>.preview-compact{max-height:clamp(212px,calc(100dvh - 20px),335px)}
+@media(max-width:680px){
+ .plate-art{height:464px}#sim-main{inset:5px 0 48px}#sim-widget{inset:32px 0 50px 5px;width:auto;height:auto}
+ #sim-stage:has(.sim-window[data-max]){height:max(464px,min(76dvh,680px))}
+ #sim-stage .sim-window[data-max]{inset:5px 0 47px}
+ .sim-window-actions button,.sim-tabs button,.sim-body button:not(.sim-range),.sim-fields summary,.sim-range,.sim-field select{min-width:44px;min-height:44px}
+ .sim-body :is(input:not([type="range"]),select),.sim-number{font-size:16px}
+ .sim-tabs{padding:0 5px}.sim-tabs button{font-size:13px}
+ .sim-body{padding-inline:9px}.sim-body button:not(.sim-range){padding-inline:7px}
+ .sim-body button.sim-switch{padding-left:41px}
+ .hero[data-scroll-demo] #sim-widget:not([data-max]){transform:none}
+}
+@media(pointer:coarse){
+ .sim-window-actions button,.sim-tabs button,.sim-body button:not(.sim-range),.sim-fields summary,.sim-range,.sim-body :is(input[type="text"],select){min-height:44px}
+ .sim-window-actions button,.sim-tabs button{min-width:44px}
+ .sim-body .sim-reading input.sim-number,.sim-body .sim-field select{font-size:16px}
+}
+@media(pointer:coarse) and (min-width:681px){
+ .plate-art{min-height:480px}#sim-widget{height:58%}
 }
 @media(max-width:680px){
   .scene-art>.scene-marks{transform:scale(1.06,1.85);transform-origin:0 34px}
@@ -192,14 +269,14 @@ footer{border-top:1px solid var(--line);padding:16px 0 max(16px,env(safe-area-in
 @media(hover:none){.btn{background:var(--signal);color:var(--on-signal)}}
 @media(max-width:840px){.hero-inner{grid-template-columns:.86fr 1.14fr;gap:14px}h1{font-size:clamp(52px,7.5vw,66px)}.nav{gap:16px}.hero .lead{font-size:15px}.actions{gap:14px}}
 @media(max-width:680px){.wrap{width:calc(100% - 36px)}.top .wrap{display:grid;grid-template-columns:minmax(0,1fr) auto 44px;min-height:62px;gap:7px;padding:8px 0}.brand{min-width:0;justify-self:start;font-size:15px;white-space:normal}.brand svg{width:28px;height:28px;flex:none}.nav{gap:13px;margin:0;font-size:13px}.nav a{min-width:44px;justify-content:center}.nav a:first-child{display:none}.hero-inner{grid-template-columns:1fr;gap:28px;padding:31px 0}
-  h1{font-size:clamp(48px,12.7vw,72px);margin:13px 0 11px;line-height:1.08}h1>span{display:block}h1 .edition{display:inline-block;font-size:12px;margin:5px 0 0 10px}.actions{margin-top:16px}.plate-art{padding:5px 1%}.metrics .wrap{padding:17px 0}.metric{min-height:52px;flex-direction:column;gap:4px;text-align:center}.metric b{font-size:27px}.metric span{font-size:11px}.metric small{display:none}
+  h1{font-size:clamp(48px,12.7vw,72px);margin:13px 0 11px;line-height:1.08}h1>span{display:block}h1 .edition{display:inline-block;font-size:12px;margin:5px 0 0 10px}.actions{margin-top:16px}.metrics .wrap{padding:17px 0}.metric{min-height:52px;flex-direction:column;gap:4px;text-align:center}.metric b{font-size:27px}.metric span{font-size:11px}.metric small{display:none}
   .scenes{grid-template-columns:1fr}.scene,.scenes>.scroll-slot:first-child>.scene,.scenes>.scroll-slot:last-child>.scene{padding:13px 0;grid-template-columns:76px minmax(0,1fr) 29px;gap:0 13px}.scenes>.scroll-slot+.scroll-slot>.scene{border-left:0;border-top:0}.scene-art{grid-column:1;grid-row:1/3;margin:0;height:63px;align-self:center}.scene h3{grid-column:2;grid-row:1;font-size:18px}.scene .jump{grid-column:3;grid-row:1/3}.scene p{grid-column:2;grid-row:2;font-size:13px;margin:3px 0 0}.guide-grid{grid-template-columns:1fr}.tools{gap:6px}.field{padding-inline:8px}.filter{max-width:39%}.section-head{align-items:center}.section-head .folio{display:none}.section{padding:36px 0}
 }
 @media(max-width:425px){.tools{display:grid}.field.filter{max-width:none}}
 @media(max-width:390px){.nav{gap:9px}.scene,.scenes>.scroll-slot:first-child>.scene,.scenes>.scroll-slot:last-child>.scene{grid-template-columns:60px minmax(0,1fr) 26px}.nav a{font-size:12px}}
 /* One interaction drives the marker, arrow and illustration together. */
 .scene,.nav a,.actions .btn{--engaged:0}
-.scene,.feature-link{-webkit-tap-highlight-color:transparent}
+.scene,.feature-link,.sim-window button,.sim-launch{-webkit-tap-highlight-color:transparent}
 :is(.scene,.nav a,.actions .btn):is(:focus-visible,:active,[data-pressed]){--engaged:1}
 @media(hover:hover) and (pointer:fine){
   :is(.scene,.nav a,.actions .btn):hover{--engaged:1}
@@ -265,20 +342,22 @@ footer{border-top:1px solid var(--line);padding:16px 0 max(16px,env(safe-area-in
   .hero h1>span+span{animation:title-reveal 460ms var(--control-ease) backwards}
   .hero .lead,.hero .actions{animation:copy-reveal 360ms var(--control-ease) 45ms backwards}
   .hero .actions:focus-within{animation:none}
-  .drawing{animation:drawing-reveal 440ms var(--control-ease) backwards}
-  .widget-layer{animation:dock-widget 560ms var(--control-ease) 100ms backwards;transform-box:fill-box}
   @keyframes title-reveal{
     from{transform:translateX(.28em)}
     to{transform:none}
   }
   @keyframes copy-reveal{from{transform:translateY(8px)}to{transform:none}}
-  @keyframes drawing-reveal{from{transform:translateX(-12px);clip-path:inset(0 12% 0 0)}to{transform:none;clip-path:inset(0)}}
-  @keyframes dock-widget{
-    from{translate:21px 22px;clip-path:inset(0 0 78% 0) fill-box}
-    to{translate:0 0;clip-path:inset(0) fill-box}
-  }
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+.sim-tabs{isolation:isolate}
+.sim-tabs .sim-tab{position:relative}
+.sim-tabs .sim-tab[aria-selected="true"]{clip-path:none;background:transparent}
+.sim-tab-marker{position:absolute;inset:0;z-index:-1;pointer-events:none;background:var(--signal);clip-path:var(--cut);transform-origin:left center}
+.sim-reticle{height:48px;display:grid;place-items:center;background:#282e2e;border:1px solid var(--line)}
+.sim-reticle i{display:block;position:relative;width:var(--reticle-size);height:var(--reticle-size);color:var(--reticle-color)}
+.sim-reticle[data-shape="十字"] i{background:linear-gradient(currentColor,currentColor) center/2px 100% no-repeat,linear-gradient(currentColor,currentColor) center/100% 2px no-repeat}
+.sim-reticle[data-shape="圆环"] i{border:2px solid currentColor;border-radius:50%}
+.sim-reticle[data-shape="圆点"] i{border-radius:50%;background:currentColor;transform:scale(.55)}
 .feature-link{
   --row-active:0;
   display:flex;align-items:center;gap:15px;padding:10px 8px 10px 4px;min-height:50px;
@@ -380,6 +459,23 @@ html:has(#feature-sheet[open]){overflow:hidden}
   .theme .icon{transform:rotate(calc(var(--theme-angle,0deg) + var(--press)*24deg));transition:transform 300ms cubic-bezier(.16,1,.3,1)}
   [data-theme="dark"] .theme{--theme-angle:180deg}
 }
+.sim-widget-card{border-bottom:1px solid var(--line)}
+.sim-widget-tools{display:flex;justify-content:flex-end;gap:5px;flex-wrap:wrap;padding:0 0 6px}
+.sim-widget-filter{display:flex;align-items:stretch;gap:6px;flex-wrap:wrap;margin-block:6px}
+.sim-widget-filter input{flex:1 1 9em;min-width:0}
+.sim-widget-filter select{flex:1 1 7em;min-width:0}
+.sim-widget-count{font-size:.82rem;color:var(--quiet);margin-block:5px}
+.sim-widget-count:empty{margin:0}
+.sim-position{font-weight:700;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.sim-coordinates{margin-block:5px 10px}
+.sim-coordinates summary{justify-content:flex-start;cursor:pointer;font-size:.86rem}
+.sim-coordinates summary::after{content:"＋";margin-left:auto}
+.sim-coordinates[open] summary::after{content:"−"}
+.sim-axes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.sim-axes label,.sim-point small{display:grid;gap:2px;font-size:.8rem;color:var(--quiet)}
+.sim-axes input{width:100%;min-width:0}
+.sim-point{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px 10px;border-top:1px solid var(--line);padding-block:6px}
+.sim-point .sim-name{min-width:0;overflow-wrap:anywhere}
 </style>
 </head>
 <body>
@@ -401,114 +497,35 @@ html:has(#feature-sheet[open]){overflow:hidden}
     <p class="lead"><span>调整角色手感，生成物品与鱼类，保存常去的坐标。把常用功能放进悬浮窗，在游戏里随时调用。</span><span class="widget-copy">在游戏里按 Home 展开悬浮窗。把移动速度、常用传送点和参数预设放进自己的快捷面板。</span></p>
     <div class="actions"><a href="#catalog" class="btn cut">浏览功能目录<svg class="icon" aria-hidden="true"><use href="#arr"/></svg></a><a class="textlink" href="#guide">快速上手<svg class="icon" aria-hidden="true"><use href="#diag"/></svg></a></div>
   </div>
-  <figure class="plate">
+  <figure class="plate" aria-label="渔力全开修改器交互演示">
     <div class="plate-title meta"><span><i class="sq"></i> CONTROL PREVIEW</span><span>R26</span></div>
-    <div class="plate-art"><svg class="blueprint" aria-hidden="true"><defs><pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0v24" fill="none" stroke="currentColor" stroke-width=".8"/></pattern></defs><rect width="100%" height="100%" fill="url(#grid)"/></svg><div class="drawing"><svg class="preview-wide" xmlns="http://www.w3.org/2000/svg" width="620" height="380" viewBox="0 0 620 380" role="img" aria-labelledby="ac-panel-title ac-panel-description">
-  <title id="ac-panel-title">玩家状态与游戏悬浮窗的功能示意</title>
-  <desc id="ac-panel-description">主窗口的移动速度倍率为 1.25 倍，可以用滑块和应用按钮调整。右下方的快捷面板放有无限生命与移动速度。</desc>
-  <defs>
-    <pattern id="ac-panel-hatch" width="5" height="5" patternUnits="userSpaceOnUse">
-      <path d="M-1 1 1-1M0 5 5 0M4 6 6 4" fill="none" stroke="var(--quiet)" stroke-width="1"/>
-    </pattern>
-    <g id="ac-panel-slider">
-      <rect width="233" height="4" y="-2" fill="var(--control-edge,var(--line))"/>
-      <rect width="8" height="4" y="-2" fill="var(--ink)"/>
-      <path d="M4 -8H13V8H4Z" fill="var(--ink)"/>
-      <path d="M8.5 -4V4" stroke="var(--paper)" stroke-width="1.1"/>
-    </g>
-  </defs>
-  <g font-family="'Saira','Segoe UI','Microsoft YaHei UI','Microsoft YaHei',sans-serif" fill="var(--ink)">
-    <g class="story-main">
-    <path d="M16 17H516V347H16Z" fill="url(#ac-panel-hatch)"/>
-    <path d="M7 8H507V338H7Z" fill="var(--paper)" stroke="var(--control-edge,var(--ink))" stroke-width="1.6"/>
-    <rect x="8" y="9" width="498" height="39" fill="var(--band)"/>
-    <g fill="var(--signal)">
-      <path d="M20 37 31 19H36L25 37Z"/>
-      <path d="M32 37 40 23 47 37H42L40 32 37 37Z"/>
-    </g>
-    <text x="57" y="34" fill="var(--band-ink)" font-weight="750" font-size="15" letter-spacing=".4">渔力全开修改器</text>
-    <path d="M419 28H429M449 24H457V32H449Z M478 24L486 32M486 24L478 32" fill="none" stroke="var(--band-soft)" stroke-width="1.15"/>
-    <!-- Category navigation uses the labels on the Windows trainer. -->
-    <g font-size="12.5" font-weight="650">
-      <rect x="8" y="48" width="498" height="35" fill="var(--pale)"/>
-      <path d="M18 53H99V73L94 78H18Z" fill="var(--signal)"/>
-      <path d="M26 65H32" stroke="var(--on-signal)" stroke-width="2.5"/>
-      <text fill="var(--on-signal)" x="38" y="70">玩家状态</text>
-      <text x="114" y="70">武器战斗</text>
-      <text x="197" y="70">钓鱼辅助</text>
-      <text x="280" y="70">金钱背包</text>
-    </g>
-    <path d="M8 83H506" stroke="var(--line)"/>
-    <text x="26" y="111" font-size="18" font-weight="750">角色手感与常用参数</text>
-    <!-- Applied running speed, native range and the actual Apply action. -->
-    <rect x="25" y="123" width="465" height="80" fill="var(--panel)" stroke="var(--control-edge,var(--line))"/>
-    <path d="M25 123H112" stroke="var(--ink)" stroke-width="3"/>
-    <text id="ac-speed-label" x="37" y="147" font-size="15" font-weight="750">移动速度倍率</text>
-    <text x="39" y="188" font-size="11.5" fill="var(--quiet)">0.25–50 倍</text>
-    <use href="#ac-panel-slider" transform="translate(39 165)"/>
-    <text id="ac-speed-value" x="295" y="174" font-size="34" font-weight="750" letter-spacing="-1.2">1.25<tspan dx="2" font-size="17">×</tspan></text>
-    <path d="M398 144H474V169L467 176H398Z" fill="var(--signal)" stroke="var(--on-signal)"/>
-    <text fill="var(--on-signal)" x="412" y="165" font-size="13" font-weight="750">应用</text>
-    <path d="M451 159H461M457 155L461 159 457 163" fill="none" stroke="var(--on-signal)" stroke-width="1.4"/>
-    <!-- The two remaining movement controls share the regular unselected look. -->
-    <path d="M26 215H487M26 263H487M26 312H487" stroke="var(--line)"/>
-    <g font-size="14" font-weight="650">
-      <text x="37" y="237">冲刺速度倍率</text>
-      <text x="37" y="285">跳跃力度倍率</text>
-    </g>
-    <use href="#ac-panel-slider" transform="translate(38 248) scale(.95 .65)"/>
-    <use href="#ac-panel-slider" transform="translate(38 296) scale(.95 .65)"/>
-    <g font-size="19" font-weight="650">
-      <text x="299" y="244">1<tspan dx="2" font-size="12">×</tspan></text>
-      <text x="299" y="292">1<tspan dx="2" font-size="12">×</tspan></text>
-    </g>
-    <path d="M30 325H72M77 325H100" stroke="var(--line)" stroke-width="2"/>
-    </g>
-    <defs><g id="ac-preview-widget">
-    <path d="M352 201H617V373H352Z" fill="url(#ac-panel-hatch)"/>
-    <path d="M344 193H610V364H344Z" fill="var(--widget-paper,#292d26)" stroke="var(--widget-edge,#171a16)" stroke-width="1.6"/>
-    <path d="M344 193H610V228H344Z" fill="var(--widget-bar,#353a31)"/>
-    <path d="M353 201H380V220H353Z" fill="var(--signal)"/>
-    <text x="356" y="215" fill="var(--on-signal)" font-size="13" font-weight="800" letter-spacing="-.3">AC</text>
-    <text x="388" y="216" fill="var(--band-ink)" font-size="15" font-weight="750">游戏悬浮窗</text>
-    <text x="569" y="215" fill="var(--band-soft)" font-size="11">收起</text>
-    <path d="M345 228H609" stroke="var(--widget-rule,#59604f)"/>
-    <g font-size="11.5" font-weight="650">
-      <path d="M355 238H422V255L417 260H355Z" fill="var(--signal)"/>
-      <text x="364" y="253" fill="var(--on-signal)">快捷面板</text>
-      <text x="435" y="253" fill="var(--band-soft)">全部功能</text>
-      <text x="507" y="253" fill="var(--band-soft)">传送点</text>
-    </g>
-    <path d="M355 270H598M355 309H598" stroke="var(--widget-rule,#59604f)"/>
-    <g fill="var(--band-ink)" font-size="15" font-weight="650">
-      <text x="357" y="294">无限生命</text>
-      <text x="357" y="339">移动速度倍率</text>
-    </g>
-    <g transform="translate(540 280)">
-      <path d="M0 0H57V14L53 18H0Z" fill="var(--widget-bar,#41473a)" stroke="var(--widget-edge,#919884)"/>
-      <path d="M3 3H15V15H3Z" fill="var(--band-ink)"/>
-      <text x="36" y="13" font-size="10.5" fill="var(--band-ink)">关</text>
-    </g>
-    <path d="M526 318H597V345H526Z" fill="var(--widget-bar,#363c30)" stroke="var(--widget-edge,#838b76)"/>
-    <path class="story-readout" d="M526 318h4v27h-4z" fill="var(--signal)"/>
-    <text x="536" y="338" fill="var(--band-ink)" font-size="18" font-weight="650">1.25<tspan dx="2" font-size="12">×</tspan></text>
-    </g></defs>
-    <g class="story-widget"><use class="widget-layer" href="#ac-preview-widget"/></g>
-  </g>
-</svg><svg class="preview-compact" viewBox="0 0 302 257" width="302" height="257" role="img" aria-label="主窗口的移动速度倍率为 1.25 倍。游戏悬浮窗内可操作无限生命和移动速度。">
-  <g font-family="'Saira','Segoe UI','Microsoft YaHei UI','Microsoft YaHei',sans-serif" fill="var(--ink)">
-    <g class="story-main">
-    <rect x="4" y="5" width="281" height="95" fill="var(--paper)" stroke="var(--control-edge,var(--ink))" stroke-width="1.5"/>
-    <path d="M5 6H284V29H5Z" fill="var(--band)"/>
-    <text x="14" y="22" fill="var(--band-ink)" font-weight="750" font-size="13">玩家状态</text>
-    <use href="#ac-speed-label" transform="translate(-23 -93)"/>
-    <use href="#ac-panel-slider" transform="translate(14 70) scale(.49 1)"/>
-    <use href="#ac-speed-value" transform="translate(-102 -78) scale(.84)"/>
-    </g>
-    <g class="story-widget"><use class="widget-layer" href="#ac-preview-widget" transform="translate(-318 -111)"/></g>
-  </g>
-</svg></div></div>
-    <figcaption class="plate-caption"><span class="meta">PLAYER SETTINGS / OVERLAY</span><span>主窗口与悬浮窗</span></figcaption>
+    <div id="sim-stage" class="plate-art" data-front="widget">
+      <svg class="blueprint" aria-hidden="true"><defs><pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0v24" fill="none" stroke="currentColor" stroke-width=".8"/></pattern></defs><rect width="100%" height="100%" fill="url(#grid)"/></svg>
+      <section id="sim-main" class="sim-window" aria-labelledby="sim-main-title" tabindex="-1">
+        <header class="sim-titlebar"><h2 id="sim-main-title"><svg viewBox="0 0 36 36" aria-hidden="true"><path d="m3 28 13-21h7L10 28zM17 28 27 11l8 17h-7l-2-5-3 5z" fill="currentColor"/></svg>渔力全开修改器</h2>
+          <div class="sim-window-actions">
+            <button type="button" data-window-action="minimize" aria-label="最小化主窗口" title="最小化主窗口">−</button>
+            <button type="button" data-window-action="size" aria-label="最大化主窗口" title="最大化主窗口" aria-pressed="false">□</button>
+            <button type="button" data-window-action="close" aria-label="关闭主窗口" title="关闭主窗口">×</button>
+          </div>
+        </header>
+        <div id="sim-categories" class="sim-tabs" aria-label="功能分类"></div>
+        <div id="sim-main-body" class="sim-body"></div>
+      </section>
+      <section id="sim-widget" class="sim-window" aria-labelledby="sim-widget-title" tabindex="-1">
+        <header class="sim-titlebar"><h2 id="sim-widget-title"><span class="sim-ac-mark" aria-hidden="true">AC</span>游戏悬浮窗</h2>
+          <div class="sim-window-actions">
+            <button type="button" data-window-action="size" aria-label="最大化悬浮窗" title="最大化悬浮窗" aria-pressed="false">□</button>
+            <button type="button" data-window-action="close" aria-label="收起悬浮窗">收起</button>
+          </div>
+        </header>
+        <div id="sim-widget-tabs" class="sim-tabs" aria-label="悬浮窗栏目"></div>
+        <div id="sim-widget-body" class="sim-body"></div>
+      </section>
+      <button type="button" id="sim-ac" class="sim-launch cut" aria-label="展开游戏悬浮窗" aria-controls="sim-widget" hidden>AC</button>
+      <button type="button" id="sim-reopen" class="sim-launch cut" aria-controls="sim-main" hidden>打开主窗口</button>
+    </div>
+    <figcaption class="plate-caption"><span class="meta">PLAYER SETTINGS / OVERLAY</span><span>操作仅在网页内生效</span></figcaption>
   </figure>
 </div></section>
 <div class="metrics"><div class="wrap">
@@ -566,6 +583,181 @@ html:has(#feature-sheet[open]){overflow:hidden}
   <div class="sheet-foot"><p>在修改器中按 <kbd>Ctrl+F</kbd> 搜索此名称。</p><button class="btn cut" type="button" id="feature-back">返回目录 <span aria-hidden="true">↩</span></button></div>
 </dialog>
 <footer><div class="wrap"><span class="meta">How to Fish / Windows</span><a class="textlink" href="#overview">回到顶部 ↑</a></div></footer>
+<script>
+// Bounds and controls follow the r26 feature registry and the corresponding desktop panels.
+const demoSpecs = (() => {
+  const numeric = (key, label, initial, min, max, unit = '', step = 'any') =>
+    ({ key, label, type: 'number', initial, min, max, unit, step });
+  const check = (key, label, initial = false) => ({ key, label, type: 'check', initial });
+  const select = (key, label, options, initial = options[0]) => ({ key, label, type: 'select', options, initial });
+  const toggle = effect => ({ kind: 'toggle', effect });
+  const multiplier = (min, max, initial = 1, slider = true) => ({
+    kind: 'number', fields: [{ ...numeric('value', '倍率', initial, min, max, '×'), slider }]
+  });
+  const currency = (label, actionLabel) => ({
+    kind: 'number', actionLabel, fields: [numeric('value', label, 1, 0, 99999999, '', 1)]
+  });
+  const saveAfter = check('saveAfter', '完成后调用游戏原生保存');
+  const journalEntry = { view: '补记鱼获' };
+  return {
+    'player.health.lock': toggle('维持角色生命值'),
+    'player.fullness.lock': toggle('维持角色饱食度'),
+    'player.poison.immunity': toggle('免疫中毒'),
+    'player.fire.immunity': toggle('免疫燃烧'),
+    'player.drowning.immunity': toggle('免除溺水伤害'),
+    'player.drop.prevent': toggle('保留死亡时携带的物品'),
+    'player.third_person.lock': toggle('使用越肩视角'),
+    'player.revive': { kind: 'action', actionLabel: '复活角色', fields: [saveAfter] },
+    'player.move.multiplier': multiplier(0.25, 50, 1.25),
+    'player.sprint.multiplier': multiplier(0.25, 50),
+    'player.jump.multiplier': multiplier(0.25, 25),
+    'player.spin.lock': {
+      kind: 'toggle', actionLabel: '应用设置',
+      fields: [numeric('speed', '转速', 4, 2, 15, '圈/秒'), check('autoJump', '模型自动跳跃')]
+    },
+    'player.air_dash.lock': toggle('在空中按 Alt 触发冲刺'),
+
+    'combat.ammo.lock': toggle('维持枪械弹药'),
+    'combat.reload.skip': toggle('跳过换弹'),
+    'combat.recoil.zero': toggle('消除开火后坐力'),
+    'combat.spread.zero': toggle('消除枪械散布'),
+    'combat.fire_rate.multiplier': multiplier(0.25, 20, 1, false),
+    'combat.damage.multiplier': multiplier(0.25, 20, 1, false),
+    'combat.melee.multiplier': multiplier(0.25, 20, 1, false),
+    'combat.aim_assist': {
+      kind: 'toggle', actionLabel: '应用原生辅助',
+      fields: [
+        numeric('strength', '辅助强度', 60, 0, 100, '', 1),
+        numeric('angle', '静默瞄准角度', 8, 2, 18, '°'),
+        numeric('distance', '最大距离', 35, 10, 80, '米'),
+        select('trigger', '触发方式', ['开镜自动锁定']),
+        check('lead', '自动提前量', true), check('head', '锁定头部'), check('teammates', '锁定队友')
+      ]
+    },
+    'combat.sharpness.lock': toggle('维持武器锋利度'),
+    'combat.silent_aim': {
+      kind: 'toggle', actionLabel: '应用追踪设置',
+      fields: [
+        numeric('angle', '捕获角度', 8, 0.5, 180, '°'),
+        numeric('distance', '追踪距离', 35, 1, 1000, '米'),
+        numeric('strength', '追踪强度', 100, 0, 100, '%'),
+        select('trigger', '触发方式', ['仅开镜射击时追踪', '所有射击均追踪'], '所有射击均追踪'),
+        check('teammates', '锁定队友')
+      ]
+    },
+    'combat.one_hit': toggle('对可受伤害的目标启用一击必杀'),
+    'combat.boss.no_escape': toggle('阻止 Boss 逃跑'),
+    'view.entity_overlay.configure': {
+      kind: 'number', actionLabel: '应用显示距离', fields: [numeric('distance', '显示距离', 200, 1, 1000, '米')]
+    },
+    'view.crosshair': {
+      kind: 'toggle', fields: [
+        select('shape', '样式', ['十字', '圆点', '圆环']),
+        select('color', '颜色', ['白色', '绿色', '紫色', '红色']),
+        { ...numeric('size', '大小', 16, 6, 36, '', 1), slider: true }
+      ]
+    },
+    'combat.feedback': {
+      kind: 'toggle', actionLabel: '开启 / 应用',
+      fields: [
+        check('streaks', '连杀热度与播报', true), check('markers', '命中与击败标记', true),
+        check('numbers', '实际伤害飘字', true), check('headSound', '爆头提示音', true),
+        check('killSound', '击败提示音', true), check('dynamicCrosshair', '武器散布指示'),
+        numeric('comboWindow', '连杀间隔', 8, 1, 30, '秒'), numeric('volume', '提示音音量', 0.35, 0, 1),
+        numeric('opacity', '反馈透明度', 0.9, 0.1, 1), numeric('scale', '反馈大小倍率', 1, 0.5, 2, '×')
+      ]
+    },
+    'combat.diagnostics': { kind: 'toggle', actionLabel: '仅观察诊断' },
+
+    'fishing.reel.multiplier': multiplier(0.25, 10),
+    'fishing.cast.multiplier': multiplier(0.25, 10),
+    'fishing.line.multiplier': multiplier(0.25, 10),
+    'fishing.pull.multiplier': multiplier(0.25, 10),
+    'fishing.instant_bite': toggle('使鱼立即咬钩'),
+    'fishing.no_escape': toggle('阻止当前上钩的鱼逃脱'),
+    'fishing.no_attack': toggle('阻止鱼发动攻击'),
+    'fishing.instant_land': { kind: 'action', actionLabel: '当前鱼饵立即上鱼', fields: [saveAfter] },
+    'fishing.weight.multiplier': multiplier(0.1, 20),
+    'fishing.rare': toggle('钓获鱼类均为极品'),
+    'fishing.bait.no_consume': toggle('保留使用的鱼饵'),
+    'journal.fishing': {
+      kind: 'panel', actionLabel: '查看 / 记入手记',
+      fields: [
+        select('view', '手记操作', ['钓鱼日志', '鱼类图鉴', '每局回顾', '补记鱼获']),
+        { ...select('species', '示例鱼种', ['鲈鱼', '鲭鱼', '鲤鱼']), when: journalEntry },
+        { ...numeric('count', '数量', 1, 1, 10000, '条', 1), when: journalEntry }
+      ]
+    },
+
+    'money.add': currency('增加数额', '增加金钱'),
+    'money.set': currency('目标余额', '修改金钱'),
+    'money.purchase.ignore': toggle('购买时忽略金钱要求'),
+    'money.euro.add': currency('增加数额', '增加 Euro'),
+    'money.euro.set': currency('目标余额', '设置 Euro')
+  };
+})();
+
+function demoResult(id, values, simulation, enabled) {
+  const spec = demoSpecs[id];
+  if (spec.kind === 'toggle' && !enabled) {
+    return id === 'combat.diagnostics' ? '已退出观察模式。辅助瞄准和魔法子弹可手动重新开启。' : '已关闭';
+  }
+  if (id.startsWith('money.') && spec.kind === 'number') {
+    const isEuro = id.startsWith('money.euro.');
+    const account = isEuro ? 'euro' : 'money';
+    const label = isEuro ? 'Euro' : '金钱';
+    const amount = Number(values.value);
+    const previous = simulation[account];
+    const next = id.endsWith('.add') ? previous + amount : amount;
+    simulation[account] = next;
+    return `模拟${label}余额 · ${previous.toLocaleString('zh-CN')} → ${next.toLocaleString('zh-CN')}`;
+  }
+  if (id.endsWith('.multiplier')) return `已应用 ${Number(values.value)} 倍`;
+  if (spec.effect) return `已开启 · ${spec.effect}`;
+  switch (id) {
+    case 'player.spin.lock':
+      return `每秒 ${values.speed} 圈 · 模型自动跳跃${values.autoJump ? '开启' : '关闭'}`;
+    case 'combat.aim_assist':
+      return `开镜锁定 · ${values.distance} 米内 · 辅助强度 ${values.strength}${values.head ? ' · 锁定头部' : ''}`;
+    case 'combat.silent_aim':
+      return `${values.trigger} · ${values.angle}° / ${values.distance} 米 / ${values.strength}%${values.teammates ? ' · 包含队友' : ''}`;
+    case 'view.crosshair':
+      return `${values.color}${values.shape} · 大小 ${values.size}`;
+    case 'view.entity_overlay.configure':
+      return `显示距离已设为 ${values.distance} 米。启用辅助瞄准或魔法子弹时显示标注。`;
+    case 'combat.feedback': {
+      const cues = spec.fields.filter(field => field.type === 'check' && values[field.key]);
+      return `已启用 ${cues.length} 项反馈 · 连杀间隔 ${values.comboWindow} 秒 · 音量 ${values.volume}`;
+    }
+    case 'combat.diagnostics':
+      return '仅观察诊断已开启 · 辅助瞄准与魔法子弹已关闭。当前演示没有锁定目标。';
+    case 'player.revive':
+      if (simulation.revived) return '演示角色已经站起，无需再次复活。';
+      simulation.revived = true;
+      return values.saveAfter ? '演示角色已站起，已模拟原生保存。' : '演示角色已从倒地状态站起。';
+    case 'fishing.instant_land':
+      simulation.catches += 1;
+      return `当前示例鱼饵已上鱼 · 累计 ${simulation.catches} 次${values.saveAfter ? ' · 已模拟原生保存' : ''}`;
+    case 'journal.fishing': {
+      const journal = simulation.journal ??= [];
+      if (values.view === '补记鱼获') {
+        journal.push({ species: values.species, count: Number(values.count) });
+        return `已补记 ${values.species} × ${values.count} · 演示场次「休闲钓鱼」`;
+      }
+      if (values.view === '鱼类图鉴') {
+        return '示例图鉴 · 鲈鱼（编号 2）、鲭鱼（编号 33）、鲤鱼（编号 102）。';
+      }
+      if (!journal.length) return '演示手记暂无记录。选择「补记鱼获」可以记下第一条。';
+      if (values.view === '每局回顾') {
+        const count = journal.reduce((sum, entry) => sum + entry.count, 0);
+        return `本局「休闲钓鱼」· 已记录 ${journal.length} 笔，共 ${count} 条、${new Set(journal.map(entry => entry.species)).size} 种鱼。`;
+      }
+      const recent = journal.slice(-3).reverse().map(entry => `${entry.species} × ${entry.count}`);
+      return `日志共 ${journal.length} 笔 · 最近记录：${recent.join('、')}`;
+    }
+  }
+}
+</script>
 <script type="application/json" id="entries">[
   {
     "id": "player.health.lock",
@@ -1160,45 +1352,104 @@ html:has(#feature-sheet[open]){overflow:hidden}
 'use strict';
 const entries = JSON.parse(document.getElementById('entries').textContent);
 const lookup = id => document.getElementById(id);
-function bindDemoScroll() {
-  const hero = document.querySelector('.hero');
-  const illustration = hero.querySelector('.plate-art');
-  const motion = matchMedia('(prefers-reduced-motion: no-preference)');
-  let start = 0, travel = 0, previous = -1, frame = 0;
+function bindDemoWindows() {
+  const stage = lookup('sim-stage'), hero = stage.closest('.hero');
+  const main = lookup('sim-main'), widget = lookup('sim-widget');
+  const reopen = lookup('sim-reopen'), ac = lookup('sim-ac');
+  const narrow = matchMedia('(max-width:680px)');
+  const motion = matchMedia('(prefers-reduced-motion:no-preference)');
+  let widgetChoice, start = 0, travel = 1, frame = 0, pressed = false;
+  function setMax(win, yes) {
+    win.toggleAttribute('data-max',yes);
+    const button = win.querySelector('[data-window-action="size"]');
+    const label = (yes ? '还原' : '最大化') + (win === main ? '主窗口' : '悬浮窗');
+    button.textContent = yes ? '❐' : '□';
+    button.setAttribute('aria-label',label);
+    button.setAttribute('aria-pressed',String(yes));
+    button.title = label;
+  }
+  function front(win) {
+    const other = win === main ? widget : main;
+    if (other.hasAttribute('data-max')) setMax(other,false);
+    if (win === main && narrow.matches && !widget.hidden) {
+      widget.hidden = true;
+      ac.hidden = false;
+      widgetChoice = false;
+    }
+    stage.dataset.front = win === main ? 'main' : 'widget';
+  }
+  function visible(win, yes) {
+    if (!yes && win.hasAttribute('data-max')) setMax(win,false);
+    win.hidden = !yes;
+    const launcher = win === main ? reopen : ac;
+    launcher.hidden = yes;
+    if (yes) front(win);
+    (yes ? win : launcher).focus({preventScroll:true});
+  }
+  function fit() {
+    widget.hidden = widgetChoice === undefined ? narrow.matches : !widgetChoice;
+    ac.hidden = !widget.hidden;
+    if (widget.hidden && widget.hasAttribute('data-max')) setMax(widget,false);
+    if (widget.hidden) stage.dataset.front = 'main';
+  }
+  fit();
+  narrow.addEventListener('change',fit);
+  stage.addEventListener('pointerdown',event => {
+    const win = event.target.closest('.sim-window');
+    if (win) { pressed = true; front(win); }
+  });
+  stage.addEventListener('focusin',event => {
+    const win = event.target.closest('.sim-window');
+    if (win) front(win);
+  });
+  stage.addEventListener('click',event => {
+    const button = event.target.closest('button');
+    if (!button) return;
+    if (button === reopen) return visible(main,true);
+    if (button === ac) { widgetChoice=true; return visible(widget,true); }
+    const action = button.dataset.windowAction;
+    if (!action) return;
+    const win = button.closest('.sim-window');
+    if (action === 'size') return setMax(win,!win.hasAttribute('data-max'));
+    if (win === widget) widgetChoice=false;
+    visible(win,false);
+  });
+  stage.addEventListener('keydown',event => {
+    if (event.key !== 'Escape' || event.defaultPrevented) return;
+    const win = event.target.closest('.sim-window[data-max]');
+    if (win) { event.preventDefault(); setMax(win,false); }
+  });
   function paint() {
     frame = 0;
+    if (!motion.matches || pressed || stage.contains(document.activeElement)) return;
     const fraction = Math.min(1,Math.max(0,(scrollY - start) / travel));
-    if (fraction === previous) return;
-    previous = fraction;
-    hero.style.setProperty('--story',String(fraction));
+    stage.style.setProperty('--story',String(fraction));
     hero.classList.toggle('show-widget',fraction >= .5);
   }
   function schedule() {
-    if (motion.matches && travel && !frame) frame = requestAnimationFrame(paint);
+    if (motion.matches && !frame) frame=requestAnimationFrame(paint);
   }
+  function release() { if (pressed) { pressed=false; schedule(); } }
+  addEventListener('pointerup',release);
+  addEventListener('pointercancel',release);
+  addEventListener('blur',release);
+  stage.addEventListener('focusout',schedule);
   function measure() {
     hero.toggleAttribute('data-scroll-demo',motion.matches);
-    if (!motion.matches) {
-      cancelAnimationFrame(frame);
-      frame = travel = 0;
-      return;
-    }
-    const box = illustration.getBoundingClientRect();
-    const top = scrollY + box.top;
-    const center = top + box.height / 2;
-    const minTravel = Math.max(1,Math.min(box.height,innerHeight) * .4);
-    // A short landscape viewport needs an earlier start to fit the handoff before the drawing scrolls past.
-    start = Math.max(0,Math.min(center - innerHeight * .68,top - minTravel));
-    travel = Math.max(minTravel,Math.min(top - start,Math.max(box.height * .6,center - innerHeight * .24 - start)));
+    if (!motion.matches) { cancelAnimationFrame(frame);frame=0;return; }
+    const box=stage.getBoundingClientRect(),top=scrollY+box.top,center=top+box.height/2;
+    const minTravel=Math.max(1,Math.min(box.height,innerHeight)*.4);
+    start=Math.max(0,Math.min(center-innerHeight*.68,top-minTravel));
+    travel=Math.max(minTravel,Math.min(top-start,Math.max(box.height*.6,center-innerHeight*.24-start)));
     schedule();
   }
   measure();
-  if ('ResizeObserver' in window) new ResizeObserver(measure).observe(hero);
+  if ('ResizeObserver' in window) new ResizeObserver(measure).observe(stage);
   addEventListener('resize',measure);
   addEventListener('scroll',schedule,{passive:true});
   motion.addEventListener('change',measure);
 }
-bindDemoScroll();
+bindDemoWindows();
 const field = lookup('query'), category = lookup('category'), results = lookup('results');
 const pageSize = 6;
 let pageNumber = 1;
@@ -1211,6 +1462,262 @@ function element(tag, className, text) {
   node.textContent = text;
   return node;
 }
+const demoCategories = ['玩家状态','武器战斗','钓鱼辅助','金钱背包'];
+const demoEntries = entries.filter(entry => demoCategories.includes(entry.category));
+const demoById = new Map(demoEntries.map(entry => [entry.id,entry]));
+const demoState = new Map();
+const demoWorld = {money:0,euro:0,catches:0};
+const movementIds = ['player.move.multiplier','player.sprint.multiplier','player.jump.multiplier'];
+let demoCategory = demoCategories[0], demoWidgetTab = '快捷面板';
+
+function demoButton(text, className, onClick) {
+  const button = element('button',className,text);
+  button.type = 'button';
+  button.addEventListener('click',onClick);
+  return button;
+}
+function demoValues(id) {
+  if (!demoState.has(id)) {
+    const initial = Object.fromEntries((demoSpecs[id].fields || []).map(field => [field.key,field.initial]));
+    demoState.set(id,{draft:{...initial},applied:initial,on:false,message:'',confirmed:false});
+  }
+  return demoState.get(id);
+}
+function demoVisible(field, values) {
+  return !field.when || Object.entries(field.when).every(([key,value]) => values[key] === value);
+}
+function demoDecimal(value) {
+  const text = String(value).trim();
+  return /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?$/i.test(text) && Number.isFinite(Number(text));
+}
+function demoValid(field, value) {
+  if (field.type !== 'number') return true;
+  const n = Number(value);
+  return demoDecimal(value) && n >= field.min && n <= field.max && (!(field.integer || field.step === 1) || Number.isInteger(n));
+}
+function demoBlocked(id) {
+  return (id === 'combat.aim_assist' || id === 'combat.silent_aim') && demoValues('combat.diagnostics').on;
+}
+function demoDraft(id, field, value) {
+  const state = demoValues(id);
+  state.draft[field.key] = value;
+  state.confirmed = false;
+  state.message = '';
+  if (id === 'combat.aim_assist' && field.key === 'head' && value && !state.on && !demoBlocked(id)) {
+    demoCommit(id,true);
+  } else {
+    if (state.on && demoValid(field,value) && (id === 'view.crosshair' ||
+      (id === 'combat.aim_assist' && ['head','lead','teammates'].includes(field.key)) ||
+      (id === 'combat.silent_aim' && field.key === 'teammates'))) {
+      state.applied[field.key] = field.type === 'number' ? Number(value) : value;
+      state.message = '已应用 · '+field.label;
+    }
+    demoSync(id);
+  }
+}
+function demoCommit(id, toggle = false) {
+  const state = demoValues(id), spec = demoSpecs[id], fields = spec.fields || [];
+  const turningOff = toggle && state.on;
+  if (!turningOff) {
+    if (!toggle && !state.on && (id === 'player.spin.lock' || id === 'combat.silent_aim')) return;
+    if (demoBlocked(id) || fields.some(f => demoVisible(f,state.draft) && !demoValid(f,state.draft[f.key]))) return;
+    for (const f of fields) {
+      if (demoVisible(f,state.draft)) state.applied[f.key] = f.type === 'number' ? Number(state.draft[f.key]) : state.draft[f.key];
+    }
+  }
+  if (toggle) state.on = !state.on;
+  state.message = !toggle && spec.kind === 'toggle' && !state.on ? '设置已应用，功能关闭' :
+    demoResult(id,state.applied,demoWorld,state.on);
+  state.confirmed = !toggle;
+  clearTimeout(state.confirmTimer);
+  if (state.confirmed) state.confirmTimer = setTimeout(() => {state.confirmed = false; demoSync(id);},1100);
+  if (id === 'combat.diagnostics') {
+    for (const target of ['combat.aim_assist','combat.silent_aim']) {
+      const other = demoValues(target);
+      if (state.on) {other.on = false; other.message = ''; other.confirmed = false;}
+      demoSync(target);
+    }
+  }
+  demoSync(id);
+  for (const label of document.querySelectorAll('[data-sim-balance]')) {
+    label.textContent = '演示余额 · 金钱 ' + demoWorld.money.toLocaleString('zh-CN') + '　Euro ' + demoWorld.euro.toLocaleString('zh-CN');
+  }
+}
+function demoFieldControl(id, f, primary) {
+  const container = element(primary || f.slider?'div':'label',primary?'sim-controls':'sim-field','');
+  if (!primary) container.append(element('span','sim-field-label',f.label));
+  const controlName = demoById.get(id).title + ' · ' + f.label;
+  function wire(control, role, event, read) {
+    control.dataset.simField = f.key;
+    control.dataset.simControl = role;
+    control.setAttribute('aria-label',controlName + (role === 'range' ? '滑条' : ''));
+    control.addEventListener(event,() => demoDraft(id,f,read(control)));
+    return control;
+  }
+  if (f.type === 'number') {
+    if (f.slider) {
+      const range = element('input','sim-range','');
+      range.type = 'range'; range.min = f.min; range.max = f.max;
+      range.step = f.step && f.step !== 'any' ? f.step : '0.05';
+      container.append(wire(range,'range','input',e => e.value));
+    }
+    const reading = element('span','sim-reading','');
+    const input = element('input','sim-number','');
+    input.type = 'text'; input.inputMode = f.integer || f.step === 1 ? 'numeric' : 'decimal';
+    input.autocomplete = 'off'; input.spellcheck = false;
+    input.addEventListener('keydown',event => {
+      if (event.key === 'Enter' && !event.isComposing) {event.preventDefault(); demoCommit(id);}
+    });
+    reading.append(wire(input,'number','input',e => e.value));
+    if (f.unit) reading.append(element('span','sim-unit',f.unit === '倍'?'×':f.unit));
+    container.append(reading);
+  } else if (f.type === 'select') {
+    const select = element('select','sim-choice','');
+    for (const option of f.options) select.add(new Option(option,option));
+    container.append(wire(select,'select','change',e=>e.value));
+  } else {
+    const check = element('input','sim-check','');
+    check.type = 'checkbox';
+    container.append(wire(check,'check','change',e=>e.checked));
+  }
+  if (f.when) container.dataset.simConditional = f.key;
+  return container;
+}
+function demoFeatureRow(id) {
+  const entry = demoById.get(id), spec = demoSpecs[id], fields = spec.fields || [];
+  const row = element('article','sim-row',''); row.dataset.simId = id; row.dataset.kind = spec.kind;
+  const bar = element('div','sim-bar','');
+  bar.append(element('h4','sim-name',entry.title));
+  if (spec.kind === 'toggle') {
+    const button = demoButton('','sim-switch',() => demoCommit(id,true));
+    button.setAttribute('role','switch'); button.setAttribute('aria-label',entry.title);
+    bar.append(button);
+  }
+  row.append(bar);
+  const primary = fields.length === 1 && fields[0].type === 'number' && spec.kind !== 'toggle';
+  const apply = demoButton(spec.actionLabel || '应用','sim-apply',()=>demoCommit(id));
+  apply.dataset.label = apply.textContent;
+  if (primary) {
+    const f = fields[0], controls = demoFieldControl(id,f,true);
+    controls.append(apply); row.append(controls,element('small','sim-limits',f.min + '–' + f.max + (f.unit ? ' ' + f.unit : '')));
+  } else if (fields.length) {
+    const detail = element('details','sim-fields','');
+    detail.append(element('summary','',spec.kind === 'panel'?'打开面板':'参数设置'));
+    if (id === 'view.crosshair') {
+      const preview = element('div','sim-reticle',''); preview.setAttribute('aria-label','准星样式预览');
+      preview.append(element('i','','')); detail.append(preview);
+    }
+    for (const f of fields) detail.append(demoFieldControl(id,f,false));
+    if (spec.kind === 'action') bar.append(apply);
+    else detail.append(apply);
+    row.append(detail);
+  } else if (spec.kind !== 'toggle') bar.append(apply);
+  const status = element('div','sim-status',''); status.setAttribute('role','status');
+  row.append(status); demoPaintRow(row);
+  return row;
+}
+function demoPaintRow(row) {
+  const id = row.dataset.simId, state = demoValues(id), spec = demoSpecs[id], fields = spec.fields || [];
+  const invalid = fields.find(f => demoVisible(f,state.draft) && !demoValid(f,state.draft[f.key]));
+  const blocked = demoBlocked(id);
+  for (const control of row.querySelectorAll('[data-sim-control]')) {
+    const f = fields.find(item=>item.key === control.dataset.simField), value = state.draft[f.key];
+    switch (control.dataset.simControl) {
+      case 'check': control.checked = value; break;
+      case 'range': {
+        const n = demoValid(f,value) ? Number(value) : state.applied[f.key];
+        if (Number(control.value) !== n) control.value = n;
+        control.style.setProperty('--fill',((n-f.min)/(f.max-f.min)*100)+'%'); break;
+      }
+      default:
+        if (control.value !== String(value)) control.value = value;
+        if (f.type === 'number') control.setAttribute('aria-invalid',String(!demoValid(f,value)));
+    }
+  }
+  for (const box of row.querySelectorAll('[data-sim-conditional]')) {
+    box.hidden = !demoVisible(fields.find(f => f.key === box.dataset.simConditional),state.draft);
+  }
+  const toggle = row.querySelector('.sim-switch');
+  if (toggle) {
+    toggle.setAttribute('aria-checked',String(state.on));
+    toggle.textContent = state.on?'开':'关';
+    toggle.disabled = !state.on && (!!invalid || blocked);
+  }
+  const apply = row.querySelector('.sim-apply');
+  if (apply) {
+    apply.disabled = !!invalid || blocked || (!state.on && (id === 'player.spin.lock' || id === 'combat.silent_aim'));
+    apply.toggleAttribute('data-confirmed',state.confirmed);
+    apply.textContent = state.confirmed?'✓ 已确认':apply.dataset.label;
+  }
+  const preview = row.querySelector('.sim-reticle');
+  if (preview) {
+    preview.dataset.shape = state.draft.shape;
+    preview.style.setProperty('--reticle-color',({'白色':'#fff','绿色':'#5bfa7d','紫色':'#da85ff','红色':'#ff6971'})[state.draft.color]);
+    preview.style.setProperty('--reticle-size',(demoValid(fields.find(f=>f.key==='size'),state.draft.size)?Number(state.draft.size):state.applied.size)+'px');
+  }
+  const changed = fields.some(f => demoVisible(f,state.draft) && String(state.draft[f.key]) !== String(state.applied[f.key]));
+  const status = row.querySelector('.sim-status');
+  const message = invalid ? invalid.label+'需填写 '+invalid.min+'–'+invalid.max+' 的'+(invalid.integer||invalid.step===1?'整数':'数值') :
+    blocked ? '仅观察诊断已开启，关闭诊断后可用' : changed ? (id.startsWith('money.')?'金额待执行':fields.length===1?'待应用 · 当前生效 '+state.applied[fields[0].key]+(fields[0].unit||''):'设置待应用') : state.message;
+  if (status.textContent !== message) status.textContent = message;
+  row.toggleAttribute('data-invalid',!!invalid);
+}
+function demoSync(id) {
+  for (const row of document.querySelectorAll('[data-sim-id="'+id+'"]')) demoPaintRow(row);
+}
+function demoTabs(container, names, current, change, owner) {
+  const marker = element('span','sim-tab-marker','');
+  marker.setAttribute('aria-hidden','true');
+  container.setAttribute('role','tablist');
+  container.setAttribute('aria-label',owner === 'sim-main-body'?'主窗口分类':'悬浮窗页面');
+  container.replaceChildren(...names.map((name,index)=>{
+    const button = demoButton(name,'sim-tab',()=>{
+      if (name === current()) return;
+      const from = marker.getBoundingClientRect();
+      for (const animation of marker.getAnimations()) animation.cancel();
+      button.prepend(marker);
+      for(const b of container.children) {b.setAttribute('aria-selected',String(b===button)); b.tabIndex=b===button?0:-1;}
+      const panel = lookup(owner);
+      panel.setAttribute('aria-labelledby',button.id);
+      change(name);
+      const to = marker.getBoundingClientRect();
+      if (from.width && to.width && matchMedia('(prefers-reduced-motion:no-preference)').matches) {
+        marker.animate([{transform:'translateX('+(from.left-to.left)+'px) scaleX('+from.width/to.width+')'},{transform:'none'}],
+          {duration:230,easing:'cubic-bezier(.16,1,.3,1)'});
+        panel.animate([{transform:'translateX('+(from.left<to.left?6:-6)+'px)',opacity:.85},{transform:'none',opacity:1}],
+          {duration:170,easing:'ease-out'});
+      }
+    });
+    button.id = owner+'-tab-'+index; button.setAttribute('role','tab'); button.setAttribute('aria-controls',owner);
+    button.setAttribute('aria-selected',String(name===current())); button.tabIndex = name===current()?0:-1;
+    button.addEventListener('keydown',event=>{
+      const next = {ArrowLeft:(index+names.length-1)%names.length,ArrowRight:(index+1)%names.length,Home:0,End:names.length-1}[event.key];
+      if(next !== undefined) {event.preventDefault(); container.children[next].focus(); container.children[next].click();}
+    });
+    return button;
+  }));
+  container.querySelector('[aria-selected="true"]').prepend(marker);
+  lookup(owner).setAttribute('role','tabpanel');
+  lookup(owner).setAttribute('aria-labelledby',container.querySelector('[aria-selected="true"]').id);
+}
+function renderDemoMain() {
+  const host = lookup('sim-main-body'), rows = demoEntries.filter(entry=>entry.category===demoCategory);
+  if (demoCategory === '玩家状态') rows.sort((a,b)=>(movementIds.includes(a.id)?movementIds.indexOf(a.id):3)-(movementIds.includes(b.id)?movementIds.indexOf(b.id):3));
+  const heading = element('h3','sim-group',demoCategory==='玩家状态'?'角色手感与常用参数':demoCategory);
+  host.replaceChildren(heading);
+  if (demoCategory === '金钱背包') {
+    const balance = element('div','sim-balance','演示余额 · 金钱 '+demoWorld.money.toLocaleString('zh-CN')+'　Euro '+demoWorld.euro.toLocaleString('zh-CN'));
+    balance.dataset.simBalance = ''; host.append(balance);
+  }
+  host.append(...rows.map(entry=>demoFeatureRow(entry.id)));
+  host.scrollTop = 0;
+}
+function initDemoPreview() {
+  demoTabs(lookup('sim-categories'),demoCategories,()=>demoCategory,name=>{demoCategory=name;renderDemoMain();},'sim-main-body');
+  demoTabs(lookup('sim-widget-tabs'),['快捷面板','全部功能','传送点'],()=>demoWidgetTab,name=>{demoWidgetTab=name;renderDemoWidget();},'sim-widget-body');
+  renderDemoMain(); renderDemoWidget();
+}
+
 // Measure the stationary slot against the viewport bottom, even for a guide taller than the screen.
 function positionStrip(slot, rect, bottom) {
   const height = Math.min(rect.height,bottom);
@@ -1438,6 +1945,206 @@ sheet.addEventListener('click', event => {
   startedOnBackdrop = false;
 });
 window.addEventListener('hashchange',syncFeaturePage);
+const demoQuickIds = ['player.health.lock','player.move.multiplier'];
+let editingQuickItems = false;
+const widgetFilter = {query:'', category:'', limit:6};
+const widgetScroll = new Map();
+const expandedWidgetFeatures = new Set();
+const demoMap = {
+  position:[0,2,0], draft:['0','2','0'], name:'', editing:false, message:'',
+  points:[{name:'营地', coordinates:[0,2,0]}, {name:'海岸', coordinates:[32,3,-18]}]
+};
+function demoWidgetRow(id) {
+  const row = demoFeatureRow(id);
+  const detail = row.querySelector('.sim-fields');
+  if (detail) {
+    detail.open = expandedWidgetFeatures.has(id);
+    detail.addEventListener('toggle',() => {
+      if (!detail.isConnected) return;
+      if (detail.open) expandedWidgetFeatures.add(id);
+      else expandedWidgetFeatures.delete(id);
+    });
+  }
+  return row;
+}
+function demoQuickCard(id) {
+  const entry = demoById.get(id);
+  const card = element('div','sim-widget-card','');
+  const tools = element('div','sim-widget-tools','');
+  tools.hidden = !editingQuickItems;
+  const index = demoQuickIds.indexOf(id);
+  for (const [step, text] of [[-1,'上移'],[1,'下移'],[0,'移除']]) {
+    const button = demoButton(text,'sim-action',() => {
+      demoQuickIds.splice(index,1);
+      if (step) demoQuickIds.splice(index + step,0,id);
+      renderDemoWidget();
+      const buttons = lookup('sim-widget-body').querySelectorAll('.sim-widget-tools');
+      const active = buttons[Math.min(step ? index + step : index, buttons.length - 1)];
+      const focus = active?.querySelector('button:not(:disabled)') || lookup('sim-widget-body').querySelector('button');
+      focus?.focus({preventScroll:true});
+    });
+    button.disabled = step !== 0 && (index + step < 0 || index + step >= demoQuickIds.length);
+    button.setAttribute('aria-label',text + entry.title);
+    tools.append(button);
+  }
+  card.append(demoWidgetRow(id),tools);
+  return card;
+}
+function demoWidgetCatalog(body) {
+  const filterBar = element('div','sim-widget-filter','');
+  const search = element('input','sim-field','');
+  search.type = 'search';
+  search.placeholder = '名称或关键词';
+  search.setAttribute('aria-label','搜索悬浮窗功能');
+  search.value = widgetFilter.query;
+  const select = element('select','sim-choice','');
+  select.setAttribute('aria-label','悬浮窗功能分类');
+  select.add(new Option('全部分类',''));
+  for (const category of new Set(demoEntries.map(entry => entry.category))) select.add(new Option(category,category));
+  select.value = widgetFilter.category;
+  const count = element('p','sim-widget-count','');
+  count.setAttribute('aria-live','polite');
+  const list = element('div','sim-widget-list','');
+  filterBar.append(search,select);
+  body.append(filterBar,count,list);
+  function drawList() {
+    const terms = widgetFilter.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const matches = demoEntries.filter(e => (!widgetFilter.category || widgetFilter.category === e.category) &&
+      terms.every(term => [e.id,e.title,e.category,e.keywords,e.description].join(' ').toLowerCase().includes(term)));
+    const visible = matches.slice(0,widgetFilter.limit);
+    count.textContent = matches.length ? '显示 ' + visible.length + ' / ' + matches.length + ' 项' : '没有匹配的功能。可以更换关键词或分类。';
+    const fragment = document.createDocumentFragment();
+    for (const entry of visible) {
+      const card = element('div','sim-widget-card','');
+      const tools = element('div','sim-widget-tools','');
+      const favorite = demoButton('','sim-action',() => {
+        const i = demoQuickIds.indexOf(entry.id);
+        if (i === -1) demoQuickIds.push(entry.id);
+        else demoQuickIds.splice(i,1);
+        labelFavorite();
+      });
+      function labelFavorite() {
+        const selected = demoQuickIds.includes(entry.id);
+        favorite.textContent = selected ? '移出快捷项' : '加入快捷项';
+        favorite.setAttribute('aria-label',favorite.textContent + '：' + entry.title);
+      }
+      labelFavorite();
+      tools.append(favorite);
+      card.append(demoWidgetRow(entry.id),tools);
+      fragment.append(card);
+    }
+    if (visible.length < matches.length) {
+      fragment.append(demoButton('显示更多','sim-action',() => {
+        widgetFilter.limit += 6;
+        drawList();
+        list.children[visible.length]?.querySelector('button,input,select')?.focus({preventScroll:true});
+      }));
+    }
+    list.replaceChildren(fragment);
+  }
+  search.addEventListener('input',() => { widgetFilter.query = search.value; widgetFilter.limit = 6; drawList(); });
+  select.addEventListener('change',() => { widgetFilter.category = select.value; widgetFilter.limit = 6; drawList(); });
+  drawList();
+}
+function demoWidgetMap(body) {
+  const current = element('p','sim-position','');
+  const editor = element('details','sim-coordinates','');
+  editor.open = demoMap.editing;
+  editor.addEventListener('toggle',() => { if (editor.isConnected) demoMap.editing = editor.open; });
+  editor.append(element('summary','','编辑模拟位置'));
+  const axes = element('div','sim-axes','');
+  const inputs = ['X','Y','Z'].map((axis,i) => {
+    const label = element('label','',axis);
+    const input = element('input','sim-field','');
+    input.value = demoMap.draft[i];
+    input.inputMode = 'decimal';
+    input.addEventListener('input',() => { demoMap.draft[i] = input.value; demoMap.message = ''; refresh(); });
+    label.append(input);
+    axes.append(label);
+    return input;
+  });
+  editor.append(axes);
+  const form = element('div','sim-widget-filter','');
+  const name = element('input','sim-field','');
+  name.placeholder = '传送点名称';
+  name.setAttribute('aria-label','新传送点名称');
+  name.value = demoMap.name;
+  name.addEventListener('input',() => { demoMap.name = name.value; demoMap.message = ''; refresh(); });
+  const save = demoButton('保存当前位置','sim-action',() => {
+    demoMap.points.push({name:name.value.trim(),coordinates:[...demoMap.position]});
+    demoMap.message = '已保存「' + name.value.trim() + '」。';
+    demoMap.name = name.value = '';
+    drawPoints();
+    refresh();
+    name.focus({preventScroll:true});
+  });
+  form.append(name,save);
+  const status = element('p','sim-widget-count','');
+  status.setAttribute('aria-live','polite');
+  const list = element('div','sim-widget-list','');
+  function refresh() {
+    const valid = demoMap.draft.map(demoDecimal);
+    inputs.forEach((input,i) => input.setAttribute('aria-invalid',String(!valid[i])));
+    const complete = valid.every(Boolean);
+    if (complete) demoMap.position = demoMap.draft.map(Number);
+    current.textContent = '模拟位置　' + demoMap.position.join(' / ');
+    const duplicate = demoMap.points.some(point => point.name === name.value.trim());
+    save.disabled = !complete || !name.value.trim() || duplicate;
+    status.textContent = !complete ? '请补全坐标，可以输入负数和小数。' : duplicate ? '这个名称已被使用。' : demoMap.message;
+  }
+  function drawPoints() {
+    const fragment = document.createDocumentFragment();
+    for (const point of demoMap.points) {
+      const row = element('div','sim-point','');
+      const caption = element('div','sim-name',point.name);
+      caption.append(element('small','',point.coordinates.join(' / ')));
+      const tools = element('div','sim-controls','');
+      const go = demoButton('传送','sim-action',() => {
+        demoMap.draft = point.coordinates.map(String);
+        inputs.forEach((input,i) => { input.value = demoMap.draft[i]; });
+        demoMap.message = '已传送到「' + point.name + '」。';
+        refresh();
+      });
+      const remove = demoButton('删除','sim-action',() => {
+        demoMap.points.splice(demoMap.points.indexOf(point),1);
+        demoMap.message = '已删除「' + point.name + '」。';
+        drawPoints();
+        refresh();
+        (list.querySelector('button') || name).focus({preventScroll:true});
+      });
+      go.setAttribute('aria-label','传送到' + point.name);
+      remove.setAttribute('aria-label','删除传送点' + point.name);
+      tools.append(go,remove);
+      row.append(caption,tools);
+      fragment.append(row);
+    }
+    list.replaceChildren(fragment);
+  }
+  body.append(current,editor,form,status,list);
+  drawPoints();
+  refresh();
+}
+function renderDemoWidget() {
+  const body = lookup('sim-widget-body');
+  if (body.dataset.tab) widgetScroll.set(body.dataset.tab,body.scrollTop);
+  body.dataset.tab = demoWidgetTab;
+  body.replaceChildren();
+  if (demoWidgetTab === '全部功能') demoWidgetCatalog(body);
+  else if (demoWidgetTab === '传送点') demoWidgetMap(body);
+  else if (demoQuickIds.length) {
+    body.append(...demoQuickIds.map(demoQuickCard));
+    const edit = demoButton(editingQuickItems ? '完成编辑' : '编辑快捷项','sim-action',() => {
+      editingQuickItems = !editingQuickItems;
+      edit.textContent = editingQuickItems ? '完成编辑' : '编辑快捷项';
+      edit.setAttribute('aria-pressed',String(editingQuickItems));
+      body.querySelectorAll('.sim-widget-tools').forEach(tools => { tools.hidden = !editingQuickItems; });
+    });
+    edit.setAttribute('aria-pressed',String(editingQuickItems));
+    body.append(edit);
+  }
+  else body.append(element('p','sim-widget-count','可以在「全部功能」中加入常用项。'));
+  body.scrollTop = widgetScroll.get(demoWidgetTab) || 0;
+}
 function theme(dark) {
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   lookup('theme').setAttribute('aria-pressed',String(dark));
@@ -1459,6 +2166,7 @@ lookup('theme').addEventListener('click', () => {
 });
 draw();
 syncFeaturePage();
+initDemoPreview();
 </script>
 <script id="font-license" type="text/plain">Copyright 2020 The Saira Project Authors (https://github.com/Omnibus-Type/Saira)
 
