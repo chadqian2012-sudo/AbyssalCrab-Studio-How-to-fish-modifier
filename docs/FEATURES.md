@@ -1,5 +1,17 @@
 # 功能指南 | Feature Guide
 
+## 游戏重新连接后如何处理旧开关 | Reconnecting to a game
+
+连接中断后重新进入网络房间时，程序会比对上次确认的房间。进程已更换、房间已变化或缺少足以确认房间的编号时，旧开关不会自动重放。连接恢复后可按需手动开启。每次新连接仍会检查游戏版本；已连接期间的每秒轮询只读取会话状态。
+
+On reconnect, the trainer checks whether it can identify the previous network room. A different game process, a room change or missing room identification prevents old switches from being replayed automatically. You can enable them manually once connected. Game compatibility is checked before each new connection.
+
+## 小数可以按 Windows 区域设置输入 | Local decimal input
+
+倍率、坐标、大陀螺转速和手记鱼重可用点号输入小数。在使用逗号小数点的区域也可输入 `2,5`。请省略千位分隔符。仅接受整数的数量框仍按整数校验。
+
+Decimal fields accept a dot or the current Windows decimal separator. For example, a comma-decimal locale accepts both `2,5` and `2.5`. Omit thousands separators. Quantity fields that require whole numbers still reject fractions.
+
 ## 关闭窗口后可从系统托盘快速打开 | Keep running in the system tray
 
 启动时显示主窗口，同时在 Windows 通知区域显示图标。点主窗口的 × 或按 Alt+F4 会隐藏窗口，已开启的功能、连接和游戏悬浮窗继续运行。左键点托盘图标，或再次打开同版本的桌面快捷方式，可恢复主窗口。

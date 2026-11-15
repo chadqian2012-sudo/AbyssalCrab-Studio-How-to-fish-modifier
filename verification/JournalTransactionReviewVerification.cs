@@ -47,6 +47,41 @@ static class JournalTransactionReviewVerification
         object? timing = null;
         try
         {
+            string journalPath = Path.Combine(folder, "version-compatibility.json");
+            const string validJournal = "{\"Version\":1,\"LastNote\":\"previous\"}";
+            const string futureJournal = "{\"Sessions\":{},\"Version\":2}";
+            File.WriteAllText(journalPath, validJournal, new System.Text.UTF8Encoding(true));
+            byte[] priorJournal = File.ReadAllBytes(journalPath);
+            using (var store = new FishingDataStore(journalPath))
+            {
+                var current = store.Load();
+                current.LastNote = "updated";
+                store.Save(current);
+                Check(File.Exists(journalPath + ".bak") && File.ReadAllBytes(journalPath + ".bak").SequenceEqual(priorJournal),
+                    "A supported journal with a byte-order mark rotates byte-for-byte into its backup");
+                File.WriteAllText(journalPath, futureJournal);
+                bool rejected = false;
+                try { store.Save(current); } catch (IOException) { rejected = true; }
+                store.Load();
+                Check(rejected && !store.Writable && File.ReadAllText(journalPath) == futureJournal && File.ReadAllBytes(journalPath + ".bak").SequenceEqual(priorJournal),
+                    "Newer journal fields protect the primary and backup even when replaced while the journal was open");
+            }
+
+            string saveRoot = Path.Combine(folder, "portable-manifest");
+            string account = Directory.CreateDirectory(Path.Combine(saveRoot, "123")).FullName;
+            string savePath = Path.Combine(account, "World.txt");
+            int gameChecks = 0;
+            var backups = new SaveBackupService(Path.Combine(folder, "portable-backups"), () => ++gameChecks == 3);
+            File.WriteAllText(savePath, World("backup"));
+            var savedEntry = backups.Create(saveRoot);
+            savedEntry.Manifest.Files[0] = savedEntry.Manifest.Files.Single() with { RelativePath = "123/World.txt" };
+            File.WriteAllText(Path.Combine(savedEntry.Directory, "manifest.json"), JsonSerializer.Serialize(savedEntry.Manifest));
+            File.WriteAllText(savePath, World("original"));
+            bool restoreInterrupted = false;
+            try { backups.Restore(savedEntry, saveRoot); } catch (IOException) when (gameChecks == 3) { restoreInterrupted = true; }
+            Check(restoreInterrupted && File.Exists(savePath) && File.ReadAllText(savePath) == World("original"),
+                "An interrupted restore from a forward-slash manifest puts the original account save back");
+
             Check(ThreadPool.SetMinThreads(1, minIo) && ThreadPool.SetMaxThreads(1, maxIo), "Fixture can deterministically hold the only thread-pool worker");
             void PendingSignature(string name, Action<FishingViewModel, string> change, Action<FishingViewModel, string> verify)
             {

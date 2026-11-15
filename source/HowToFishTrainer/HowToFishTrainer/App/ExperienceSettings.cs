@@ -4,7 +4,6 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -58,8 +57,7 @@ public sealed class ExperienceSettingsStore
     public ExperienceSettingsStore(string? path) { _path = path == null ? null : Path.GetFullPath(path); }
     public static ExperienceSettings Parse(string text)
     {
-        var value = JsonSerializer.Deserialize<ExperienceSettings>(text) ?? throw new JsonException("体验设置为空");
-        if (value.Version is not (1 or 2)) throw new NotSupportedException("体验设置版本较新");
+        var value = AtomicLocalFile.ReadVersioned<ExperienceSettings>(text, 2);
         value.Version = 2;
         value.Presets = (value.Presets ?? new()).Where(p => p != null && !string.IsNullOrWhiteSpace(p.Name) && p.Name.Length <= 40)
             .Where(p => ValidPreset(p.Parameters)).DistinctBy(p => p.Name, StringComparer.OrdinalIgnoreCase).Take(50).ToList();
@@ -113,30 +111,5 @@ public sealed class ExperienceSettingsStore
             Warning = null;
         }
         catch (Exception e) { Warning = "体验设置保存失败 · " + e.Message; throw; }
-    }
-}
-
-internal static class AtomicLocalFile
-{
-    internal static void Write(string path, string text, Action<string> validate)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-        string temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
-        {
-            using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            { stream.Write(Encoding.UTF8.GetBytes(text)); stream.Flush(true); }
-            if (!File.Exists(path)) File.Move(temp, path);
-            else
-            {
-                bool valid;
-                try { validate(File.ReadAllText(path)); valid = true; }
-                catch (NotSupportedException e) { throw new IOException("文件版本较新，未覆盖原文件", e); }
-                catch (Exception e) when (e is JsonException or InvalidOperationException) { valid = false; }
-                // Read/permission failures must abort instead of being treated as broken JSON.
-                File.Replace(temp, path, valid ? path + ".bak" : null);
-            }
-        }
-        finally { if (File.Exists(temp)) File.Delete(temp); }
     }
 }

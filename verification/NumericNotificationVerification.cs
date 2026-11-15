@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -30,6 +31,32 @@ static class NumericNotificationVerification
         Check(slider.Value==3,"Slider binding starts from retained typed-draft value");
         model.Value=99;
         Check(slider.Value==5&&model.Value==99&&model.Text=="99"&&model.HasError,"Slider binding refreshes without rewriting the invalid numeric draft");
+        var originalCulture = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("de-DE");
+            n.Text = "1,25";
+            Check(!n.HasError && n.Value == 1.25 && n.Text == "1,25", "Local decimal separator remains editable and is applied as a fraction");
+            n.Text = "2.75";
+            Check(!n.HasError && n.Value == 2.75, "Existing dot-decimal input keeps its value under a comma-decimal culture");
+            n.Text = "1.234,5";
+            Check(n.HasError && n.LastValidValue == 2.75, "Ambiguous grouping does not replace the last valid number");
+            Check(FeatureItemViewModel.TrySpinSpeed("7,5", out double speed) && speed == 7.5
+                && !FeatureItemViewModel.TrySpinSpeed("15,1", out _), "Spin speed uses the same separator and enforces its 15 rps limit");
+            using var journal = new FishingViewModel(gameRunning: () => false, startTimer: false);
+            journal.BeginSession();
+            journal.SpeciesText = "Test fish";
+            journal.WeightText = "2,75";
+            journal.AddCatch();
+            Check(journal.WeightError == "" && journal.Catches.Count == 1 && journal.Catches[0].WeightKg == 2.75,
+                "The journal accepts and records the same localized weight displayed by its editor");
+            var quantity = new NumericInput("count", 2, 1, 10, true) { Text = "2,5" };
+            Check(quantity.HasError && quantity.Value == 2, "An integer-only field rejects a localized fractional count");
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("en-US");
+            n.Text = "1,250";
+            Check(n.HasError && n.LastValidValue == 2.75, "Thousands separators cannot accidentally change the applied multiplier");
+        }
+        finally { CultureInfo.CurrentCulture = originalCulture; }
         var folder=Path.Combine(args[0],"verification/numeric-notification-review-20261030",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(folder);
         var dll=typeof(NumericInput).Assembly.Location;
         File.WriteAllText(Path.Combine(folder,"results.json"),JsonSerializer.Serialize(new {passed=Failed.Count==0,checks=Passed.Count+Failed.Count,passedChecks=Passed,failedChecks=Failed,

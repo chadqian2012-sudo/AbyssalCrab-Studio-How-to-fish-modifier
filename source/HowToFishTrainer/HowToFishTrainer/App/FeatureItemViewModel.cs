@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -22,8 +21,6 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 	private readonly Action<FeatureItemViewModel>? _stateChanged;
 
 	private readonly Action? _playEnabledSound;
-
-	private readonly Action<string, string>? _showFeatureNotice;
 
 	private readonly ISponsorAccessGate _sponsorAccessGate;
 
@@ -73,7 +70,6 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
             Changed(nameof(SpinSpeedValidationMessage));
             Changed(nameof(HasSpinSpeedError));
             Changed(nameof(CanApplySpinSpeed));
-                Changed(nameof(CanApplyMagic));
             NotifyStateChanged();
         }
     }
@@ -82,8 +78,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
     public ICommand ApplySpinSpeedCommand { get; }
     public static bool TrySpinSpeed(string text, out double speed)
     {
-        return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out speed) &&
-            double.IsFinite(speed) && speed >= 2d && speed <= 15d;
+        return NumericInput.TryReadNumber(text, out speed) && speed >= 2d && speed <= 15d;
     }
     public static JsonElement SpinArguments(bool enabled, double speed, bool autoJump = false)
     {
@@ -649,8 +644,6 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
     private bool HasValidGeneratorSelection => SelectedOption != null && Options.Contains(SelectedOption) && FilteredOptions.Contains(SelectedOption);
     public bool CanGenerate => CanInteract && HasValidGeneratorSelection && !HasUnresolvedCatalogChoice;
 
-	private bool IsClientProtectionRestricted => ClientProtectionNotice.IsRestricted(Descriptor.Id, _capabilities);
-
 	public string CapabilityLabel => "实时控制";
 
 	public ICommand ExecuteCommand { get; }
@@ -664,7 +657,6 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 	public FeatureItemViewModel(FeatureDescriptor descriptor, IGameRuntimeClient? runtime = null, CapabilitySet? capabilities = null, IReadOnlyList<CatalogOption>? options = null, FeatureToggleState? toggleState = null, Action<FeatureItemViewModel>? stateChanged = null, Action? playEnabledSound = null, ISponsorAccessGate? sponsorAccessGate = null, Action<string, string>? showFeatureNotice = null, NumericInput? entityOverlayDistanceInput = null)
 	{
 		EntityOverlayDistanceInput = entityOverlayDistanceInput ?? new NumericInput("显示距离（米）", 200, 1, 1000);
-		_showFeatureNotice = showFeatureNotice;
 		Descriptor = descriptor;
         foreach (var input in new[] { MagicAngleInput, MagicDistanceInput, MagicStrengthInput })
             input.PropertyChanged += (_, _) => Changed(nameof(CanApplyMagic));
@@ -709,14 +701,6 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
                 _spinAutoJump = toggleState.SpinAutoJump;
                 _appliedSpinAutoJump = toggleState.AppliedSpinAutoJump;
             }
-		}
-		if (IsClientProtectionRestricted && runtime != null)
-		{
-			IsAvailable = true;
-			_enabled = false;
-			_isSuccessful = false;
-			_status = "由房主端结算；客机点击开关查看说明，本机不会开启。";
-			_stateLabel = "需房主支持";
 		}
         ApplySpinSpeedCommand = new RelayCommand(() =>
         {
@@ -765,10 +749,6 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 	public void ApplyExternalToggleState(FeatureToggleState state)
 	{
         _operationEpoch++;
-		if (IsClientProtectionRestricted)
-		{
-			state = ClientProtectionNotice.DisabledState;
-		}
 		_suppressToggleExecution = true;
 		try
 		{
@@ -822,10 +802,6 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
     private async Task ExecuteToggleAsync(bool desired, bool? previousState = null, JsonElement? argumentsOverride = null)
 	{
         if (desired && _executionBlockReason?.Invoke() is string reason) { RevertToggle(false); Status=reason; StateLabel="待开启"; NotifyStateChanged(); return; }
-		if (ShowClientProtectionNotice())
-		{
-			return;
-		}
 		bool previous = previousState ?? !desired;
         if (IsMagicBullet && desired && !argumentsOverride.HasValue && NumericInput.FirstError(MagicAngleInput, MagicDistanceInput, MagicStrengthInput) is string magicError && magicError.Length > 0)
         { Status = magicError; RevertToggle(previous); return; }
@@ -933,7 +909,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 
 	internal async Task Execute(IGameRuntimeClient? runtime, CapabilitySet? capabilities)
 	{
-		if (IsBusy || ShowClientProtectionNotice())
+		if (IsBusy)
 		{
 			return;
 		}
@@ -1050,17 +1026,6 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 		{
 			IsBusy = false;
 		}
-	}
-
-	private bool ShowClientProtectionNotice()
-	{
-		if (!IsClientProtectionRestricted || _runtime == null)
-		{
-			return false;
-		}
-		ApplyExternalToggleState(ClientProtectionNotice.DisabledState);
-		_showFeatureNotice?.Invoke("客机功能说明", "当前处于好友房间（客机）。此功能由房主端结算，仅开启本机修改器无法保证生效。请由房主在“房间成员”中为你配置相应保护。本次未开启此功能。");
-		return true;
 	}
 
 	private async Task CleanupGeneratedAsync()

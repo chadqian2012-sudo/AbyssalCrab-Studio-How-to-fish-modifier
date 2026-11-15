@@ -9,6 +9,7 @@
     <Page Remove="AnglerApp.xaml"/>
     <ApplicationDefinition Include="AnglerApp.xaml"/>
     <Compile Include="..\HowToFishTrainer\HowToFishTrainer\App\Fishing*.cs" Link="Journal\%(Filename)%(Extension)"/>
+    <Compile Include="..\HowToFishTrainer\HowToFishTrainer\App\AtomicLocalFile.cs" Link="Journal\AtomicLocalFile.cs"/>
     <Compile Include="..\HowToFishTrainer\HowToFishTrainer\App\SaveBackupService.cs" Link="Journal\SaveBackupService.cs"/>
     <Compile Include="..\HowToFishTrainer\HowToFishTrainer\App\NumericInput.cs" Link="Journal\NumericInput.cs"/>
     <Compile Include="..\HowToFishTrainer\HowToFishTrainer\App\RelayCommand.cs" Link="Journal\RelayCommand.cs"/>

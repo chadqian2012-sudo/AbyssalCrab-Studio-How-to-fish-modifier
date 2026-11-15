@@ -41,27 +41,15 @@ public partial class MainWindow : Window, IComponentConnector
 
 	private LicensedRuntimeClient? _licensedRuntime;
 
-	private bool _attaching;
+	private CancellationTokenSource? _pendingAttach;
 
 	private bool _refreshingMode;
 
-	private int? _attachedProcessId;
+	private int? _gameProcessId;
+	private int? AttachedProcessId => _bridge == null ? null : _gameProcessId;
 
-	private SessionMode? _sessionMode;
-
-	private ulong? _sceneHandle;
-
-	private Guid? _consentSession;
-
-	private string? _consentLobbyId;
-
-	private int? _consentOwnerId;
-
-	private bool _consentGranted;
-
-	private string? _compatibilityCacheKey;
-
-	private CompatibilityReport? _compatibilityCache;
+	private RuntimeSessionSnapshot? _lastSession;
+	private bool _awaitingRoomClear;
 
 	private const int EmergencyHotkeyId = 4740166;
 
@@ -87,10 +75,7 @@ public partial class MainWindow : Window, IComponentConnector
 		_license = license;
 		_ownsLicense = ownsLicense;
 		_sponsorGate = new SponsorAccessGate(() => _license.Current);
-		_viewModel = new MainViewModel(null, _sponsorGate, (string title, string message) =>
-		{
-			MessageBox.Show(_statusWidget?.IsActive == true ? _statusWidget : this, message, title, MessageBoxButton.OK, MessageBoxImage.Asterisk);
-		}, preferencesStore);
+		_viewModel = new MainViewModel(sponsorAccessGate: _sponsorGate, preferencesStore: preferencesStore);
 		_sponsorGate.ActivationRequested += SponsorGate_ActivationRequested;
 		_license.StatusChanged += License_StatusChanged;
 		InitializeComponent();
@@ -98,7 +83,7 @@ public partial class MainWindow : Window, IComponentConnector
         TrainerContent.OpenJournalRequested = OpenJournal;
         SearchArea.RevealResult = TrainerContent.RevealSearchHit;
         SearchArea.Dismissed = CloseSearch;
-		_crosshairOverlay = new CrosshairOverlay(_viewModel.Crosshair, () => _attachedProcessId, Dispatcher);
+		_crosshairOverlay = new CrosshairOverlay(_viewModel.Crosshair, () => AttachedProcessId, Dispatcher);
 		_viewModel.UpdateLicenseStatus(_license.Current);
         // The callback constructor starts immediately, including in preview windows.
         // Configure a stopped timer so preview/tests cannot claim a running game's bridge.
@@ -196,6 +181,7 @@ public partial class MainWindow : Window, IComponentConnector
             return;
         }
         _appearanceClosing = true;
+        _pendingAttach?.Cancel();
         (Application.Current as App)?.StopTrayActivation();
         _timer.Stop();
         IsEnabled = false;
@@ -216,7 +202,7 @@ public partial class MainWindow : Window, IComponentConnector
         }
         catch (Exception error)
         {
-            TryLogBridgeFailure(_attachedProcessId ?? 0, error);
+            TryLogBridgeFailure(AttachedProcessId ?? 0, error);
             MessageBox.Show("退出前未能确认游戏内持续功能已停用：" + error.Message + "\n修改器将断开连接并退出，请检查游戏中的效果。", "停用未确认", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally
@@ -373,140 +359,113 @@ public partial class MainWindow : Window, IComponentConnector
 		return 0;
 	}
 
-	private void PollGame(object? sender, EventArgs e)
+	private async void PollGame(object? sender, EventArgs e)
 	{
-		ProcessLocateResult processLocateResult = HowToFishProcessLocator.FindAnyRunning();
-		MainViewModel viewModel = _viewModel;
-		string connectionStatus;
-		if (processLocateResult.IsSuccess)
-		{
-			connectionStatus = $"已发现游戏 · PID {processLocateResult.Target.ProcessId}";
-		}
-		else
-		{
-			connectionStatus = (processLocateResult.AccessDenied ? "发现游戏但无法读取进程信息" : "等待 How to Fish");
-		}
-		viewModel.ConnectionStatus = connectionStatus;
-		if (!processLocateResult.IsSuccess)
-		{
-			_viewModel.ModeStatus = (processLocateResult.AccessDenied ? "进程信息访问被拒绝 · 未执行附加" : "未连接 · 只读保护");
-			_attachPolicy.Reset();
-			if (_bridge != null && !_attaching)
-			{
-				DisconnectBridgeAsync(_bridge);
-			}
-			return;
-		}
 		try
 		{
-			if (_bridge != null && _attachedProcessId != processLocateResult.Target.ProcessId)
+			var result = HowToFishProcessLocator.FindAnyRunning();
+			if (!result.IsSuccess)
 			{
-				DisconnectBridgeAsync(_bridge);
+				_viewModel.ConnectionStatus = result.AccessDenied ? "发现游戏但无法读取进程信息" : "等待 How to Fish";
+				_viewModel.ModeStatus = result.AccessDenied ? "进程信息访问被拒绝 · 未执行附加" : "未连接 · 只读保护";
+				await ObserveGameProcessAsync(null);
 				return;
 			}
-			string directoryName = Path.GetDirectoryName(processLocateResult.Target.ExecutablePath);
+			int processId = result.Target.ProcessId;
+			_viewModel.ConnectionStatus = $"已发现游戏 · PID {processId}";
+			if (await ObserveGameProcessAsync(processId)) return;
+			if (_pendingAttach != null) return;
+			if (_bridge != null)
+			{
+				if (!_refreshingMode) await RefreshSessionModeAsync(_bridge);
+				return;
+			}
+			if (!_attachPolicy.TryBegin(processId))
+			{
+				_viewModel.ModeStatus = _attachPolicy.DescribeRetry(processId);
+				return;
+			}
+			string directoryName = Path.GetDirectoryName(result.Target.ExecutablePath);
 			GameFingerprint observed = GameFingerprintReader.Read(directoryName);
 			CompatibilityReport compatibilityReport = EvaluateCompatibility(directoryName, observed);
 			_viewModel.ModeStatus = CompatibilityPresentation.Status(compatibilityReport);
-			if (_compatibilityNotice.ShouldShow(observed, compatibilityReport))
-			{
-				MessageBox.Show(this, CompatibilityPresentation.UpdateMessage(observed), "游戏版本更新提示", MessageBoxButton.OK, MessageBoxImage.Asterisk);
-			}
 			if (!compatibilityReport.CanWrite)
 			{
-				if (_bridge != null)
-				{
-					DisconnectBridgeAsync(_bridge);
-				}
+				_attachPolicy.RecordFailure(processId, _viewModel.ModeStatus);
+				return;
 			}
-			else if (compatibilityReport.CanWrite && _bridge == null && !_attaching)
+			await AttachBridgeAsync(processId, directoryName);
+			if (!_appearanceClosing && _gameProcessId == processId && _compatibilityNotice.ShouldShow(observed, compatibilityReport))
 			{
-				if (_attachPolicy.TryBegin(processLocateResult.Target.ProcessId))
-				{
-					AttachBridgeAsync(processLocateResult.Target.ProcessId, directoryName);
-				}
-				else
-				{
-					_viewModel.ModeStatus = _attachPolicy.DescribeRetry(processLocateResult.Target.ProcessId);
-				}
-			}
-			else if (compatibilityReport.CanWrite && _bridge != null && _attachedProcessId == processLocateResult.Target.ProcessId && !_refreshingMode)
-			{
-				RefreshSessionModeAsync(_bridge);
+				MessageBox.Show(this, CompatibilityPresentation.UpdateMessage(observed), "游戏版本更新提示", MessageBoxButton.OK, MessageBoxImage.Asterisk);
 			}
 		}
 		catch (Exception ex)
 		{
 			_viewModel.ModeStatus = "校验失败 · 已切换只读 · " + ex.GetType().Name;
-			_viewModel.SuspendConnection();
-			if (_bridge != null)
-			{
-				DisconnectBridgeAsync(_bridge);
-			}
+			if (_gameProcessId is int processId) _attachPolicy.RecordFailure(processId, _viewModel.ModeStatus);
+			_pendingAttach?.Cancel();
+			if (_bridge != null) await DetachBridgeAsync(preserveSwitches: false, _gameProcessId);
 		}
 	}
 
-	private CompatibilityReport EvaluateCompatibility(string gameRoot, GameFingerprint observed)
+	private async ValueTask<bool> ObserveGameProcessAsync(int? processId)
 	{
-		string text = $"{observed.UnityVersion}|{observed.SteamBuildId}|{observed.AssemblySha256}|{observed.AssemblyMvid:D}|{observed.Is64Bit}";
-		if (_compatibilityCacheKey == text && (object)_compatibilityCache != null)
-		{
-			return _compatibilityCache;
-		}
+		if (_gameProcessId == processId) return false;
+		int? previous = _gameProcessId;
+		_gameProcessId = processId;
+		_pendingAttach?.Cancel();
+		_attachPolicy.Reset();
+		// A transient pipe failure retains switches only for the same game process.
+		if (!previous.HasValue) return false;
+		await DetachBridgeAsync(preserveSwitches: false, previous);
+		return true;
+	}
+
+	private static CompatibilityReport EvaluateCompatibility(string gameRoot, GameFingerprint observed)
+	{
 		GameContractReport contracts = (GameBuildCatalog.Certified.Any((GameFingerprint build) => CompatibilityEngine.Compare(build, observed).Status == CompatibilityStatus.Supported) ? GameContractReport.Compatible : GameContractValidator.Validate(gameRoot));
-		_compatibilityCache = CompatibilityEngine.Evaluate(GameBuildCatalog.Certified, observed, contracts);
-		_compatibilityCacheKey = text;
-		return _compatibilityCache;
+		return CompatibilityEngine.Evaluate(GameBuildCatalog.Certified, observed, contracts);
 	}
 
 	private async Task AttachBridgeAsync(int processId, string gameRoot)
 	{
         if (_appearanceClosing) return;
         RuntimeBridgeClient? connected = null;
-		_attaching = true;
+		using var attempt = new CancellationTokenSource();
+		_pendingAttach = attempt;
 		try
 		{
-            connected = await RuntimeBridgeClient.ConnectAsync(processId, gameRoot, CancellationToken.None, _license.Current.IsSponsor);
-            if (_appearanceClosing) { await connected.DisposeAsync(); return; }
-            _bridge = connected;
-			_licensedRuntime = new LicensedRuntimeClient(_bridge, _sponsorGate);
+			connected = await RuntimeBridgeClient.ConnectAsync(processId, gameRoot, attempt.Token, _license.Current.IsSponsor);
 			RuntimeSessionSnapshot snapshot;
 			try
 			{
-				snapshot = await _bridge.InspectSessionAsync(CancellationToken.None);
+				snapshot = await connected.InspectSessionAsync(attempt.Token);
 			}
 			catch (Exception innerException)
 			{
 				throw new RuntimeBridgeConnectException(RuntimeBridgeConnectStage.SessionHandshake, innerException);
 			}
-            if (!IsCurrentBridge(connected)) return;
-			await ApplySessionModeAsync(connected, snapshot);
-            if (!IsCurrentBridge(connected)) return;
-			_attachedProcessId = processId;
+			attempt.Token.ThrowIfCancellationRequested();
+			var established = _bridge = connected;
+			connected = null;
+			await ApplySessionModeAsync(established, snapshot);
+			if (!IsCurrentBridge(established)) return;
 			_attachPolicy.RecordSuccess(processId);
 		}
 		catch (Exception exception)
 		{
-            if (_appearanceClosing || (connected != null && !IsCurrentBridge(connected)))
-                return;
+			if (attempt.IsCancellationRequested || _appearanceClosing) return;
 			string text = BridgeConnectionDiagnostics.Describe(exception);
 			_attachPolicy.RecordFailure(processId, text);
 			TryLogBridgeFailure(processId, exception);
 			_viewModel.ModeStatus = "运行时桥失败 · " + text;
-			if (_bridge != null)
-			{
-				await _bridge.DisposeAsync();
-			}
-			_bridge = null;
-			_licensedRuntime = null;
-			_attachedProcessId = null;
-			_sessionMode = null;
-			_sceneHandle = null;
-			_viewModel.SuspendConnection();
+			await DetachBridgeAsync(preserveSwitches: true, processId);
 		}
 		finally
 		{
-			_attaching = false;
+			_pendingAttach = null;
+			await ReleaseBridgeAsync(connected, processId);
 		}
 	}
 
@@ -531,21 +490,13 @@ public partial class MainWindow : Window, IComponentConnector
             if (!IsCurrentBridge(bridge)) return;
 			RuntimeBridgeConnectException exception = new RuntimeBridgeConnectException(RuntimeBridgeConnectStage.SessionRefresh, innerException);
 			string text = BridgeConnectionDiagnostics.Describe(exception);
-			int? attachedProcessId = _attachedProcessId;
-			if (attachedProcessId.HasValue)
+			if (AttachedProcessId is int processId)
 			{
-				int valueOrDefault = attachedProcessId.GetValueOrDefault();
-				_attachPolicy.RecordFailure(valueOrDefault, text);
-				TryLogBridgeFailure(valueOrDefault, exception);
+				_attachPolicy.RecordFailure(processId, text);
+				TryLogBridgeFailure(processId, exception);
 			}
 			_viewModel.ModeStatus = "运行时桥已失去响应 · 已切换只读 · " + text;
-			_viewModel.SuspendConnection();
-			await bridge.DisposeAsync();
-			_bridge = null;
-			_licensedRuntime = null;
-			_attachedProcessId = null;
-			_sessionMode = null;
-			_sceneHandle = null;
+			await DetachBridgeAsync(preserveSwitches: true, AttachedProcessId);
 		}
 		finally
 		{
@@ -564,76 +515,48 @@ public partial class MainWindow : Window, IComponentConnector
 		}
 	}
 
-	private async Task DisconnectBridgeAsync(RuntimeBridgeClient bridge)
+	private ValueTask DetachBridgeAsync(bool preserveSwitches, int? processId)
 	{
-		if (_bridge == bridge)
+		var bridge = _bridge;
+		_bridge = null;
+		_licensedRuntime = null;
+		if (preserveSwitches) _viewModel.SuspendConnection();
+		else
 		{
+			_lastSession = null;
+			_awaitingRoomClear = false;
 			_viewModel.Disconnect();
-			_bridge = null;
-			_licensedRuntime = null;
-			_attachedProcessId = null;
-			_sessionMode = null;
-			_sceneHandle = null;
-			_consentSession = null;
-			_consentLobbyId = null;
-			_consentOwnerId = null;
-			_consentGranted = false;
-			await bridge.DisposeAsync();
 		}
+		return ReleaseBridgeAsync(bridge, processId);
+	}
+
+	private static async ValueTask ReleaseBridgeAsync(RuntimeBridgeClient? bridge, int? processId)
+	{
+		if (bridge == null) return;
+		try { await bridge.DisposeAsync(); }
+		catch (Exception error) { TryLogBridgeFailure(processId ?? 0, error); }
 	}
 
 	private async Task ApplySessionModeAsync(RuntimeBridgeClient bridge, RuntimeSessionSnapshot snapshot)
 	{
         if (!IsCurrentBridge(bridge)) return;
-		SessionMode mode = RuntimeSessionMode.From(snapshot.Host, snapshot.Client, snapshot.Lobby);
-		bool accessChanged = mode != _sessionMode;
-		ulong? sceneHandle = _sceneHandle;
-		int num;
-		if (sceneHandle.HasValue)
+		var previous = _lastSession;
+		SessionMode mode = snapshot.Mode;
+		bool sceneChanged = previous is { SceneHandle: > 0 } && snapshot.SceneHandle > 0 && previous.SceneHandle != snapshot.SceneHandle;
+		bool worldChanged = _awaitingRoomClear || (previous != null && snapshot.RequiresClearFrom(previous, reconnecting: _licensedRuntime == null));
+		if (worldChanged)
 		{
-			ulong valueOrDefault = sceneHandle.GetValueOrDefault();
-			num = ((valueOrDefault != snapshot.SceneHandle) ? 1 : 0);
+			_awaitingRoomClear = true;
+			_viewModel.Disconnect();
+			var clear = await bridge.ExecuteAsync(new FeatureCommand("locks.disable_all", JsonSerializer.SerializeToElement(new { }), Capability.OwnedPlayer), CancellationToken.None);
+			if (!IsCurrentBridge(bridge)) return;
+			if (!clear.Succeeded) throw new InvalidDataException("切换房间时未能确认持续功能已停用 · " + clear.Message);
+			_awaitingRoomClear = false;
 		}
-		else
+		CapabilitySet capabilitySet = CapabilityMatrix.For(mode, mode == SessionMode.JoinedFriend);
+		if (worldChanged || _licensedRuntime == null)
 		{
-			num = 0;
-		}
-		bool sceneChanged = (byte)num != 0;
-		bool identityChanged = mode == SessionMode.JoinedFriend && (_consentSession != bridge.SessionId || !string.Equals(_consentLobbyId, snapshot.LobbyId, StringComparison.Ordinal) || _consentOwnerId != snapshot.OwnerId);
-		if (accessChanged | identityChanged)
-		{
-            // Stop accepting old-session aim requests before the asynchronous clear.
-            // Otherwise a click while awaiting disable_all can queue an enable after it.
-            _viewModel.AimAssist.Disconnect();
-			SessionMode? sessionMode = _sessionMode;
-			if (sessionMode.HasValue)
-			{
-				await bridge.ExecuteAsync(new FeatureCommand("locks.disable_all", JsonSerializer.SerializeToElement(new { }), Capability.OwnedPlayer), CancellationToken.None);
-                if (!IsCurrentBridge(bridge)) return;
-			}
-		}
-		if (mode != SessionMode.JoinedFriend)
-		{
-			_consentSession = null;
-			_consentLobbyId = null;
-			_consentOwnerId = null;
-			_consentGranted = false;
-		}
-		else if (identityChanged)
-		{
-			_consentSession = bridge.SessionId;
-			_consentLobbyId = snapshot.LobbyId;
-			_consentOwnerId = snapshot.OwnerId;
-			_consentGranted = true;
-			accessChanged = true;
-		}
-		CapabilitySet capabilitySet = CapabilityMatrix.For(mode, _consentGranted);
-		if (accessChanged)
-		{
-			if (_licensedRuntime == null)
-			{
-				_licensedRuntime = new LicensedRuntimeClient(bridge, _sponsorGate);
-			}
+			_licensedRuntime ??= new LicensedRuntimeClient(bridge, _sponsorGate);
 			_viewModel.Connect(_licensedRuntime, capabilitySet);
 		}
 		if (sceneChanged)
@@ -667,15 +590,13 @@ public partial class MainWindow : Window, IComponentConnector
 				_viewModel.FunEventsPage.RefreshAvailabilityAsync();
 			}
 		}
-		_sessionMode = mode;
-		_sceneHandle = snapshot.SceneHandle;
+		_lastSession = previous != null && !worldChanged ? snapshot.KeepKnownIdentity(previous) : snapshot;
 		MainViewModel viewModel = _viewModel;
 		viewModel.ModeStatus = mode switch
 		{
 			SessionMode.Host => "运行时桥已连接 · 房主模式 · 当前玩家与世界功能可用", 
 			SessionMode.Solo => "运行时桥已连接 · 单人模式 · 当前玩家与世界功能可用", 
-			SessionMode.JoinedFriend => (!_consentGranted) ? "运行时桥已连接 · 好友房 · 功能可调用" : "运行时桥已连接 · 好友房 · 功能可调用", 
-			SessionMode.MainMenu => "运行时桥已连接 · 请先进入房间", 
+			SessionMode.JoinedFriend => "运行时桥已连接 · 好友房 · 功能可调用",
 			_ => "运行时桥已连接 · 请先进入房间", 
 		};
 	}
@@ -683,6 +604,7 @@ public partial class MainWindow : Window, IComponentConnector
 	protected override void OnClosed(EventArgs e)
 	{
         _appearanceClosing = true;
+        _pendingAttach?.Cancel();
         _trayIcon?.Dispose();
         _trayIcon = null;
         _trayMenu?.Dispose();
@@ -701,11 +623,7 @@ public partial class MainWindow : Window, IComponentConnector
 		_license.StatusChanged -= License_StatusChanged;
 		_sponsorGate.ActivationRequested -= SponsorGate_ActivationRequested;
 		NativeHotkeys.UnregisterHotKey(new WindowInteropHelper(this).Handle, 4740166);
-		if (_bridge != null)
-		{
-			_bridge.DisposeAsync().AsTask().GetAwaiter()
-				.GetResult();
-		}
+		ReleaseBridgeAsync(_bridge, AttachedProcessId).GetAwaiter().GetResult();
 		if (_ownsLicense)
 		{
 			_license.Dispose();

@@ -50,7 +50,6 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
 	private readonly IToggleSoundPlayer _soundPlayer;
 
-	private readonly Action<string, string>? _showFeatureNotice;
 
 	private readonly ISponsorAccessGate _sponsorAccessGate;
 
@@ -582,7 +581,6 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 
     public MainViewModel(IToggleSoundPlayer? soundPlayer = null, ISponsorAccessGate? sponsorAccessGate = null, Action<string, string>? showFeatureNotice = null, IUserPreferencesStore? preferencesStore = null, string? experiencePath = null)
 	{
-		_showFeatureNotice = showFeatureNotice;
         _settings = new TrainerSettingsStore(experiencePath == null ? System.IO.Path.Combine(ProductIdentity.AppDataDirectory,"settings.json") : System.IO.Path.Combine(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(experiencePath))!,"teleport-points.json"));
 		_soundPlayer = soundPlayer ?? new ToggleSoundPlayer();
 		_sponsorAccessGate = sponsorAccessGate ?? AllowAllSponsorAccessGate.Instance;
@@ -855,7 +853,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
                 int actionEpoch = _featureActionEpoch;
                 _toggleStates.TryGetValue(item.Id, out var state);
                 var feature = new FeatureItemViewModel(item, _runtime, _capabilities, options, state,
-                    source => { if (actionEpoch == _featureActionEpoch) RememberToggleState(source); }, PlayEnabledSound, _sponsorAccessGate, _showFeatureNotice, EntityOverlayDistanceInput);
+                    source => { if (actionEpoch == _featureActionEpoch) RememberToggleState(source); }, PlayEnabledSound, _sponsorAccessGate, entityOverlayDistanceInput: EntityOverlayDistanceInput);
                 AttachExperience(feature);
                 RestoreFeatureParameters(feature);
                 AllFeatures.Add(feature);
@@ -973,11 +971,6 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 				continue;
 			}
 			FeatureDescriptor featureDescriptor = FeatureRegistry.Find(pair.Key);
-			if (ClientProtectionNotice.IsRestricted(pair.Key, capabilities))
-			{
-				ApplyRememberedToggleState(pair.Key, ClientProtectionNotice.DisabledState);
-				continue;
-			}
 			if ((object)featureDescriptor == null || featureDescriptor.Control != FeatureControl.Toggle || !RuntimeFeatureSupport.ImplementedIds.Contains(featureDescriptor.Id) || !capabilities.CanExecute(featureDescriptor.RequiredCapability))
 			{
 				ApplyRememberedToggleState(pair.Key, new FeatureToggleState(Enabled: false, "会话已变化，当前权限不允许恢复此功能", "已关闭", IsSuccessful: false));
@@ -1178,7 +1171,9 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 			return;
 		}
 		_islandLoadBusy = true;
-        var runtime=_runtime;var capabilities=_capabilities;int epoch=_connectionEpoch;
+        var runtime = _runtime;
+        var capabilities = _capabilities;
+        int epoch = _connectionEpoch, context = _positionContextEpoch;
 		OnPropertyChanged("CanLoadSelectedIsland");
 		try
 		{
@@ -1206,15 +1201,19 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 			}
 			JsonElement arguments = jsonElement;
             var result=await new FeatureEngine(runtime).ExecuteAsync(new FeatureCommand("world.island.load", arguments, Capability.HostWorld), capabilities, CancellationToken.None);
-            if(runtime==_runtime&&epoch==_connectionEpoch)PositionStatus=result.Message;
+            if (IsCurrentPositionContext(runtime, epoch, context)) PositionStatus = result.Message;
 		}
 		catch (Exception ex)
 		{
-            if(runtime==_runtime&&epoch==_connectionEpoch)PositionStatus = "岛屿载入失败 · " + ex.Message;
+            if (IsCurrentPositionContext(runtime, epoch, context)) PositionStatus = "岛屿载入失败 · " + ex.Message;
 		}
 		finally
 		{
-            if(runtime==_runtime&&epoch==_connectionEpoch){_islandLoadBusy = false;OnPropertyChanged("CanLoadSelectedIsland");}
+            if (IsCurrentPositionContext(runtime, epoch, context))
+            {
+                _islandLoadBusy = false;
+                OnPropertyChanged(nameof(CanLoadSelectedIsland));
+            }
 		}
 	}
 

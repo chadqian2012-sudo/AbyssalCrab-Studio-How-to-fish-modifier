@@ -56,7 +56,7 @@ public sealed class FishingDataStore : IDisposable
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     private readonly string? _path;
     private FileStream? _lease;
-    private bool _future;
+    private const int MaxFileBytes = 16 * 1024 * 1024;
     public bool Writable { get; private set; } = true;
     public string Warning { get; private set; } = "";
     public FishingDataStore(string? path)
@@ -73,8 +73,7 @@ public sealed class FishingDataStore : IDisposable
     }
     public static FishingData Parse(string json)
     {
-        var d = JsonSerializer.Deserialize<FishingData>(json) ?? throw new InvalidDataException("日志为空");
-        if (d.Version != 1) throw new NotSupportedException("日志版本较新");
+        var d = AtomicLocalFile.ReadVersioned<FishingData>(json, 1);
         if (d.Catches == null || d.Sessions == null || d.Catches.Count > 20000 || d.Sessions.Count > 1000)
             throw new InvalidDataException("日志条目数量无效");
         var sessions = new HashSet<Guid>(); var catches = new HashSet<Guid>();
@@ -107,45 +106,27 @@ public sealed class FishingDataStore : IDisposable
             if (!File.Exists(p)) continue;
             try
             {
-                if (new FileInfo(p).Length > 16 * 1024 * 1024) throw new InvalidDataException("日志超过 16 MB");
-                var d = Parse(File.ReadAllText(p));
+                var d = ReadFile(p);
                 if (p != _path) Warning = "日志主文件损坏，已读取上一份有效备份";
                 return d;
             }
-            catch (NotSupportedException) { _future = true; Writable = false; Warning = "日志版本较新，原文件保持不变"; return new(); }
+            catch (NotSupportedException) { Writable = false; Warning = "日志版本较新，原文件保持不变"; return new(); }
             catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or JsonException) { Warning = "日志读取失败，正在尝试有效备份"; }
         }
         return new();
     }
     public void Save(FishingData data)
     {
-        if (!Writable || _future) throw new IOException(Warning);
+        if (!Writable) throw new IOException(Warning);
         var text = JsonSerializer.Serialize(data, JsonOptions); Parse(text);
-        if (Encoding.UTF8.GetByteCount(text) > 16 * 1024 * 1024) throw new IOException("日志已达 16 MB 上限，请先导出整理");
-        if (_path != null) WriteAtomic(_path, Encoding.UTF8.GetBytes(text), prior => Parse(Encoding.UTF8.GetString(prior)));
+        var bytes = Encoding.UTF8.GetBytes(text);
+        if (bytes.Length > MaxFileBytes) throw new IOException("日志已达 16 MB 上限，请先导出整理");
+        if (_path != null) AtomicLocalFile.WriteBytes(_path, bytes, file => ReadFile(file));
     }
-    internal static void WriteAtomic(string path, byte[] bytes, Action<byte[]>? validatePrevious = null)
+    private static FishingData ReadFile(string path)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-        string tmp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
-        {
-            using (var f = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { f.Write(bytes); f.Flush(true); }
-            if (!File.Exists(path)) File.Move(tmp, path);
-            else
-            {
-                string? backup = null;
-                if (validatePrevious != null)
-                {
-                    try { validatePrevious(File.ReadAllBytes(path)); backup = path + ".bak"; }
-                    catch (NotSupportedException e) { throw new IOException("日志版本较新，未覆盖原文件", e); }
-                    catch (Exception e) when (e is JsonException or InvalidDataException or InvalidOperationException) { }
-                    // Keep unreadable files intact; only known invalid data may be replaced.
-                }
-                File.Replace(tmp, path, backup);
-            }
-        }
-        finally { if (File.Exists(tmp)) File.Delete(tmp); }
+        if (new FileInfo(path).Length > MaxFileBytes) throw new IOException("日志超过 16 MB");
+        return Parse(File.ReadAllText(path));
     }
     public void Dispose() { _lease?.Dispose(); _lease = null; Writable = false; }
 }
