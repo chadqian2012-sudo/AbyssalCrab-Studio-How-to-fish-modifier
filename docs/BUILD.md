@@ -8,6 +8,12 @@
 - r24 运行时补丁入口 | Runtime patch entry point: `build/Build-TargetOptions.ps1`
 - 本地构建所需引用 | References required for a local build: `patched/HowToFishTrainer.Core.dll`, `references/HowToFishTrainer.Memory.dll`, plus the embedded Runtime/Harmony assemblies in the project directory. These binary files are excluded from this public source repository; obtain them only from sources you are authorized to use.
 
+- r28 掉落物清理补丁沿用此入口。运行以下命令，从 r27 的 Runtime 和 Core 同时生成本版所需的两个程序集，再执行桌面发布。所用游戏程序集和父版本的哈希由脚本核对。
+
+```powershell
+& '.\build\Build-TargetOptions.ps1' -WorldDrops -DotnetPath '<SDK>/dotnet.exe' -GameManagedDirectory '<game>/How to Fish_Data/Managed' -DnlibPath '<dnlib>/dnlib.dll' -ParentRuntimePath '<r27>/HowToFishTrainer.Runtime.dll' -ParentCorePath '<r27>/HowToFishTrainer.Core.dll'
+```
+
 ## 环境 | Prerequisites
 
 需要 Windows、PowerShell 和 .NET 8 Windows Desktop SDK。脚本从 PATH 查找 dotnet，或接受 `-DotnetPath` 指定便携 SDK。离线依赖缓存可用 `-PackageCache` 指定；无需已清理的历史 SDK 下载清单。
@@ -37,6 +43,8 @@ python .\build\check_packaging_variants.py --dotnet-path '<SDK>/dotnet.exe' --pa
 The default mode creates a Windows x64 self-contained single file and does not require a separate .NET installation. The compressed single-file build extracts on startup; distribute the folder build as a whole; the framework-dependent build requires the .NET 8 Desktop Runtime x64. Verify outputs and embedded resources against the current delivery notes before distribution.
 
 ## r24 以已交付的 r23 为父版本 | Patch the shipped r23 runtime
+
+重建历史 r24 时请使用 r24 对应的 Git 提交。当前分支构建 r28 的命令见本页开头。
 
 补丁输入为 r23 默认版内嵌运行时、对应的游戏 Managed 程序集、Harmony 及 dnlib。先生成并验证运行时，再用上面的发布入口分别打包。两种 EXE 都需要解包核验。
 

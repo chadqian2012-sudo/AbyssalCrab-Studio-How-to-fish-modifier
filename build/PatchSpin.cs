@@ -17,17 +17,25 @@ internal static class PatchSpin
         { return _target.GetTypes().FirstOrDefault(t => t.FullName == type.FullName); }
     }
 
-    internal static TypeDef Clone(ModuleDef targetModule, string helper, string typeName)
+    internal static TypeDef Clone(ModuleDef targetModule, string helper, string typeName, params string[] updateMethods)
     {
         using var sourceModule = ModuleDefMD.Load(helper);
         var source = sourceModule.GetTypes().Single(t => t.FullName == typeName);
         if (source.NestedTypes.Count != 0) throw new Exception("Helper must have no nested types");
-        var target = new TypeDefUser(source.Namespace, source.Name, targetModule.CorLibTypes.Object.TypeDefOrRef) { Attributes = source.Attributes };
-        targetModule.Types.Add(target);
+        TypeDef target = updateMethods.Length == 0
+            ? new TypeDefUser(source.Namespace, source.Name, targetModule.CorLibTypes.Object.TypeDefOrRef) { Attributes = source.Attributes }
+            : targetModule.GetTypes().Single(t => t.FullName == typeName);
+        if (updateMethods.Length == 0) targetModule.Types.Add(target);
+        var originalMethods = target.Methods.ToDictionary(m => m.FullName);
         var importer = new Importer(targetModule, ImporterOptions.TryToUseTypeDefs, default, new Mapper(targetModule));
         var fields = new Dictionary<FieldDef, FieldDef>();
         foreach (var field in source.Fields)
         {
+            if (updateMethods.Length != 0)
+            {
+                fields.Add(field, target.Fields.Single(f => f.FullName == field.FullName));
+                continue;
+            }
             var copy = new FieldDefUser(field.Name, importer.Import(field.FieldSig), field.Attributes);
             if (field.HasConstant) copy.Constant = new ConstantUser(field.Constant.Value);
             target.Fields.Add(copy); fields.Add(field, copy);
@@ -35,6 +43,11 @@ internal static class PatchSpin
         var methods = new Dictionary<MethodDef, MethodDef>();
         foreach (var method in source.Methods)
         {
+            if (originalMethods.TryGetValue(method.FullName, out var existing))
+            {
+                methods.Add(method, existing);
+                continue;
+            }
             var copy = new MethodDefUser(method.Name, importer.Import(method.MethodSig), method.ImplAttributes, method.Attributes);
             foreach (var param in method.ParamDefs) copy.ParamDefs.Add(new ParamDefUser(param.Name, param.Sequence, param.Attributes));
             target.Methods.Add(copy); methods.Add(method, copy);
@@ -42,7 +55,7 @@ internal static class PatchSpin
         foreach (var pair in methods)
         {
             var old = pair.Key; var copy = pair.Value;
-            if (!old.HasBody) continue;
+            if (!old.HasBody || (originalMethods.ContainsKey(old.FullName) && !updateMethods.Contains(old.Name.String))) continue;
             var body = new CilBody { InitLocals = old.Body.InitLocals }; copy.Body = body;
             var locals = old.Body.Variables.ToDictionary(v => v, v => new Local(importer.Import(v.Type)));
             foreach (var local in old.Body.Variables) body.Variables.Add(locals[local]);
@@ -55,7 +68,7 @@ internal static class PatchSpin
                 else if (operand is Local local) operand = locals[local];
                 else if (operand is Parameter parameter) operand = copy.Parameters[parameter.Index];
                 else if (operand is IMethod method && method.DeclaringType.FullName == source.FullName)
-                    operand = methods.Single(p => p.Key.Name == method.Name && p.Key.MethodSig.Params.Count == method.MethodSig.Params.Count).Value;
+                    operand = methods.Single(p => p.Key.FullName == method.FullName).Value;
                 else if (operand is IField field && field.DeclaringType.FullName == source.FullName)
                     operand = fields.Single(p => p.Key.Name == field.Name).Value;
                 else if (operand is IMethod externalMethod) operand = importer.Import(externalMethod);
@@ -83,14 +96,14 @@ internal static class PatchSpin
         for (int i = added.Length - 1; i >= 0; i--) method.Body.Instructions.Insert(0, added[i]);
     }
 
-    private static void Support(ModuleDef module)
+    internal static void Support(ModuleDef module, string id = "player.spin.lock")
     {
         var ctor = Method(module, "HowToFishTrainer.Core.RuntimeFeatureSupport", ".cctor");
         var instructions = ctor.Body.Instructions;
         var store = instructions.Single(i => i.OpCode == OpCodes.Stsfld);
         var add = instructions.Select(i => i.Operand).OfType<IMethod>().First(m => m.Name == "Add");
         int at = instructions.IndexOf(store);
-        foreach (var i in new[] { Instruction.Create(OpCodes.Dup), Instruction.Create(OpCodes.Ldstr, "player.spin.lock"), Instruction.Create(OpCodes.Callvirt, add), Instruction.Create(OpCodes.Pop) }) instructions.Insert(at++, i);
+        foreach (var i in new[] { Instruction.Create(OpCodes.Dup), Instruction.Create(OpCodes.Ldstr, id), Instruction.Create(OpCodes.Callvirt, add), Instruction.Create(OpCodes.Pop) }) instructions.Insert(at++, i);
     }
 
     public static void Main(string[] args)

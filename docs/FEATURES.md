@@ -1,5 +1,13 @@
 # 功能指南 | Feature Guide
 
+## 一键清理地上散落的物品 | Clear loose world drops
+
+进入自己的单人或房主世界，打开「金钱背包」，点击「一键清理掉落物」。主窗口和悬浮窗都可以按名称搜索这个按钮。它会分批回收当前已加载世界里符合条件的地面武器、普通物品和死亡生物。按下按钮后新掉落或已被捡起的物品会留在原处或持有人手中。活体、背包、任务物品和玩家遗体会保留。
+
+清理会影响同一房间的其他玩家。想撤回某次清理，需要事先备份测试存档。生成页面的「清理本次生成」仍只处理修改器自己生成的对象。
+
+In a solo or hosted world, use the cleanup action under Money & Inventory or search for its Chinese name in either window. It removes eligible loose drops in batches from the loaded world. Living creatures, held items, inventory, quest items and player bodies are preserved. The action affects everyone in the room. The spawn page still provides its separate cleanup for trainer-spawned objects.
+
 ## 游戏重新连接后如何处理旧开关 | Reconnecting to a game
 
 连接中断后重新进入网络房间时，程序会比对上次确认的房间。进程已更换、房间已变化或缺少足以确认房间的编号时，旧开关不会自动重放。连接恢复后可按需手动开启。每次新连接仍会检查游戏版本；已连接期间的每秒轮询只读取会话状态。

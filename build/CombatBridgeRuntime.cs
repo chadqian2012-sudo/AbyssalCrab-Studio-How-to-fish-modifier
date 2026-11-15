@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using HowToFishTrainer.Runtime;
@@ -26,7 +27,7 @@ namespace AbyssalCrab.Runtime
             var property = AccessTools.Property(obj.GetType(), name);
             return property != null ? property.GetValue(obj, null) : AccessTools.Field(obj.GetType(), name).GetValue(obj);
         }
-        private static object Call(object host, string name, object[] args)
+        internal static object Call(object host, string name, object[] args)
         {
             try { return AccessTools.Method(host.GetType(), name).Invoke(host, args); }
             catch (TargetInvocationException error) { throw error.InnerException ?? error; }
@@ -36,6 +37,11 @@ namespace AbyssalCrab.Runtime
             string id = envelope.Value<string>("featureId");
             var args = envelope["arguments"] as JObject ?? new JObject();
             string correlation = envelope.Value<string>("correlationId");
+            if (id == "world.clear_drops")
+            {
+                DropCleanup.Start(host, correlation, envelope["arguments"] as JObject);
+                return true;
+            }
             if (id == "view.entity_overlay.configure")
             {
                 Call(host, "ValidateAuthority", new object[] { id });
@@ -131,7 +137,7 @@ namespace AbyssalCrab.Runtime
             catch{_wave=null;_waveHost=null;}
         }
         public static void Reset(TrainerBridgeHost host)
-        {if(_waveHost!=null&&host!=_waveHost)return;_wave=null;_waveHost=null;_count=0;}
+        {DropCleanup.Cancel(host);if(_waveHost!=null&&host!=_waveHost)return;_wave=null;_waveHost=null;_count=0;}
         public static object AdjustDefinition(object definition)
         {
             if (definition == null || _count == 0 || !Animal((string)Read(definition,"Id"))) return definition;
@@ -192,6 +198,122 @@ namespace AbyssalCrab.Runtime
                     new object[]{current[random.Next(current.Count)],offset,rotation,velocity,kill,id=="rare-fish-school",bird?.18f:.12f},null));
             }
             return result;
+        }
+    }
+
+    public sealed class DropCleanup
+    {
+        private static DropCleanup _active;
+        private readonly TrainerBridgeHost _host;
+        private readonly Transform _root;
+        private readonly Player _player;
+        private readonly byte _island;
+        private readonly string _saveName;
+        private readonly string _id = Guid.NewGuid().ToString("N");
+        private readonly List<KeyValuePair<Item, int>> _items = new List<KeyValuePair<Item, int>>();
+        private int _next, _removed, _skipped, _failed;
+
+        private DropCleanup(TrainerBridgeHost host, Transform root, string saveName)
+        {
+            _host = host;
+            _root = root;
+            _player = Player.LocalPlayer;
+            _island = OnlineIslandManager.ActiveIsland;
+            _saveName = saveName;
+            // Each item is registered under both its root and its collider transforms.
+            foreach (var pair in ItemManager.Items)
+            {
+                Item item = pair.Value;
+                if (item && pair.Key == item.transform && IsClearableDrop(item, root))
+                    _items.Add(new KeyValuePair<Item, int>(item, item.NetworkObject.ObjectId));
+            }
+        }
+
+        public static bool IsClearableDrop(Item item, Transform worldRoot)
+        {
+            return item && item.transform.parent == worldRoot && item.NetworkObject &&
+                !item.NetworkObject.IsSceneObject && item.IsServerInitialized && item.IsSpawned &&
+                !item.IsDestroying && !item.IsQuestItem && !item.DeadPlayer &&
+                !item.HasPlayerHolder && !item.IsInInventory && !item.WaitingForForceDrop &&
+                !item.BirdHolder && !item.AttachedRod && (!item.Creature || item.Creature.IsDead);
+        }
+
+        public static void Cancel(TrainerBridgeHost host)
+        {
+            if (_active != null && _active._host == host) _active = null;
+        }
+
+        public static void Start(TrainerBridgeHost host, string correlation, JObject args)
+        {
+            if (args == null || (args.Count != 0 && (args.Count != 1 || args["operationId"] == null)))
+                throw new ArgumentException("清理请求需要空参数或本次清理编号。");
+            var server = Server.Instance;
+            var manager = ItemManager.Instance;
+            var player = Player.LocalPlayer;
+            var save = SaveManager.CurServerSave;
+            if (!server || !server.IsServerInitialized || !manager || !manager.IsServerInitialized ||
+                !player || !server.DynamicObjectsHolder || !OnlineIslandManager.Instance || IslandManager.IsLoading || save == null)
+            {
+                Cancel(host);
+                throw new InvalidOperationException("请在单人或房主世界加载完成后清理掉落物。");
+            }
+            Transform root = server.DynamicObjectsHolder;
+            var token = args["operationId"];
+            var job = _active;
+            if (token == null)
+            {
+                job = new DropCleanup(host, root, save.Name);
+                _active = job;
+            }
+            else
+            {
+                if (token.Type != JTokenType.String || job == null || job._id != (string)token || job._host != host)
+                    throw new InvalidOperationException("本次清理已结束，请重新点击清理。");
+                if (job._root != root || job._player != player || job._island != OnlineIslandManager.ActiveIsland || job._saveName != save.Name)
+                {
+                    Cancel(host);
+                    throw new InvalidOperationException("房间或岛屿已切换，本次清理已停止。");
+                }
+            }
+            job.ProcessBatch(manager);
+            int remaining = job._items.Count - job._next;
+            if (remaining == 0) _active = null;
+            var result = new JObject { ["operationId"] = job._id, ["total"] = job._items.Count, ["remaining"] = remaining,
+                ["removed"] = job._removed, ["skipped"] = job._skipped, ["failed"] = job._failed };
+            string message = "已清理 " + job._removed + " 个掉落物";
+            if (job._skipped != 0) message += "，已拾取或状态改变 " + job._skipped + " 个";
+            if (job._failed != 0) message += "，失败 " + job._failed + " 个";
+            if (remaining != 0) message += "，剩余 " + remaining + " 个";
+            CombatBridgeRuntime.Call(host, "Reply", new object[] { correlation, true, message, result, false, true });
+        }
+
+        private void ProcessBatch(ItemManager manager)
+        {
+            float deadline = Time.realtimeSinceStartup + .002f;
+            int end = Math.Min(_next + 32, _items.Count);
+            while (_next < end)
+            {
+                var candidate = _items[_next++];
+                Item item = candidate.Key;
+                if (!IsClearableDrop(item, _root) || item.NetworkObject.ObjectId != candidate.Value)
+                    _skipped++;
+                else
+                {
+                    try
+                    {
+                        // Match the native island-unload path: despawn the network object without effects.
+                        manager.Despawn(item.gameObject);
+                        if (!item || !item.IsSpawned || item.NetworkObject.ObjectId != candidate.Value) _removed++;
+                        else _failed++;
+                    }
+                    catch (Exception error)
+                    {
+                        if (_failed == 0) Debug.LogWarning("[AbyssalCrab] 清理掉落物失败：" + error.Message);
+                        _failed++;
+                    }
+                }
+                if (Time.realtimeSinceStartup >= deadline) break;
+            }
         }
     }
 }

@@ -203,14 +203,9 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 	{
 		get
 		{
-			bool flag = Descriptor.RequiredCapability == Capability.HostWorld && Descriptor.Id != "persistence.save";
-			if (flag)
-			{
-				FeatureControl control = Descriptor.Control;
-				bool flag2 = (uint)(control - 2) <= 1u;
-				flag = flag2;
-			}
-			return flag;
+            return Descriptor.RequiredCapability == Capability.HostWorld &&
+                Descriptor.Control is FeatureControl.Action or FeatureControl.Generator &&
+                Descriptor.Id is not ("persistence.save" or "world.clear_drops");
 		}
 	}
 
@@ -958,6 +953,11 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
         var invokedParameters=CaptureParameters();
 		try
 		{
+            if (Descriptor.Id == "world.clear_drops")
+            {
+                await ClearWorldDropsAsync(runtime, capabilities);
+                return;
+            }
 			JsonElement arguments = JsonSerializer.SerializeToElement(Descriptor.Control switch
 			{
                 FeatureControl.Toggle when IsSpin => SpinArguments(Enabled, Enabled ? RequireSpinSpeed() : 4d, SpinAutoJump),

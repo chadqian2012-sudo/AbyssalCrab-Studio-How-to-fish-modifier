@@ -25,6 +25,11 @@ internal static class PatchTargetOptions
     }
     public static void Main(string[] args)
     {
+        if (args[0] == "--world-drops")
+        {
+            PatchWorldDrops(args[1..]);
+            return;
+        }
         string baseline = args[0], helper = args[1], output = args[2], game = args[3];
         const string parentHash = "36d5f71f02f9dd21ffcd37aaf7f0266732c6783c84b86802d6186ffc37db56ee";
         if (Hash(baseline) != parentHash) throw new Exception("Unexpected r23 Runtime");
@@ -112,5 +117,94 @@ internal static class PatchTargetOptions
             retainedMethods = before.Count - changed.Count, changedMethods = changed, addedMethods, noHelperDependency = true, gameInjected = false, gameAssetsWritten = false };
         File.WriteAllText(Path.Combine(Path.GetDirectoryName(output)!, "runtime-audit.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine($"Combat challenge audited: {changed.Count} changed, {before.Count - changed.Count} retained, {addedMethods.Length} new methods; {Hash(output)}");
+    }
+
+    static void PatchWorldDrops(string[] args)
+    {
+        string stage = args[0], game = args[1];
+        if (Hash(game) != "e3ec0befacc5269efdecb279f0ae72155fcde3ebaeed07e361aa15e6f7fc84b1")
+            throw new InvalidDataException("Review the updated game before building the cleanup action.");
+        const string feature = "world.clear_drops";
+        object Patch(string kind, string expected, string owner, string entry, bool core)
+        {
+            string parent = Path.Combine(stage, $"r27-{kind}.dll");
+            string helper = Path.Combine(stage, $"world-drops-{kind}.dll");
+            string output = Path.Combine(stage, $"candidate-{kind}.dll");
+            if (Hash(parent) != expected) throw new InvalidDataException("Unexpected r27 " + kind);
+            using var module = ModuleDefMD.Load(parent);
+            var before = module.GetTypes().SelectMany(t => t.Methods).ToDictionary(m => m.FullName, Body);
+            var refs = module.GetAssemblyRefs().Select(r => r.FullName).ToHashSet();
+            var cleanup = core ? null : PatchSpin.Clone(module, helper, "AbyssalCrab.Runtime.DropCleanup");
+            string[] changedEntries = core ? new[] { entry } : new[] { entry, "Reset" };
+            TypeDef target = PatchSpin.Clone(module, helper, "AbyssalCrab.Runtime." + owner, changedEntries);
+            var dispatch = target.Methods.Single(m => m.Name == entry);
+            var allowed = new HashSet<string> { dispatch.FullName };
+            var registrations = new List<string> { dispatch.FullName };
+            if (core)
+            {
+                PatchSpin.Support(module, feature);
+                string constructor = module.Find("HowToFishTrainer.Core.RuntimeFeatureSupport", false)
+                    .Methods.Single(m => m.IsStaticConstructor).FullName;
+                allowed.Add(constructor);
+                registrations.Add(constructor);
+            }
+            else
+            {
+                var bridgeCall = target.Methods.Single(m => m.Name == "Call");
+                if (!bridgeCall.IsPrivate) throw new InvalidDataException("Unexpected bridge helper access");
+                bridgeCall.Attributes = (bridgeCall.Attributes & ~MethodAttributes.MemberAccessMask) | MethodAttributes.Assembly;
+                allowed.Add(target.Methods.Single(m => m.Name == "Reset").FullName);
+                var host = module.Find("HowToFishTrainer.Runtime.TrainerBridgeHost", false);
+                var method = host.Methods.Single(m => m.Name == "CancelFunEvents" && !m.IsStatic
+                    && m.MethodSig.Params.Count == 1 && m.MethodSig.Params[0].ElementType == ElementType.String);
+                var handler = cleanup.Methods.Single(m => m.Name == "Cancel" && m.IsStatic
+                    && m.ReturnType.ElementType == ElementType.Void && m.MethodSig.Params.Single().FullName == host.FullName);
+                method.Body.Instructions.Insert(0, Instruction.Create(OpCodes.Ldarg_0));
+                method.Body.Instructions.Insert(1, Instruction.Create(OpCodes.Call, handler));
+                allowed.Add(method.FullName);
+            }
+            var identity = SHA256.HashData(File.ReadAllBytes(parent).Concat(File.ReadAllBytes(helper))
+                .Concat(File.ReadAllBytes(args[2])).Concat(File.ReadAllBytes(args[3])).ToArray());
+            if (!core) module.Assembly.Name = "HowToFishTrainer.Runtime.V1_1_37.WorldDrops." + Convert.ToHexString(identity)[..16].ToLowerInvariant();
+            module.Mvid = new Guid(identity.AsSpan(0, 16));
+            module.Write(output);
+            using var result = ModuleDefMD.Load(output);
+            var methods = result.GetTypes().SelectMany(t => t.Methods).ToDictionary(m => m.FullName);
+            if (before.Keys.Except(methods.Keys).Any()) throw new InvalidDataException("An existing method was removed.");
+            var changed = before.Keys.Where(k => Body(methods[k]) != before[k]).ToArray();
+            if (!allowed.SetEquals(changed))
+                throw new InvalidDataException("Unexpected method changes: " + string.Join(", ", changed));
+            var added = methods.Keys.Except(before.Keys).ToArray();
+            if (added.Any(k => core || methods[k].DeclaringType.FullName != cleanup.FullName))
+                throw new InvalidDataException("Unexpected new method: " + string.Join(", ", added));
+            if (result.GetAssemblyRefs().Any(r => !refs.Contains(r.FullName)))
+                throw new InvalidDataException("Unexpected assembly dependencies: " + string.Join(", ", result.GetAssemblyRefs().Select(r => r.FullName).Except(refs)));
+            foreach (var key in registrations)
+                if (methods[key].Body.Instructions.Count(i => i.OpCode == OpCodes.Ldstr && Equals(i.Operand, feature)) != 1)
+                    throw new InvalidDataException("Cleanup feature must appear once in " + key);
+            if (!core)
+            {
+                using var native = ModuleDefMD.Load(game);
+                var nativeClear = native.Find("ItemManager", false).Methods.Single(m => m.Name == "ClearDictionary");
+                var batch = result.Find(cleanup.FullName, false).Methods.Single(m => m.Name == "ProcessBatch");
+                string Despawn(MethodDef m) => m.Body.Instructions.Select(i => i.Operand).OfType<IMethod>()
+                    .Single(c => c.Name == "Despawn").FullName;
+                if (Despawn(batch) != Despawn(nativeClear))
+                    throw new InvalidDataException("World cleanup does not call the native network despawn overload.");
+                bool Calls(MethodDef from, string fullName) => from.Body.Instructions.Any(i => i.Operand is IMethod c && c.FullName == fullName);
+                var cleanupOwner = batch.DeclaringType;
+                var start = cleanupOwner.Methods.Single(m => m.Name == "Start");
+                var cancel = cleanupOwner.Methods.Single(m => m.Name == "Cancel");
+                if (!Calls(methods[dispatch.FullName], start.FullName) || !Calls(start, batch.FullName)
+                    || !Calls(batch, cleanupOwner.Methods.Single(m => m.Name == "IsClearableDrop").FullName)
+                    || changed.Where(k => methods[k].Name == "CancelFunEvents" || methods[k].Name == "Reset").Any(k => !Calls(methods[k], cancel.FullName)))
+                    throw new InvalidDataException("Cleanup dispatch, eligibility check or cancellation hook is missing.");
+            }
+            return new { parentSha256 = expected, sha256 = Hash(output), retainedMethods = before.Count - changed.Length, changedMethods = changed, addedMethods = added };
+        }
+        var core = Patch("core", "a2cac4e5393b41c98c843f37acd8662c29b8b5475662c28e9115bc8874199bfc", "GameplayRegistry", "Add", true);
+        var runtime = Patch("runtime", "de14b34c34e894d8e1b992d549918c643a30d1c8cfb4ed3b0ab4b24f8704787a", "CombatBridgeRuntime", "TryHandle", false);
+        var report = new { passed = true, runtime, core, gameAssemblySha256 = Hash(game), gameInjected = false, gameAssetsWritten = false };
+        File.WriteAllText(Path.Combine(stage, "runtime-audit.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
     }
 }
