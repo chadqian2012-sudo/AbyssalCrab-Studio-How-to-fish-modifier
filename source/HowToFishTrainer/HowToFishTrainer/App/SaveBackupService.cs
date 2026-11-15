@@ -129,7 +129,7 @@ public sealed class SaveBackupService
                 using (var f = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { f.Write(pair.Value); f.Flush(true); }
                 manifest.Files.Add(new(pair.Key, pair.Value.LongLength, Hash(pair.Value)));
             }
-            FishingDataStore.WriteAtomic(Path.Combine(staging, "manifest.json"), Encoding.UTF8.GetBytes(JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true })));
+            AtomicLocalFile.WriteBytes(Path.Combine(staging, "manifest.json"), Encoding.UTF8.GetBytes(JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true })));
             System.IO.Directory.Move(staging, final);
             return new(final, manifest);
         }
@@ -186,7 +186,7 @@ public sealed class SaveBackupService
                 if (!Hash(bytes).Equals(file.Sha256, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("备份校验失败：" + file.RelativePath);
                 ValidateSave(file.RelativePath, bytes);
                 string target = Path.Combine(root, file.RelativePath); if (!Under(target, root)) throw new IOException("恢复路径越界"); NoLinks(target);
-                payload.Add(file.RelativePath, bytes);
+                payload.Add(Path.GetRelativePath(root, target), bytes);
             }
             var prior = Snapshot(root, true);
             var recovery = Persist(root, prior, "恢复前自动备份"); // Must succeed before any save changes.
@@ -197,7 +197,7 @@ public sealed class SaveBackupService
                 {
                     if (_gameRunning()) throw new IOException("检测到游戏启动，已停止并回滚恢复");
                     string target = Path.Combine(root, pair.Key); NoLinks(target);
-                    FishingDataStore.WriteAtomic(target, pair.Value); written.Add(pair.Key);
+                    AtomicLocalFile.WriteBytes(target, pair.Value); written.Add(pair.Key);
                 }
                 if (_gameRunning()) throw new IOException("检测到游戏启动，已停止并回滚恢复");
                 return recovery;
@@ -207,7 +207,7 @@ public sealed class SaveBackupService
                 var rollbackErrors = new List<string>();
                 foreach (var path in written.AsEnumerable().Reverse())
                 {
-                    try { string target = Path.Combine(root, path); NoLinks(target); if (prior.TryGetValue(path, out var bytes)) FishingDataStore.WriteAtomic(target, bytes); else File.Delete(target); }
+                    try { string target = Path.Combine(root, path); NoLinks(target); if (prior.TryGetValue(path, out var bytes)) AtomicLocalFile.WriteBytes(target, bytes); else File.Delete(target); }
                     catch (Exception e) { rollbackErrors.Add(e.Message); }
                 }
                 if (rollbackErrors.Count != 0) throw new IOException("恢复失败，部分回滚失败；恢复前完整副本：" + recovery.Directory + " · " + string.Join("；", rollbackErrors), original);

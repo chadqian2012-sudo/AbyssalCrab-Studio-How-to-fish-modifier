@@ -121,29 +121,7 @@ public sealed class FileUserPreferencesStore : IUserPreferencesStore
     public void Save(TrainerUserPreferences preferences)
     {
         if (_unsupported) throw new IOException("参数文件版本较新，未覆盖原文件");
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        string temporary = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
-        {
-            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                byte[] bytes = System.Text.Encoding.UTF8.GetBytes(preferences.ToJson());
-                stream.Write(bytes);
-                stream.Flush(flushToDisk: true);
-            }
-            if (File.Exists(_path))
-            {
-                // A broken primary must never replace a usable backup.
-                bool primaryValid;
-                try { TrainerUserPreferences.Parse(File.ReadAllText(_path)); primaryValid = true; }
-                catch (NotSupportedException e) { throw new IOException("参数文件版本较新，未覆盖原文件", e); }
-                catch (Exception e) when (e is JsonException or InvalidOperationException) { primaryValid = false; }
-                // A read/permission failure is not proof of corruption; leave the file intact.
-                File.Replace(temporary, _path, primaryValid ? _path + ".bak" : null);
-            }
-            else File.Move(temporary, _path);
-            Warning = null;
-        }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        AtomicLocalFile.Write(_path, preferences.ToJson(), text => TrainerUserPreferences.Parse(text));
+        Warning = null;
     }
 }

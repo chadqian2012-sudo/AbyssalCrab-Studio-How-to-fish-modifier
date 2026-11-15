@@ -29,7 +29,7 @@ sealed class OverlayFixtureRuntime : IGameRuntimeClient
             "catalog.items" => new { items = new object[] {
                 new { id = 11, name = "Rifle " + CatalogRevision, fish = false, kind = "枪械", weapon = new { damage = 9 }, attachments = new { sights = new[] { new { id = "scope", name = "Scope" } }, extendedMag = true, laser = true }, skins = new[] { new { id = "blue", name = "Blue", rarity = "rare" } } },
                 new { id = 5, name = "Apple", fish = false, kind = "食品" }, new { id = 21, name = "Fish", fish = true, kind = "鱼类" } } },
-            "catalog.islands" => new { islands = Array.Empty<object>() },
+            "catalog.islands" => new { islands = new[] { new { index = 1, key = "island:1", name = "A", available = true, runtimeIndex = 1, sceneBuildIndex = 2 } } },
             "players.catalog" => new { players = Array.Empty<object>() },
             "features.proofs" => Array.Empty<object>(),
             "fun.event.catalog" => new { events = FunEventDefinitions.All.Select(e => new { id = e.Id, available = true, reason = "fixture" }).ToArray(), totalFunEntities = 0, currentWaveCount = 0 },
@@ -265,7 +265,30 @@ static class OverlayVerification
         Check(runtime.Commands.Count == oldSent && current.Commands.Count == newSent && vm.OverlayStatus == "Current world" && vm.CanPositionAction,
             "Old-world position response cannot teleport, overwrite status or hold the current controls busy");
         sent = current.Commands.Count; Await(vm.TeleportSavedPointAsync("missing", "missing"));
-        Check(current.Commands.Count == sent, "Missing shortcut point sends no runtime commands"); Close(vm);
+        Check(current.Commands.Count == sent, "Missing shortcut point sends no runtime commands");
+
+        current.HeldCommand = "world.island.load";
+        vm.SelectedIsland = vm.IslandOptions.Single();
+        foreach (bool oldReplyFirst in new[] { false, true })
+        {
+            vm.LoadSelectedIslandCommand.Execute(null);
+            var oldReply = current.Pending.Dequeue();
+            vm.ResetWorldContext("New scene");
+            vm.LoadSelectedIslandCommand.Execute(null);
+            var newReply = current.Pending.Dequeue();
+            if (oldReplyFirst)
+            {
+                oldReply.SetResult(OverlayFixtureRuntime.Result()); Pump();
+                vm.LoadSelectedIslandCommand.Execute(null);
+                Check(vm.PositionStatus == "New scene" && !vm.CanLoadSelectedIsland && current.Pending.Count == 0,
+                    "An old island receipt cannot unlock the new scene's pending load or admit a third request");
+            }
+            newReply.SetResult(OverlayFixtureRuntime.Result() with { Message = "New island loaded" }); Pump();
+            if (!oldReplyFirst) { oldReply.SetException(new IOException("Late old-scene failure")); Pump(); }
+            Check(vm.PositionStatus == "New island loaded" && vm.CanLoadSelectedIsland,
+                "Only the new scene's island receipt owns the final status and busy state, old reply first: " + oldReplyFirst);
+        }
+        Close(vm);
     }
 
     static void TeleportImports()

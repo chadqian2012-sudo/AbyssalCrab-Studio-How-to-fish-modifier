@@ -40,7 +40,7 @@ public partial class FishingWindow : Window
     {
         var dialog = new SaveFileDialog { Title = "导出鱼获记录", Filter = "CSV 表格|*.csv", DefaultExt = ".csv", FileName = $"AbyssalCrab-{(all ? "钓鱼日志" : "本局回顾")}-{DateTime.Now:yyyyMMdd-HHmm}.csv" };
         if (dialog.ShowDialog(this) != true) return;
-        try { var encoding = new UTF8Encoding(true); FishingDataStore.WriteAtomic(dialog.FileName, encoding.GetPreamble().ConcatBytes(encoding.GetBytes(_model.ExportCsv(all)))); }
+        try { var encoding = new UTF8Encoding(true); AtomicLocalFile.WriteBytes(dialog.FileName, encoding.GetPreamble().ConcatBytes(encoding.GetBytes(_model.ExportCsv(all)))); }
         catch (Exception error) { MessageBox.Show(this, "导出失败：" + error.Message); }
     }
     internal static byte[] RenderRecap(FishingViewModel model, Brush background, Brush foreground)
@@ -57,7 +57,7 @@ public partial class FishingWindow : Window
     {
         var dialog = new SaveFileDialog { Title = "保存每局回顾图片", Filter = "PNG 图片|*.png", DefaultExt = ".png", FileName = $"AbyssalCrab-本局回顾-{DateTime.Now:yyyyMMdd-HHmm}.png" };
         if (dialog.ShowDialog(this) != true) return;
-        try { FishingDataStore.WriteAtomic(dialog.FileName, RenderRecap(_model, (Brush)FindResource("GlassCanvasBrush"), (Brush)FindResource("TextBrush"))); }
+        try { AtomicLocalFile.WriteBytes(dialog.FileName, RenderRecap(_model, (Brush)FindResource("GlassCanvasBrush"), (Brush)FindResource("TextBrush"))); }
         catch (Exception error) { MessageBox.Show(this, "图片导出失败：" + error.Message); }
     }
     protected override void OnClosing(CancelEventArgs e)

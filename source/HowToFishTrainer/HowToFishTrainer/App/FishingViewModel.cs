@@ -58,11 +58,13 @@ public sealed class FishingViewModel : INotifyPropertyChanged, IDisposable
         {
             if (!Set(ref _weight, value ?? "")) return;
             if (_weight.Trim().Length == 0) _lastValidWeight = null;
-            else if (double.TryParse(_weight, NumberStyles.Float, CultureInfo.InvariantCulture, out var w) && double.IsFinite(w) && w > 0 && w <= 1000000) _lastValidWeight = w;
+            else if (TryReadWeight(_weight, out var weight)) _lastValidWeight = weight;
             Changed(nameof(WeightError));
         }
     }
-    public string WeightError => _weight.Trim().Length == 0 || (double.TryParse(_weight, NumberStyles.Float, CultureInfo.InvariantCulture, out var w) && double.IsFinite(w) && w > 0 && w <= 1000000) ? "" : "重量须大于 0 且不超过 1000000 kg，支持小数";
+    private static bool TryReadWeight(string text, out double weight) =>
+        NumericInput.TryReadNumber(text, out weight) && weight > 0 && weight <= 1000000;
+    public string WeightError => string.IsNullOrWhiteSpace(_weight) || TryReadWeight(_weight, out _) ? "" : "重量须大于 0 且不超过 1000000 kg，支持小数";
     public string Place { get => _place; set => Set(ref _place, value ?? ""); }
     public string Equipment { get => _equipment; set => Set(ref _equipment, value ?? ""); }
     public string Note { get => _note; set => Set(ref _note, value ?? ""); }
@@ -197,7 +199,7 @@ public sealed class FishingViewModel : INotifyPropertyChanged, IDisposable
         if (CountInput.HasError) { Status = CountInput.Error; return; }
         if (weight.Length > 0)
         {
-            if (!double.TryParse(weight, NumberStyles.Float, CultureInfo.InvariantCulture, out var w) || !double.IsFinite(w) || w <= 0 || w > 1000000)
+            if (!TryReadWeight(weight, out var w))
             { Status = "单条重量须大于 0 且不超过 1000000 kg，允许小数；未知可留空"; return; }
             kg = w;
         }

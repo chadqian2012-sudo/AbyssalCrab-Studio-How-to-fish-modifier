@@ -10,7 +10,15 @@ public partial class FeatureSearchBox : UserControl
     internal Func<SearchHit, bool>? RevealResult { get; set; }
     internal Action? Dismissed { get; set; }
 
-    public FeatureSearchBox() => InitializeComponent();
+    public FeatureSearchBox()
+    {
+        InitializeComponent();
+        TextCompositionManager.AddPreviewTextInputStartHandler(FeatureSearch, (_, _) => IsComposingQuery = true);
+        TextCompositionManager.AddPreviewTextInputHandler(FeatureSearch, (_, _) => IsComposingQuery = false);
+        FeatureSearch.LostKeyboardFocus += (_, _) => IsComposingQuery = false;
+    }
+
+    internal bool IsComposingQuery { get; private set; }
 
     internal void ShowSearch()
     {
@@ -38,7 +46,8 @@ public partial class FeatureSearchBox : UserControl
 
     internal bool HandleWindowKey(KeyEventArgs e)
     {
-        if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control) ShowSearch();
+        if (IsComposingQuery) return false;
+        if (e.Key == Key.F && e.KeyboardDevice.Modifiers == ModifierKeys.Control) ShowSearch();
         else if (e.Key == Key.Escape && Visibility == Visibility.Visible) Dismissed?.Invoke();
         else return false;
         e.Handled = true;
@@ -47,8 +56,8 @@ public partial class FeatureSearchBox : UserControl
 
     private void Search_KeyDown(object sender, KeyEventArgs e)
     {
-        if (HandleWindowKey(e)) return;
-        if (Keyboard.Modifiers != ModifierKeys.None || FeatureSearchResults.Items.Count == 0) return;
+        if (IsComposingQuery || HandleWindowKey(e)) return;
+        if (e.KeyboardDevice.Modifiers != ModifierKeys.None || FeatureSearchResults.Items.Count == 0) return;
         if (e.Key is Key.Down or Key.Up)
         {
             int last = FeatureSearchResults.Items.Count - 1;
@@ -59,7 +68,7 @@ public partial class FeatureSearchBox : UserControl
             FeatureSearch.Focus();
             e.Handled = true;
         }
-        else if (e.Key == Key.Enter && (FeatureSearch.IsKeyboardFocused || e.OriginalSource is ListBoxItem or ListBox))
+        else if (e.Key == Key.Enter && (ReferenceEquals(e.OriginalSource, FeatureSearch) || e.OriginalSource is ListBoxItem or ListBox))
         {
             if ((FeatureSearchResults.SelectedItem ?? FeatureSearchResults.Items[0]) is SearchHit hit) Open(hit);
             e.Handled = true;

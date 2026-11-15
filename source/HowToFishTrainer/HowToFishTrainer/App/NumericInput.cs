@@ -67,7 +67,7 @@ public sealed class NumericInput : INotifyPropertyChanged
     private bool TryParse(out double value, out string error)
     {
         error = string.Empty;
-        if (!double.TryParse(_text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) || !double.IsFinite(value))
+        if (!TryReadNumber(_text, out value))
             error = $"{Label}：请输入有效数字";
         else if (Minimum.HasValue && value < Minimum || Maximum.HasValue && value > Maximum)
             error = RangeDescription;
@@ -75,6 +75,10 @@ public sealed class NumericInput : INotifyPropertyChanged
             error = $"{Label}：需要整数，不能使用小数";
         return error.Length == 0;
     }
+    internal static bool TryReadNumber(string text, out double value) =>
+        (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value)
+         || double.TryParse(text, NumberStyles.Float, CultureInfo.CurrentCulture, out value))
+        && double.IsFinite(value);
     public static string FirstError(params NumericInput[] inputs)
     { foreach(var input in inputs)if(input.HasError)return input.Error;return string.Empty; }
     public static string FirstError(NumericInput a) => a.Error;

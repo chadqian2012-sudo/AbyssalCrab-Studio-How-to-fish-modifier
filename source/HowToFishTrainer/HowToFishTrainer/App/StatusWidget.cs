@@ -249,7 +249,7 @@ public sealed partial class StatusWidget : Window, IDisposable
     }
     private void HandleKey(object sender, KeyEventArgs e)
     {
-        if (!e.Handled && _expanded && e.Key == Key.Escape) { SetExpanded(false, true); e.Handled = true; }
+        if (!e.Handled && _expanded && e.Key == Key.Escape && !SearchArea.IsComposingQuery) { SetExpanded(false, true); e.Handled = true; }
     }
     private void Search_Click(object sender, RoutedEventArgs e) => SearchArea.ShowSearch();
     private void CloseSearch() { SearchArea.Visibility = Visibility.Collapsed; GlobalSearchButton.Focus(); }

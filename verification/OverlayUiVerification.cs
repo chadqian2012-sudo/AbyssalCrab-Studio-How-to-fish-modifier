@@ -57,6 +57,12 @@ sealed class OverlayUiRuntime : IGameRuntimeClient
 
 static class OverlayUiVerification
 {
+    private sealed class SearchKeyboard() : KeyboardDevice(InputManager.Current)
+    {
+        public bool ControlPressed { get; set; }
+        protected override KeyStates GetKeyStatesFromSystem(Key key) =>
+            ControlPressed && key == Key.LeftCtrl ? KeyStates.Down : KeyStates.None;
+    }
     private static readonly List<string> Checks = new();
     private static readonly List<string> Images = new();
     private static void Check(bool pass, string name) { if (!pass) throw new InvalidOperationException(name); Checks.Add(name); }
@@ -317,6 +323,51 @@ static class OverlayUiVerification
             "Repeated tray exit leaves the saved session unchanged");
     }
 
+    private static void VerifyGameProcessChange(string output)
+    {
+        const BindingFlags instance = BindingFlags.NonPublic | BindingFlags.Instance;
+        using var license = new HowToFishTrainer.App.Licensing.LicenseService(Path.Combine(output, "process-change-license"), "test");
+        var window = new MainWindow(license, new OverlayUiPreferenceStore());
+        var vm = (MainViewModel)window.DataContext;
+        var caps = CapabilityMatrix.For(SessionMode.Host, false);
+        var observe = typeof(MainWindow).GetMethod("ObserveGameProcessAsync", instance)!;
+        void Report(int? pid) => ((ValueTask<bool>)observe.Invoke(window, new object?[] { pid })!).GetAwaiter().GetResult();
+        const string health = "player.health.lock";
+        Report(101);
+        vm.Connect(new OverlayUiRuntime(), caps);
+        vm.AllFeatures.Single(f => f.Descriptor.Id == health).Enabled = true;
+        Pump();
+        vm.SuspendConnection();
+        using var attempt = new CancellationTokenSource();
+        var pending = typeof(MainWindow).GetField("_pendingAttach", instance)!;
+        pending.SetValue(window, attempt);
+        Report(101);
+        var sameGame = new OverlayUiRuntime();
+        vm.Connect(sameGame, caps);
+        Pump();
+        Check(!attempt.IsCancellationRequested && sameGame.Calls.Contains(health),
+            "A repeated PID retains a pending handshake and replays confirmed switches on same-game reconnect");
+        vm.SuspendConnection();
+        Report(202);
+        var nextGame = new OverlayUiRuntime();
+        vm.Connect(nextGame, caps);
+        Pump();
+        Check(attempt.IsCancellationRequested && !nextGame.Calls.Contains(health),
+            "Replacing the process after a pipe failure cancels the old handshake and never enables the prior game's switch");
+        pending.SetValue(window, null);
+        vm.AllFeatures.Single(f => f.Descriptor.Id == health).Enabled = true;
+        Pump();
+        vm.SuspendConnection();
+        Report(null);
+        Report(202);
+        var restarted = new OverlayUiRuntime();
+        vm.Connect(restarted, caps);
+        Pump();
+        Check(!restarted.Calls.Contains(health), "Observing game exit clears suspended switches even when Windows later reuses the same PID");
+        typeof(MainWindow).GetMethod("BeginSessionShutdown", instance)!.Invoke(window, null);
+        window.Close();
+    }
+
     private static async Task VerifyPendingTrayExit(string output)
     {
         const BindingFlags instance = BindingFlags.Instance | BindingFlags.NonPublic;
@@ -356,6 +407,45 @@ static class OverlayUiVerification
             BinaryPrimitives.WriteInt32LittleEndian(header, response.Length);
             await server.WriteAsync(header, limit.Token); await server.WriteAsync(response, limit.Token);
         }
+        var previousRoom = new RuntimeSessionSnapshot(true, true, true, "original-room", 4, 7);
+        var partialRoom = previousRoom with { LobbyId = null, OwnerId = null };
+        var lastRoom = type.GetField("_lastSession", instance)!;
+        lastRoom.SetValue(window, previousRoom);
+        var runtimeField = type.GetField("_licensedRuntime", instance)!;
+        var adapter = new HowToFishTrainer.App.Licensing.LicensedRuntimeClient(new OverlayUiRuntime(),
+            HowToFishTrainer.App.Licensing.AllowAllSponsorAccessGate.Instance);
+        runtimeField.SetValue(window, adapter);
+        var apply = type.GetMethod("ApplySessionModeAsync", instance)!;
+        Task Apply(RuntimeSessionSnapshot observation) => (Task)apply.Invoke(window, new object[] { bridge, observation })!;
+        await Apply(partialRoom).WaitAsync(limit.Token);
+        Check(Equals(lastRoom.GetValue(window), previousRoom) && vm.CanTeleportInCurrentSession,
+            "An incomplete inspection on a connected bridge retains confirmed lobby and owner identity");
+        async Task ClearFor(RuntimeSessionSnapshot observed, bool accept, string scenario)
+        {
+            var confirmed = lastRoom.GetValue(window);
+            var transition = Apply(observed);
+            var clear = await ReadRequest();
+            Check(clear.GetProperty("featureId").GetString() == "locks.disable_all" &&
+                !vm.CanTeleportInCurrentSession, "Controls are detached pending a real clear receipt: " + scenario);
+            await Reply(clear, accept);
+            if (accept) { await transition; return; }
+            try { await transition; throw new Exception("Room switch ignored the rejected clear"); }
+            catch (InvalidDataException) { }
+            Check(Equals(lastRoom.GetValue(window), confirmed) && !vm.CanTeleportInCurrentSession,
+                "A rejected clear preserves the confirmed room and keeps controls offline: " + scenario);
+        }
+        await ClearFor(previousRoom with { LobbyId = "new-room", OwnerId = 8 }, false, "room A, unknown sample, room B");
+        await ClearFor(previousRoom, true, "the observed identifiers revert to A after a rejected clear");
+        Check(vm.CanTeleportInCurrentSession, "A successful retried clear makes the current room's controls available");
+        runtimeField.SetValue(window, null);
+        await ClearFor(partialRoom, false, "reconnect cannot confirm the previous lobby or owner");
+        runtimeField.SetValue(window, adapter);
+        await ClearFor(partialRoom, true, "a confirmed clear permits manual controls in an unidentified room");
+        runtimeField.SetValue(window, null);
+        await ClearFor(partialRoom, false, "two unidentified network rooms cannot be matched by scene handle alone");
+        lastRoom.SetValue(window, null);
+        vm.Connect(new OverlayUiRuntime(), CapabilityMatrix.For(SessionMode.Host, false));
+        vm.AllFeatures.Single(f => f.Descriptor.Id == "player.health.lock").Enabled = true;
         var refresh = (Task)type.GetMethod("RefreshSessionModeAsync", instance)!.Invoke(window, new object[]{bridge})!;
         var inspection = await ReadRequest();
         Check(inspection.GetProperty("featureId").GetString() == "session.inspect", "An inspection is in flight before tray exit");
@@ -578,14 +668,35 @@ static class OverlayUiVerification
         Check(searchArea.Visibility == Visibility.Visible && featureSearch.ActualWidth > 100 && Equals(featureSearchResults.SelectedItem, searchHit) &&
             vm.FeatureQuery == "移动" && vm.SelectedPage.Category == "鱼类生成" && tabs.SelectedIndex == 0,
             "Selecting a global result at 620 pixels leaves the original page and overlay tab visible");
-        var escape = new KeyEventArgs(Keyboard.PrimaryDevice,inputSource,0,Key.Escape) { RoutedEvent = Keyboard.PreviewKeyDownEvent };
+        var keyboard = new SearchKeyboard();
+        var escape = new KeyEventArgs(keyboard,inputSource,0,Key.Escape) { RoutedEvent = Keyboard.PreviewKeyDownEvent };
         featureSearch.RaiseEvent(escape);
         Check(escape.Handled && searchArea.Visibility == Visibility.Collapsed && vm.SelectedPage.Category == "鱼类生成" && tabs.SelectedIndex == 0,
             "Escape closes the search without navigating or changing overlay tabs");
         searchButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Render(content,null,620,680);
         featureSearchResults.SelectedIndex = -1;
-        var down = new KeyEventArgs(Keyboard.PrimaryDevice,inputSource,0,Key.Down) { RoutedEvent = Keyboard.PreviewKeyDownEvent };
+        var composition = new TextComposition(InputManager.Current, featureSearch, "", TextCompositionAutoComplete.Off);
+        featureSearch.RaiseEvent(new TextCompositionEventArgs(keyboard, composition)
+            { RoutedEvent = TextCompositionManager.PreviewTextInputStartEvent });
+        foreach (var key in new[] { Key.Down, Key.Up, Key.Enter, Key.Escape })
+        {
+            var candidateKey = new KeyEventArgs(keyboard, inputSource, 0, key)
+                { RoutedEvent = Keyboard.PreviewKeyDownEvent };
+            featureSearch.RaiseEvent(candidateKey);
+            Check(!candidateKey.Handled && searchArea.Visibility == Visibility.Visible && featureSearchResults.SelectedIndex == -1 &&
+                tabs.SelectedIndex == 0 && vm.SelectedPage.Category == "鱼类生成",
+                "While composing text, the search leaves " + key + " to the input method");
+        }
+        featureSearch.RaiseEvent(new TextCompositionEventArgs(keyboard, composition)
+            { RoutedEvent = TextCompositionManager.PreviewTextInputEvent });
+        keyboard.ControlPressed = true;
+        var modifiedDown = new KeyEventArgs(keyboard, inputSource, 0, Key.Down) { RoutedEvent = Keyboard.PreviewKeyDownEvent };
+        featureSearch.RaiseEvent(modifiedDown);
+        Check(!modifiedDown.Handled && featureSearchResults.SelectedIndex == -1,
+            "Ctrl+Down from the event's keyboard does not select a search result");
+        keyboard.ControlPressed = false;
+        var down = new KeyEventArgs(keyboard,inputSource,0,Key.Down) { RoutedEvent = Keyboard.PreviewKeyDownEvent };
         featureSearch.RaiseEvent(down);
         Check(featureSearch.Focusable && featureSearch.IsTabStop && down.Handled && featureSearchResults.SelectedIndex == 0 &&
             tabs.SelectedIndex == 0 && vm.SelectedPage.Category == "鱼类生成",
@@ -612,12 +723,14 @@ static class OverlayUiVerification
         string originalSpin = spinFeature.SpinSpeedText;
         spinFeature.SpinSpeedText = "-";
         Render(content, null, 620, 680);
-        ClickSearchResult(featureSearchResults, spinHit, "打开功能设置");
+        featureSearchResults.SelectedItem = spinHit;
+        var enter = new KeyEventArgs(keyboard, inputSource, 0, Key.Enter) { RoutedEvent = Keyboard.PreviewKeyDownEvent };
+        featureSearch.RaiseEvent(enter);
         Render(content, Path.Combine(output, "search-spin-editor-620.png"), 620, 680);
         var spinEditor = Find<TextBox>(overlayView).Single(b => ReferenceEquals(b.DataContext, spinFeature) && AutomationProperties.GetName(b) == "大陀螺转速");
-        Check(tabs.SelectedIndex == 1 && vm.SelectedPage.Category == "玩家" && searchArea.Visibility == Visibility.Collapsed &&
+        Check(enter.Handled && tabs.SelectedIndex == 1 && vm.SelectedPage.Category == "玩家" && searchArea.Visibility == Visibility.Collapsed &&
             spinEditor.ActualHeight > 0 && spinEditor.Text == "-" && InsideScrollViewports(spinEditor,new Rect(spinEditor.RenderSize)),
-            "Opening the spin-speed result reveals its actual editor through the nested viewports and preserves its unfinished draft");
+            "Enter opens the selected spin-speed editor through the nested viewports and preserves its unfinished draft");
         spinFeature.SpinSpeedText = originalSpin;
         tabs.SelectedIndex = 0;
         Render(content, Path.Combine(output, "search-hidden-620.png"), 620, 680);
@@ -823,13 +936,14 @@ static class OverlayUiVerification
         VerifyEntityOverlay(vm,runtime,secondView,overlayView,content,tabs,output);
         VerifyGullChallenge(vm,runtime,secondView,overlayView,content,output);
         VerifyTrayLifecycle(output);
+        VerifyGameProcessChange(output);
         var pendingExit = VerifyPendingTrayExit(output);
         while (!pendingExit.IsCompleted) { Pump(); Thread.Sleep(1); }
         pendingExit.GetAwaiter().GetResult();
         listener.Flush(); string bindingErrors = errors.ToString(); File.WriteAllText(Path.Combine(output, "binding-errors.txt"), bindingErrors);
         Check(string.IsNullOrWhiteSpace(bindingErrors), "No WPF binding errors during all overlay and feature-page rendering");
         vm.CloseExperience(); vm.ClosePreferences(); main.Close();
-        File.WriteAllText(Path.Combine(output, "ui-verification.json"), JsonSerializer.Serialize(new { verificationVersion = "20261114-global-search-ui-v15", appAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(StatusWidget).Assembly.Location))), runnerAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(OverlayUiVerification).Assembly.Location))), checks = Checks, images = Images, realGameOpened = false, desktopInputSent = false, formalPreferencesUsed = false }, new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(Path.Combine(output, "ui-verification.json"), JsonSerializer.Serialize(new { verificationVersion = "r27-compatibility", appAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(StatusWidget).Assembly.Location))), runnerAssemblySha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(OverlayUiVerification).Assembly.Location))), checks = Checks, images = Images, realGameOpened = false, desktopInputSent = false, formalPreferencesUsed = false }, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine("PASS " + Checks.Count + " UI checks; " + Images.Count + " rendered images");
         return 0;
     }
