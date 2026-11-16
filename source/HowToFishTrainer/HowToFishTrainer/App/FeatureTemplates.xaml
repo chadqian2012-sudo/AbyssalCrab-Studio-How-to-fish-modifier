@@ -94,7 +94,7 @@
             <RowDefinition/>
             <RowDefinition/>
           </Grid.RowDefinitions>
-          <TextBlock FontSize="11" TextTrimming="CharacterEllipsis" Style="{StaticResource Muted}" Text="{Binding Status}"/>
+          <TextBlock FontSize="11" TextWrapping="Wrap" Style="{StaticResource Muted}" Text="{Binding Status}"/>
           <Grid Row="1" Margin="0,9,0,0">
             <Grid.ColumnDefinitions>
               <ColumnDefinition/>

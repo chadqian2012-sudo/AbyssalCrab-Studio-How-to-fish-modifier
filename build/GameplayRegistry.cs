@@ -28,7 +28,7 @@ namespace AbyssalCrab.Runtime
             result.Add(new FeatureDescriptor("unlock.islands", "解锁中心", "解锁所有岛屿", Capability.HostWorld, FeatureControl.Action,
                 null, null, false, "解锁当前游戏构建中有效的全部岛屿，并调用原生世界保存；不会自动传送。"));
             result.Add(new FeatureDescriptor("world.clear_drops", "金钱背包", "一键清理掉落物", Capability.HostWorld, FeatureControl.Action,
-                null, null, false, "清理当前世界散落的武器、普通物品、死鱼和可拾取的动物尸体。保留活体、玩家遗体、任务物品，以及手持、背包和鱼钩上的物品。"));
+                null, null, false, "清理散落的武器、普通物品、死鱼和可拾取的动物尸体，也清理能确认由修改器召唤的活体。野生活体、玩家遗体、任务物品，以及手持、背包和鱼钩上的物品都会保留。"));
             return _cached = result.AsReadOnly();
         }
         public static bool Handles(string id) => id == "combat.silent_aim" || id == "player.air_dash.lock" ||

@@ -55,12 +55,14 @@ public sealed partial class FeatureItemViewModel
             int removed = result.GetProperty("removed").GetInt32();
             int skipped = result.GetProperty("skipped").GetInt32();
             int failed = result.GetProperty("failed").GetInt32();
+            bool retainedLive = result.TryGetProperty("summonTrackingAvailable", out var tracking) && tracking.ValueKind == JsonValueKind.False;
             confirmed = $"已清理 {removed} 个，跳过 {skipped} 个，失败 {failed} 个";
+            if (retainedLive) confirmed += "。召唤来源不可核实，已保留活体";
             Status = remaining == 0 ? confirmed : $"{confirmed}，待处理 {remaining} 个";
             if (remaining == 0)
             {
-                IsSuccessful = failed == 0;
-                StateLabel = IsSuccessful ? "已完成" : "部分完成";
+                IsSuccessful = failed == 0 && !retainedLive;
+                StateLabel = failed != 0 ? "部分完成" : retainedLive ? "仅清理掉落物" : "已完成";
                 return;
             }
             confirmed += "。";

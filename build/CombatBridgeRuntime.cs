@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using HarmonyLib;
 using HowToFishTrainer.Runtime;
 using Newtonsoft.Json.Linq;
@@ -204,13 +205,16 @@ namespace AbyssalCrab.Runtime
     public sealed class DropCleanup
     {
         private static DropCleanup _active;
+        private static ConditionalWeakTable<Item, DropInstance> _instances = new ConditionalWeakTable<Item, DropInstance>();
+        private static MethodInfo _stopServer, _forget;
+        private static bool _observing;
         private readonly TrainerBridgeHost _host;
         private readonly Transform _root;
         private readonly Player _player;
         private readonly byte _island;
         private readonly string _saveName;
         private readonly string _id = Guid.NewGuid().ToString("N");
-        private readonly List<KeyValuePair<Item, int>> _items = new List<KeyValuePair<Item, int>>();
+        private readonly List<KeyValuePair<Item, DropInstance>> _items = new List<KeyValuePair<Item, DropInstance>>();
         private int _next, _removed, _skipped, _failed;
 
         private DropCleanup(TrainerBridgeHost host, Transform root, string saveName)
@@ -225,17 +229,78 @@ namespace AbyssalCrab.Runtime
             {
                 Item item = pair.Value;
                 if (item && pair.Key == item.transform && IsClearableDrop(item, root))
-                    _items.Add(new KeyValuePair<Item, int>(item, item.NetworkObject.ObjectId));
+                    _items.Add(new KeyValuePair<Item, DropInstance>(item, InstanceOf(item)));
             }
+        }
+
+        public static void ObserveLifecycle(Harmony harmony)
+        {
+            if (ObservingLifecycle()) return;
+            try
+            {
+                _stopServer = AccessTools.DeclaredMethod(typeof(Item), nameof(Item.OnStopServer));
+                _forget = typeof(DropCleanup).GetMethod(nameof(ForgetSummon));
+                harmony.Patch(_stopServer, prefix: new HarmonyMethod(_forget));
+                _observing = true;
+                ObservingLifecycle();
+            }
+            catch (Exception error)
+            {
+                Debug.LogWarning("[AbyssalCrab] 无法跟踪召唤来源，将保留活体：" + error.Message);
+            }
+        }
+
+        private static bool ObservingLifecycle()
+        {
+            if (!_observing) return false;
+            var patches = Harmony.GetPatchInfo(_stopServer);
+            if (patches != null)
+                foreach (var patch in patches.Prefixes)
+                    if (patch.PatchMethod == _forget) return true;
+            _observing = false;
+            _instances = new ConditionalWeakTable<Item, DropInstance>();
+            return false;
+        }
+
+        private static DropInstance InstanceOf(Item item)
+        {
+            DropInstance instance;
+            if (_instances.TryGetValue(item, out instance) && instance.ObjectId == item.NetworkObject.ObjectId)
+                return instance;
+            ForgetSummon(item);
+            instance = new DropInstance(item.NetworkObject.ObjectId);
+            _instances.Add(item, instance);
+            return instance;
+        }
+
+        // These lists are the actual generation ledgers. FunWaveJob and its completed wave share one list.
+        public static void RecordSummon(object spawned, List<object> jobSpawned, List<object> generated)
+        {
+            var item = spawned as Item;
+            if (!item || !item.NetworkObject || !item.IsServerInitialized || !item.IsSpawned || !ObservingLifecycle()) return;
+            ForgetSummon(item);
+            _instances.Add(item, new DropInstance(item.NetworkObject.ObjectId, jobSpawned, generated));
+        }
+
+        public static void ForgetSummon(Item __instance)
+        {
+            DropInstance instance;
+            if (!_instances.TryGetValue(__instance, out instance)) return;
+            _instances.Remove(__instance);
+            instance.JobSpawned?.Remove(__instance);
+            instance.Generated?.Remove(__instance);
         }
 
         public static bool IsClearableDrop(Item item, Transform worldRoot)
         {
-            return item && item.transform.parent == worldRoot && item.NetworkObject &&
-                !item.NetworkObject.IsSceneObject && item.IsServerInitialized && item.IsSpawned &&
-                !item.IsDestroying && !item.IsQuestItem && !item.DeadPlayer &&
-                !item.HasPlayerHolder && !item.IsInInventory && !item.WaitingForForceDrop &&
-                !item.BirdHolder && !item.AttachedRod && (!item.Creature || item.Creature.IsDead);
+            if (!item || item.transform.parent != worldRoot || !item.NetworkObject ||
+                item.NetworkObject.IsSceneObject || !item.IsServerInitialized || !item.IsSpawned ||
+                item.IsDestroying || item.IsQuestItem || item.DeadPlayer || item.HasPlayerHolder ||
+                item.IsInInventory || item.WaitingForForceDrop || item.BirdHolder || item.AttachedRod)
+                return false;
+            var creature = item as Creature ?? item.Creature;
+            return !creature || creature.IsDead || (_observing && _instances.TryGetValue(item, out var source) &&
+                source.JobSpawned != null && source.ObjectId == item.NetworkObject.ObjectId);
         }
 
         public static void Cancel(TrainerBridgeHost host)
@@ -258,6 +323,7 @@ namespace AbyssalCrab.Runtime
                 throw new InvalidOperationException("请在单人或房主世界加载完成后清理掉落物。");
             }
             Transform root = server.DynamicObjectsHolder;
+            bool observing = ObservingLifecycle();
             var token = args["operationId"];
             var job = _active;
             if (token == null)
@@ -279,31 +345,43 @@ namespace AbyssalCrab.Runtime
             int remaining = job._items.Count - job._next;
             if (remaining == 0) _active = null;
             var result = new JObject { ["operationId"] = job._id, ["total"] = job._items.Count, ["remaining"] = remaining,
+                ["summonTrackingAvailable"] = observing,
                 ["removed"] = job._removed, ["skipped"] = job._skipped, ["failed"] = job._failed };
-            string message = "已清理 " + job._removed + " 个掉落物";
+            string message = "已清理 " + job._removed + " 个对象";
             if (job._skipped != 0) message += "，已拾取或状态改变 " + job._skipped + " 个";
             if (job._failed != 0) message += "，失败 " + job._failed + " 个";
             if (remaining != 0) message += "，剩余 " + remaining + " 个";
+            if (!observing) message += "；召唤来源不可核实，已保留活体";
             CombatBridgeRuntime.Call(host, "Reply", new object[] { correlation, true, message, result, false, true });
         }
 
         private void ProcessBatch(ItemManager manager)
         {
+            var round = CombatFeedbackRuntime.RoundFor(_host);
             float deadline = Time.realtimeSinceStartup + .002f;
             int end = Math.Min(_next + 32, _items.Count);
             while (_next < end)
             {
                 var candidate = _items[_next++];
                 Item item = candidate.Key;
-                if (!IsClearableDrop(item, _root) || item.NetworkObject.ObjectId != candidate.Value)
+                DropInstance current;
+                if (!IsClearableDrop(item, _root) || !_instances.TryGetValue(item, out current) ||
+                    current != candidate.Value || item.NetworkObject.ObjectId != current.ObjectId)
                     _skipped++;
                 else
                 {
                     try
                     {
+                        var bird = round == null ? null : (item as Bird ?? item.Bird);
+                        int? targetId = bird ? bird.GetInstanceID() : (int?)null;
                         // Match the native island-unload path: despawn the network object without effects.
                         manager.Despawn(item.gameObject);
-                        if (!item || !item.IsSpawned || item.NetworkObject.ObjectId != candidate.Value) _removed++;
+                        if (!item || !item.IsSpawned || item.NetworkObject.ObjectId != current.ObjectId)
+                        {
+                            _removed++;
+                            if (targetId.HasValue && round.Birds.TryGetValue(targetId.Value, out var tracked) &&
+                                ReferenceEquals(tracked, bird)) round.Birds.Remove(targetId.Value);
+                        }
                         else _failed++;
                     }
                     catch (Exception error)
@@ -314,6 +392,19 @@ namespace AbyssalCrab.Runtime
                 }
                 if (Time.realtimeSinceStartup >= deadline) break;
             }
+        }
+    }
+
+    public sealed class DropInstance
+    {
+        internal readonly int ObjectId;
+        internal readonly List<object> JobSpawned, Generated;
+
+        internal DropInstance(int objectId, List<object> jobSpawned = null, List<object> generated = null)
+        {
+            ObjectId = objectId;
+            JobSpawned = jobSpawned;
+            Generated = generated;
         }
     }
 }

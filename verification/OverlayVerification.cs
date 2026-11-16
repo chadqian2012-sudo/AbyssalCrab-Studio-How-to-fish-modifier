@@ -189,7 +189,7 @@ static class OverlayVerification
         const string id = "world.clear_drops";
         var runtime = new OverlayFixtureRuntime { HeldCommand = id };
         var vm = Create(runtime, out _, out _);
-        vm.FeatureQuery = "清场";
+        vm.FeatureQuery = "清场 召唤生物";
         var hit = vm.SearchResults.Single(h => h.Id == id);
         vm.SelectSearchPage(hit);
         var card = vm.DisplayFeatures.Single(f => f.Descriptor.Id == id);
@@ -237,6 +237,13 @@ static class OverlayVerification
         Check(!current.IsSuccessful && current.Status.Contains("已清理 8 个") && current.Status.Contains("本批结果未确认") &&
             runtime.Commands.Count(c => c.FeatureId == id) == 5,
             "A lost continuation reply reports its outcome as unknown and retains confirmed removals without retrying");
+        current.ExecuteCommand.Execute(null);
+        var fallback = JsonSerializer.SerializeToElement(new { operationId, remaining = 0, removed = 4, skipped = 0, failed = 0, summonTrackingAvailable = false });
+        runtime.Pending.Dequeue().SetResult(new(true, "", fallback, fallback, false));
+        PumpUntil(() => !current.IsBusy);
+        Check(!current.IsSuccessful && current.StateLabel == "仅清理掉落物" && current.Status.Contains("已清理 4 个") &&
+            current.Status.Contains("召唤来源不可核实，已保留活体"),
+            "The action card retains actual drop counts and reports that unverified living creatures were preserved");
         Close(vm);
     }
 

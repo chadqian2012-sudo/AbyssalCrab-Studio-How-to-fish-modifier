@@ -2,11 +2,13 @@
 
 ## 一键清理地上散落的物品 | Clear loose world drops
 
-进入自己的单人或房主世界，打开「金钱背包」，点击「一键清理掉落物」。主窗口和悬浮窗都可以按名称搜索这个按钮。它会分批回收当前已加载世界里符合条件的地面武器、普通物品和死亡生物。按下按钮后新掉落或已被捡起的物品会留在原处或持有人手中。活体、背包、任务物品和玩家遗体会保留。
+进入自己的单人或房主世界，打开「金钱背包」，点击「一键清理掉落物」。主窗口和悬浮窗都可以搜索「清场」。它会分批回收地面的武器、普通物品、动物尸体，以及修改器在当前世界召唤、仍能核实来源的活体。例如，召唤的海鸥和野生海鸥混在一起时，清理只会带走召唤的海鸥。
+
+清理范围以点击时已加载的对象为准。之后新生成的生物、中途被捡起的物品、背包、鱼钩上的物品、任务物品和玩家遗体会保留。游戏重开或从存档读回后，来源不明的活体也会保留。
 
 清理会影响同一房间的其他玩家。想撤回某次清理，需要事先备份测试存档。生成页面的「清理本次生成」仍只处理修改器自己生成的对象。
 
-In a solo or hosted world, use the cleanup action under Money & Inventory or search for its Chinese name in either window. It removes eligible loose drops in batches from the loaded world. Living creatures, held items, inventory, quest items and player bodies are preserved. The action affects everyone in the room. The spawn page still provides its separate cleanup for trainer-spawned objects.
+In a solo or hosted world, use the cleanup action under Money & Inventory or search for 清场 in either window. It removes eligible loose drops and living creatures recorded when the trainer spawned them in the current world. Wild creatures, animals of unknown origin, held items, inventory, quest items and player bodies are preserved. The action affects everyone in the room. The spawn page still provides its separate cleanup for trainer-spawned objects.
 
 ## 游戏重新连接后如何处理旧开关 | Reconnecting to a game
 
