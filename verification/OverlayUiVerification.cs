@@ -48,6 +48,7 @@ sealed class OverlayUiRuntime : IGameRuntimeClient
         if (command.FeatureId == "catalog.islands") result = new { islands = new[] { new { index = 1, key = "island:test", name = "测试岛", rawName = "Test", available = true, runtimeIndex = 1, sceneBuildIndex = 2 } } };
         if (command.FeatureId == "players.catalog") result = new { players = Array.Empty<object>() };
         if (command.FeatureId == "features.proofs") result = Array.Empty<object>();
+        if (command.FeatureId == "world.clear_drops") result = new { operationId = Guid.NewGuid().ToString("N"), remaining = 0, removed = 4, skipped = 0, failed = 0, summonTrackingAvailable = false };
         if (command.FeatureId == "fun.event.catalog") result = new { events = FunEventDefinitions.All.Select(e => new { id = e.Id, available = true, reason = "fixture" }).ToArray(), totalFunEntities = 0, currentWaveCount = 0 };
         if (command.FeatureId == "casino.status") result = new { available = true, outcomeMode = "black", multiplier = 2, remainingRounds = 0 };
         var json = JsonSerializer.SerializeToElement(result);
@@ -511,6 +512,7 @@ static class OverlayUiVerification
         var content = (FrameworkElement)overlay.Content;
         var overlayView = (TrainerContentView)overlay.FindName("TrainerContent");
         int callsBeforeRender = runtime.Calls.Count;
+        int explicitCleanupCall = -1;
         for (int i = 0; i < tabs.Items.Count; i++) { tabs.SelectedIndex = i; Render(content, Path.Combine(output, "overlay-tab-" + i + ".png")); }
         Check(tabs.Items.Count == 5, "Five overlay tabs construct and render");
         tabs.SelectedIndex = 1;
@@ -548,6 +550,20 @@ static class OverlayUiVerification
         {
             vm.SelectedPage = page;
             pageViewport.ScrollToTop(); pageViewport.ScrollToLeftEnd();
+            if (page.Category == "金钱背包")
+            {
+                var cleanup = vm.DisplayFeatures.Single(f => f.Descriptor.Id == "world.clear_drops");
+                explicitCleanupCall = runtime.Calls.Count;
+                cleanup.ExecuteCommand.Execute(null);
+                Pump();
+                Render(secondView, null, 1400, 820);
+                Render(content, null, 620, 680);
+                Check(runtime.Calls.ElementAtOrDefault(explicitCleanupCall) == "world.clear_drops" &&
+                    new[] { secondView, overlayView }.All(view => Find<TextBlock>(view).Any(text =>
+                        ReferenceEquals(text.DataContext, cleanup) && text.ActualHeight > 0 && text.ActualWidth > 0 &&
+                        text.TextWrapping == TextWrapping.Wrap && text.Text.Contains("已清理 4 个") && text.Text.Contains("已保留活体"))),
+                    "Main and narrow overlay cleanup cards render both the actual removal count and the preserved-live warning");
+            }
             Render(content, Path.Combine(output, "narrow-page-" + page.Category + ".png"), 620, 680);
             bool ordinary = new[] { "玩家", "钓鱼", "金钱背包", "解锁中心" }.Contains(page.Category);
             Check(overlayView.ActualWidth > 400 && overlayView.ActualWidth <= 620 && pageViewport.ViewportWidth > 400 && pageViewport.ViewportWidth <= 620 && (ordinary ? pageViewport.ScrollableWidth < 1 && pageViewport.ScrollableHeight < 1 : pageViewport.ScrollableWidth > 100),
@@ -742,7 +758,7 @@ static class OverlayUiVerification
             "Expanded active-feature summary displays the shared all-disabled state");
         Check(runtime.Calls.Count == callsBeforeSearch, "Searching, adding a shortcut, opening its page and expanding the summary dispatch no runtime commands");
         activeSummary.IsExpanded = false; vm.SelectedOverlayPanel = populatedPanel;
-        var writes = runtime.Calls.Skip(callsBeforeRender).Where(id => !new[] { "players.catalog", "players.inspect", "catalog.items", "catalog.islands", "features.proofs", "fun.event.catalog", "fun.event.availability", "casino.status" }.Contains(id)).ToArray();
+        var writes = runtime.Calls.Where((id, i) => i >= callsBeforeRender && i != explicitCleanupCall).Where(id => !new[] { "players.catalog", "players.inspect", "catalog.items", "catalog.islands", "features.proofs", "fun.event.catalog", "fun.event.availability", "casino.status" }.Contains(id)).ToArray();
         Check(writes.Length == 0, "Building and navigating overlay sends no gameplay write commands");
         vm.SelectedPage = vm.Pages.First(p => p.Category == "玩家");
         feature.ValueInput.Text = "2.75";

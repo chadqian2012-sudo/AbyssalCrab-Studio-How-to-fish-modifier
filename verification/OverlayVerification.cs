@@ -65,11 +65,15 @@ static class OverlayVerification
         Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => frame.Continue = false));
         Dispatcher.PushFrame(frame);
     }
-    static void Await(Task task)
+    static void PumpUntil(Func<bool> completed)
     {
         var deadline = DateTime.UtcNow.AddSeconds(10);
-        while (!task.IsCompleted && DateTime.UtcNow < deadline) { Pump(); Thread.Sleep(1); }
-        if (!task.IsCompleted) throw new TimeoutException("Fixture task did not finish");
+        while (!completed() && DateTime.UtcNow < deadline) { Pump(); Thread.Sleep(1); }
+        if (!completed()) throw new TimeoutException("Fixture operation did not finish");
+    }
+    static void Await(Task task)
+    {
+        PumpUntil(() => task.IsCompleted);
         task.GetAwaiter().GetResult(); Pump();
     }
     static MainViewModel Create(OverlayFixtureRuntime runtime, out OverlayFixtureStore store, out string path)
@@ -93,7 +97,7 @@ static class OverlayVerification
     {
         Root = Path.GetFullPath(args[0]); Directory.CreateDirectory(Root);
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
-        try { SharedFeatures(); SearchShortcuts(); PanelsAndPersistence(); TeleportBoundaries(); TeleportImports(); PresetAndEmergency(); SettingsSaveFailure(); SettingsMigration(); }
+        try { SharedFeatures(); SearchShortcuts(); ClearWorldDrops(); PanelsAndPersistence(); TeleportBoundaries(); TeleportImports(); PresetAndEmergency(); SettingsSaveFailure(); SettingsMigration(); }
         catch (Exception e) { Failed.Add("Unhandled: " + e); }
         File.WriteAllText(Path.Combine(Root, "results.json"), JsonSerializer.Serialize(new {
             passed = Failed.Count == 0, checks = Passed.Count + Failed.Count, passedChecks = Passed, failedChecks = Failed,
@@ -177,6 +181,69 @@ static class OverlayVerification
         Check(panel.Shortcuts.Count == count && missingResult == null && removedResult == null && vm.SelectedPage.Category == "世界传送" &&
             vm.OverlayStatus.Contains("已失效") && runtime.Commands.Count == sent,
             "Missing or removed ordinary features cannot become apparently valid page shortcuts");
+        Close(vm);
+    }
+
+    static void ClearWorldDrops()
+    {
+        const string id = "world.clear_drops";
+        var runtime = new OverlayFixtureRuntime { HeldCommand = id };
+        var vm = Create(runtime, out _, out _);
+        vm.FeatureQuery = "清场 召唤生物";
+        var hit = vm.SearchResults.Single(h => h.Id == id);
+        vm.SelectSearchPage(hit);
+        var card = vm.DisplayFeatures.Single(f => f.Descriptor.Id == id);
+        vm.AddFeatureToOverlayCommand.Execute(hit);
+        var shortcut = vm.SelectedOverlayPanel!.Items.Single().Feature;
+        Check(vm.SelectedPage.Category == "金钱背包" && card.Descriptor.Control == FeatureControl.Action &&
+            ReferenceEquals(shortcut, card) && !runtime.Commands.Any(c => c.FeatureId == id),
+            "Opening search and pinning ground cleanup share one action without executing it");
+
+        shortcut!.ExecuteCommand.Execute(null);
+        card.ExecuteCommand.Execute(null);
+        Check(card.IsBusy && runtime.Commands.Count(c => c.FeatureId == id && c.RequiredCapability == Capability.HostWorld) == 1 &&
+            runtime.Pending.Count == 1 && !runtime.Commands.Any(c => c.FeatureId == "generation.cleanup"),
+            "A pending ground cleanup sends one world action across both entry points and leaves generator cleanup separate");
+        string operationId = Guid.NewGuid().ToString("N");
+        RuntimeCommandResult Batch(int remaining, int removed, int failed = 0)
+        {
+            var counts = JsonSerializer.SerializeToElement(new { operationId, remaining, removed, skipped = 0, failed });
+            return new(true, "fixture", counts, counts, false);
+        }
+        runtime.Pending.Dequeue().SetResult(Batch(2, 5));
+        PumpUntil(() => runtime.Pending.Count == 1);
+        var continuation = runtime.Commands.Last(c => c.FeatureId == id);
+        Check(card.IsBusy && card.Status.Contains("已清理 5 个") && continuation.Arguments.GetProperty("operationId").GetString() == operationId &&
+            !card.CanRequestNativeSave && !continuation.RequestNativeSave,
+            "A partial result shows progress and continues only the original job without saving the world");
+        runtime.Pending.Dequeue().SetResult(Batch(0, 6, 1));
+        PumpUntil(() => !card.IsBusy);
+        Check(!card.IsBusy && !card.IsSuccessful && card.StateLabel == "部分完成" &&
+            card.Status.Contains("已清理 6 个") && card.Status.Contains("失败 1 个"),
+            "The cleanup card reports the actual number removed and distinguishes a failed item");
+        card.ExecuteCommand.Execute(null);
+        vm.SuspendConnection();
+        vm.Connect(runtime, CapabilityMatrix.For(SessionMode.Host, false));
+        runtime.Pending.Dequeue().SetResult(Batch(1, 3));
+        PumpUntil(() => !card.IsBusy);
+        Check(runtime.Commands.Count(c => c.FeatureId == id) == 3 && runtime.Pending.Count == 0,
+            "A stale partial receipt after reconnect cannot resume cleanup in the new connection");
+        var current = Feature(vm, id);
+        current.ExecuteCommand.Execute(null);
+        runtime.Pending.Dequeue().SetResult(Batch(1, 8));
+        PumpUntil(() => runtime.Pending.Count == 1);
+        runtime.Pending.Dequeue().SetException(new IOException("fixture pipe lost"));
+        PumpUntil(() => !current.IsBusy);
+        Check(!current.IsSuccessful && current.Status.Contains("已清理 8 个") && current.Status.Contains("本批结果未确认") &&
+            runtime.Commands.Count(c => c.FeatureId == id) == 5,
+            "A lost continuation reply reports its outcome as unknown and retains confirmed removals without retrying");
+        current.ExecuteCommand.Execute(null);
+        var fallback = JsonSerializer.SerializeToElement(new { operationId, remaining = 0, removed = 4, skipped = 0, failed = 0, summonTrackingAvailable = false });
+        runtime.Pending.Dequeue().SetResult(new(true, "", fallback, fallback, false));
+        PumpUntil(() => !current.IsBusy);
+        Check(!current.IsSuccessful && current.StateLabel == "仅清理掉落物" && current.Status.Contains("已清理 4 个") &&
+            current.Status.Contains("召唤来源不可核实，已保留活体"),
+            "The action card retains actual drop counts and reports that unverified living creatures were preserved");
         Close(vm);
     }
 

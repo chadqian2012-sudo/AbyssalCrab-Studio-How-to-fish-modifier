@@ -1,11 +1,75 @@
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Input;
+using System.Windows.Threading;
+using HowToFishTrainer.Core;
 
 namespace HowToFishTrainer.App;
 
 public sealed partial class FeatureItemViewModel
 {
+    private async Task ClearWorldDropsAsync(IGameRuntimeClient runtime, CapabilitySet capabilities)
+    {
+        var engine = new FeatureEngine(runtime);
+        string? operationId = null;
+        int previousRemaining = int.MaxValue;
+        string confirmed = "";
+        while (true)
+        {
+            if (_executionBlockReason?.Invoke() is string reason)
+            {
+                StateLabel = "已停止";
+                Status = confirmed + reason;
+                return;
+            }
+            var arguments = operationId == null ? JsonSerializer.SerializeToElement(new { }) : JsonSerializer.SerializeToElement(new { operationId });
+            OperationReceipt receipt;
+            try
+            {
+                receipt = await engine.ExecuteAsync(new FeatureCommand(Descriptor.Id, arguments, Descriptor.RequiredCapability), capabilities, CancellationToken.None);
+            }
+            catch (Exception error) when (operationId != null)
+            {
+                StateLabel = "清理中断";
+                Status = confirmed + "本批结果未确认。" + error.Message;
+                return;
+            }
+            if (receipt.Status != ReceiptStatus.Succeeded)
+            {
+                StateLabel = "清理中断";
+                Status = confirmed + receipt.Message;
+                return;
+            }
+            var result = receipt.ReadBack ?? throw new InvalidDataException("游戏没有返回清理结果");
+            var id = result.GetProperty("operationId").GetString();
+            int remaining = result.GetProperty("remaining").GetInt32();
+            if (!Guid.TryParseExact(id, "N", out _) || (operationId != null && operationId != id) ||
+                remaining < 0 || remaining >= previousRemaining)
+                throw new InvalidDataException("游戏返回的清理批次无效，已停止");
+            operationId = id;
+            previousRemaining = remaining;
+            int removed = result.GetProperty("removed").GetInt32();
+            int skipped = result.GetProperty("skipped").GetInt32();
+            int failed = result.GetProperty("failed").GetInt32();
+            bool retainedLive = result.TryGetProperty("summonTrackingAvailable", out var tracking) && tracking.ValueKind == JsonValueKind.False;
+            confirmed = $"已清理 {removed} 个，跳过 {skipped} 个，失败 {failed} 个";
+            if (retainedLive) confirmed += "。召唤来源不可核实，已保留活体";
+            Status = remaining == 0 ? confirmed : $"{confirmed}，待处理 {remaining} 个";
+            if (remaining == 0)
+            {
+                IsSuccessful = failed == 0 && !retainedLive;
+                StateLabel = failed != 0 ? "部分完成" : retainedLive ? "仅清理掉落物" : "已完成";
+                return;
+            }
+            confirmed += "。";
+            await Dispatcher.Yield(DispatcherPriority.Background);
+        }
+    }
+
     public bool IsMagicBullet => Descriptor.Id == "combat.silent_aim";
     public NumericInput EntityOverlayDistanceInput { get; }
     public NumericInput MagicAngleInput { get; } = new("捕获角度（度）", 8, .5, 180);

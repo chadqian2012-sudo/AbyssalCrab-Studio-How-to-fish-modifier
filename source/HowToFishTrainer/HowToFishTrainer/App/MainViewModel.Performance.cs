@@ -96,6 +96,7 @@ public sealed partial class MainViewModel
                 "combat.one_hit" => "秒杀 一击毙命",
                 "generation.item" => "刷物品 造物 生成装备",
                 "generation.fish" => "刷鱼 生成活鱼 生成死鱼",
+                "world.clear_drops" => "清场 清除掉落物 地面清理 清理召唤生物 清理召唤物",
                 "world.island.load" => "岛屿传送 切换岛屿",
                 _ => ""
             };
