@@ -103,7 +103,8 @@ public sealed partial class MainViewModel
             Add(feature.Id, feature.Title, DisplayCategory(feature.Id, feature.Category), feature.Description, aliases);
         }
 
-        Add("view.entity_overlay.configure", "实体标注", "战斗", "设置骨骼、红框及准心连线的显示距离。");
+        Add("view.entity_overlay.configure", "实体标注", "战斗", "设置骨骼、红框及准心连线的显示距离。",
+            "Rust 三维投影 Rust 辅助瞄准筛选与排序");
         Add("view.crosshair", "外置准星", "战斗", "调节准星形状、颜色和大小。", "准心 十字线");
         Add("combat.feedback", "连杀热潮与战斗反馈", "战斗", "设置命中标记、爆头提示音、伤害飘字、武器散布与连杀热度。", "击杀 击败提示音");
         Add("combat.diagnostics", "战斗诊断", "战斗", "查看当前武器与锁定状态。", "仅观察 诊断模式");

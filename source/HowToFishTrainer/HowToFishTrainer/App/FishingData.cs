@@ -1,9 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace HowToFishTrainer.App;
 
@@ -11,11 +10,13 @@ public sealed record FishingSpecies(int Id, string Name);
 public sealed record FishingCatch(Guid Id, Guid SessionId, DateTimeOffset At, string Species, int Count,
     double? WeightKg, string Place, string Equipment, string Note)
 {
+    [JsonIgnore]
     public string Display => $"{At.LocalDateTime:MM-dd HH:mm}  ·  {Species} ×{Count}  ·  {(WeightKg is double w ? w.ToString("0.###") + " kg/条" : "重量未记录")}\n{Place}  {Equipment}";
 }
 public sealed record FishingSession(Guid Id, string Name, DateTimeOffset Started, DateTimeOffset LastActive,
     DateTimeOffset? Ended = null, string EndReason = "")
 {
+    [JsonIgnore]
     public string Display => $"{Started.LocalDateTime:MM-dd HH:mm} · {Name} · {(Ended == null ? "进行中" : EndReason)}";
 }
 public sealed record FishingCodexRow(int Id, string Name, bool Discovered, int LoggedCount, double? BestKg)
@@ -57,6 +58,7 @@ public sealed class FishingDataStore : IDisposable
     private readonly string? _path;
     private FileStream? _lease;
     private const int MaxFileBytes = 16 * 1024 * 1024;
+    private const int InvalidSessionIds = 1, InvalidCatchLinks = 2;
     public bool Writable { get; private set; } = true;
     public string Warning { get; private set; } = "";
     public FishingDataStore(string? path)
@@ -74,19 +76,7 @@ public sealed class FishingDataStore : IDisposable
     public static FishingData Parse(string json)
     {
         var d = AtomicLocalFile.ReadVersioned<FishingData>(json, 1);
-        if (d.Catches == null || d.Sessions == null || d.Catches.Count > 20000 || d.Sessions.Count > 1000)
-            throw new InvalidDataException("日志条目数量无效");
-        var sessions = new HashSet<Guid>(); var catches = new HashSet<Guid>();
-        foreach (var s in d.Sessions)
-            if (s == null || s.Id == Guid.Empty || !sessions.Add(s.Id) || !Text(s.Name, 80) || s.Started.Year < 2000
-                || s.LastActive < s.Started || (s.Ended != null && (s.Ended < s.Started || s.Ended < s.LastActive)) || !Text(s.EndReason, 80, true))
-                throw new InvalidDataException("场次记录无效");
-        if (d.Sessions.Count(s => s.Ended == null) > 1) throw new InvalidDataException("同时存在多个进行中场次");
-        foreach (var c in d.Catches)
-            if (c == null || c.Id == Guid.Empty || !catches.Add(c.Id) || !sessions.Contains(c.SessionId) || !Text(c.Species, 80)
-                || c.Count < 1 || c.Count > 10000 || c.At.Year < 2000 || (c.WeightKg is double w && (!double.IsFinite(w) || w <= 0 || w > 1000000))
-                || !Text(c.Place, 120, true) || !Text(c.Equipment, 120, true) || !Text(c.Note, 500, true))
-                throw new InvalidDataException("鱼获记录无效");
+        ValidateRecords(d);
         d.SaveRoot ??= ""; d.Account ??= "";
         if (!Text(d.LastSpecies, 80, true)) d.LastSpecies = "";
         if (d.LastCount < 1 || d.LastCount > 10000) d.LastCount = 1;
@@ -96,6 +86,50 @@ public sealed class FishingDataStore : IDisposable
         if (!Text(d.LastNote, 500, true)) d.LastNote = "";
         if (!Text(d.LastSessionName, 80)) d.LastSessionName = "休闲钓鱼";
         return d;
+    }
+
+    private static void ValidateRecords(FishingData d, bool tryNative = false)
+    {
+        if (d.Catches == null || d.Sessions == null || d.Catches.Count > 20000 || d.Sessions.Count > 1000)
+            throw new InvalidDataException("日志条目数量无效");
+        int linkStatus = tryNative && FishingNative.Enabled ? ValidateLinksInRust(d) : -1;
+        if (linkStatus == InvalidSessionIds) throw new InvalidDataException("场次记录无效");
+        var sessions = linkStatus < 0 ? new HashSet<Guid>(d.Sessions.Count) : null;
+        int activeSessions = 0;
+        foreach (var s in d.Sessions)
+        {
+            if (s == null || (sessions != null && (s.Id == Guid.Empty || !sessions.Add(s.Id))) || !Text(s.Name, 80) || s.Started.Year < 2000
+                || s.LastActive < s.Started || (s.Ended != null && (s.Ended < s.Started || s.Ended < s.LastActive)) || !Text(s.EndReason, 80, true))
+                throw new InvalidDataException("场次记录无效");
+            if (s.Ended == null) activeSessions++;
+        }
+        if (activeSessions > 1) throw new InvalidDataException("同时存在多个进行中场次");
+        if (linkStatus == InvalidCatchLinks) throw new InvalidDataException("鱼获记录无效");
+
+        var catches = sessions == null ? null : new HashSet<Guid>(d.Catches.Count);
+        foreach (var c in d.Catches)
+            if (c == null || (catches != null && (c.Id == Guid.Empty || !catches.Add(c.Id) || !sessions!.Contains(c.SessionId))) || !Text(c.Species, 80)
+                || c.Count < 1 || c.Count > 10000 || c.At.Year < 2000 || (c.WeightKg is double w && (!double.IsFinite(w) || w <= 0 || w > 1000000))
+                || !Text(c.Place, 120, true) || !Text(c.Equipment, 120, true) || !Text(c.Note, 500, true))
+                throw new InvalidDataException("鱼获记录无效");
+    }
+
+    private static int ValidateLinksInRust(FishingData data)
+    {
+        const int guidBytes = 16;
+        int sessionCount = data.Sessions.Count, catchCount = data.Catches.Count;
+        var sessionIds = new byte[sessionCount * guidBytes];
+        var catchLinks = new byte[catchCount * guidBytes * 2];
+        for (int i = 0; i < sessionCount; i++)
+            (data.Sessions[i]?.Id ?? Guid.Empty).TryWriteBytes(sessionIds.AsSpan(i * guidBytes, guidBytes));
+        for (int i = 0; i < catchCount; i++)
+        {
+            var item = data.Catches[i];
+            int index = i * guidBytes * 2;
+            (item?.Id ?? Guid.Empty).TryWriteBytes(catchLinks.AsSpan(index, guidBytes));
+            (item?.SessionId ?? Guid.Empty).TryWriteBytes(catchLinks.AsSpan(index + guidBytes, guidBytes));
+        }
+        return FishingNative.TryValidateLinks(sessionIds, sessionCount, catchLinks, catchCount, out int status) ? status : -1;
     }
     private static bool Text(string? s, int max, bool empty = false) => s != null && s.Length <= max && (empty || !string.IsNullOrWhiteSpace(s));
     public FishingData Load()
@@ -118,8 +152,10 @@ public sealed class FishingDataStore : IDisposable
     public void Save(FishingData data)
     {
         if (!Writable) throw new IOException(Warning);
-        var text = JsonSerializer.Serialize(data, JsonOptions); Parse(text);
-        var bytes = Encoding.UTF8.GetBytes(text);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(data, JsonOptions);
+        if (data == null) throw new JsonException("文件根节点无效");
+        if (data.Version != 1) throw new NotSupportedException("文件版本不受当前软件支持");
+        ValidateRecords(data, tryNative: true);
         if (bytes.Length > MaxFileBytes) throw new IOException("日志已达 16 MB 上限，请先导出整理");
         if (_path != null) AtomicLocalFile.WriteBytes(_path, bytes, file => ReadFile(file));
     }

@@ -107,6 +107,43 @@ The public repository does not bundle the .NET SDK. The portable SDK mentioned i
 
 The standalone journal project is `source/AnglerCompanion/AnglerCompanion.csproj` and shares journal sources with the trainer. Local r16b validation used the .NET 8 Windows Desktop SDK. DLLs, icons, branding images, distributables and game assemblies are excluded from this source publication. Supply authorized dependencies required by the project files; historical packaging scripts have version-specific assumptions. A clean-clone rebuild and live-game acceptance remain pending.
 
+## 手记默认使用 C#，可开启 Rust 对照 | Optional Rust journal comparison
+
+Rust 手记库独立构建。用 Windows x64 MSVC Rust 工具链运行以下命令，再构建独立手记或用上面的发布入口构建桌面程序。两个项目都会内嵌已生成的手记库。
+
+```powershell
+& '.\build\Build-JournalNative.ps1' -CargoPath '<cargo>\cargo.exe'
+& '<SDK>\dotnet.exe' build '.\source\AnglerCompanion\AnglerCompanion.csproj' -c Release --artifacts-path 'build/staging/journal/angler'
+```
+
+从设置了 `ABYSSALCRAB_JOURNAL_RUST=1` 的进程启动程序，即可对照 Rust 校验场次与鱼获的关联、按场次和时间筛选排序。缺少库或加载失败时自动使用 C#。清除此变量后重新启动即可回到 C#。JSON 读写、原子保存、备份与按当前语言比较文字由 C# 执行。
+
+Build the optional journal library with the Windows x64 MSVC Rust toolchain before building either app. Launch the app with `ABYSSALCRAB_JOURNAL_RUST=1` to opt in to Rust link validation and session/time ordering. Both apps fall back to C# if the library is unavailable.
+
+### 同一批手记可以复跑三组对照
+
+在仓库根目录执行下面的 PowerShell。将 `$oldApp` 指向从 r30 提取的桌面程序集目录。当前桌面程序需先用 Release 配置构建，并内嵌上一步生成的手记库。两份运行器分别加载旧版和候选程序集。每次复测使用新的输出目录。
+
+```powershell
+$oldApp = (Resolve-Path '<r30 App directory>').Path
+$project = 'verification/journal-comparison/JournalComparison.csproj'
+$run = Join-Path $PWD ('build/journal-check-' + [guid]::NewGuid().ToString('N'))
+dotnet build $project -t:Rebuild -c Release "-p:AppDirectory=$oldApp" -o "$run/old"
+dotnet build $project -t:Rebuild -c Release -o "$run/new"
+$before = "$run/old/JournalComparison.dll"
+$after = "$run/new/JournalComparison.dll"
+dotnet $before prepare "$run/input"
+$env:ABYSSALCRAB_JOURNAL_RUST = '0'
+dotnet $before baseline "$run/input" "$run/baseline"
+dotnet $after managed "$run/input" "$run/managed"
+$env:ABYSSALCRAB_JOURNAL_RUST = '1'
+dotnet $after rust "$run/input" "$run/rust"
+Remove-Item Env:ABYSSALCRAB_JOURNAL_RUST
+dotnet $before readback "$run/input" "$run/managed"
+dotnet $before readback "$run/input" "$run/rust"
+dotnet $after compare "$run/baseline" "$run/managed" "$run/rust"
+```
+
 ## 历史 r23 构建证据附录 | r23 build evidence appendix
 
 - 父 Runtime / Required parent Runtime: r22b, SHA-256 `b5bf1fb7fa166ec4c500d03231594862af4784d01805497446d425f99206f210`.

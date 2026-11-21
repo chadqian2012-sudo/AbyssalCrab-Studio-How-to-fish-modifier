@@ -9,6 +9,8 @@
     <Page Remove="AnglerApp.xaml"/>
     <ApplicationDefinition Include="AnglerApp.xaml"/>
     <Compile Include="..\HowToFishTrainer\HowToFishTrainer\App\Fishing*.cs" Link="Journal\%(Filename)%(Extension)"/>
+    <EmbeddedResource Include="..\..\build\staging\journal\abyssalcrab_journal.dll" LogicalName="abyssalcrab_journal.dll"
+                      Condition="Exists('..\..\build\staging\journal\abyssalcrab_journal.dll')" />
     <Compile Include="..\HowToFishTrainer\HowToFishTrainer\App\AtomicLocalFile.cs" Link="Journal\AtomicLocalFile.cs"/>
     <Compile Include="..\HowToFishTrainer\HowToFishTrainer\App\SaveBackupService.cs" Link="Journal\SaveBackupService.cs"/>
     <Compile Include="..\HowToFishTrainer\HowToFishTrainer\App\NumericInput.cs" Link="Journal\NumericInput.cs"/>
