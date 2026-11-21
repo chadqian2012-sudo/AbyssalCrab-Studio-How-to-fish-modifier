@@ -303,6 +303,10 @@ namespace AbyssalCrab.Runtime
         private static Vector3 Velocity(AimTargetTrack t,Vector3 point)
         {
             if(t.Rig&&!t.Rig.isKinematic){var v=t.Rig.GetPointVelocity(point);return Finite(v)&&v.sqrMagnitude<=40000?v:Vector3.zero;}
+            if(!t.Transform)return Vector3.zero;
+            // Aim and different projectiles may query different body points in the same track.
+            // Estimate translation from the target's moving transform, not the chosen hit point.
+            point=t.Transform.position;if(!Finite(point))return Vector3.zero;
             float now=Time.unscaledTime;
             if(!t.SampleReady){t.SampleReady=true;t.SamplePosition=point;t.SampleTime=now;return Vector3.zero;}
             float dt=now-t.SampleTime;if(dt<.01f)return t.SampleVelocity;

@@ -25,6 +25,7 @@ internal static class PatchTargetOptions
     }
     public static void Main(string[] args)
     {
+        if(args[0]=="--projectile-r29") { PatchProjectiles(args[1..]); return; }
         if (args[0] == "--world-drops")
         {
             PatchWorldDrops(args[1..]);
@@ -117,6 +118,51 @@ internal static class PatchTargetOptions
             retainedMethods = before.Count - changed.Count, changedMethods = changed, addedMethods, noHelperDependency = true, gameInjected = false, gameAssetsWritten = false };
         File.WriteAllText(Path.Combine(Path.GetDirectoryName(output)!, "runtime-audit.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine($"Combat challenge audited: {changed.Count} changed, {before.Count - changed.Count} retained, {addedMethods.Length} new methods; {Hash(output)}");
+    }
+
+    static void PatchProjectiles(string[] args)
+    {
+        string baseline=args[0], helper=args[1], output=args[2], game=args[3];
+        if(Hash(baseline)!="f310e47c0f89eff9d2858662a138e52e035622eb183b18162a35b0049c011b87" ||
+            Hash(game)!="e3ec0befacc5269efdecb279f0ae72155fcde3ebaeed07e361aa15e6f7fc84b1") throw new InvalidDataException("Review the changed baseline before patching r29");
+        using var module=ModuleDefMD.Load(baseline);
+        using var source=ModuleDefMD.Load(helper);
+        var before=module.GetTypes().SelectMany(t=>t.Methods).ToDictionary(m=>m.FullName,Body);
+        string[] names={"GameplayLaunch","GameplayFlight","GameplayHooks","GameplayRuntime","OverlayBuildDelegate","OverlayAbiDelegate","OverlayMeshKernel","OverlayBatchRenderer","MagicRangeRenderer","CombatBridgeRuntime"};
+        var owners=names.Select(n=>"AbyssalCrab.Runtime."+n).ToHashSet();
+        foreach(var name in owners) { var old=module.Find(name,false); if(old!=null)module.Types.Remove(old); }
+        foreach(var name in owners) PatchSpin.Clone(module,helper,name);
+        PatchSpin.Clone(module,helper,"AbyssalCrab.Runtime.PredictiveAimRuntime","Velocity");
+        var methods=module.GetTypes().Where(t=>owners.Contains(t.FullName)).SelectMany(t=>t.Methods).ToDictionary(m=>m.FullName);
+        var fields=module.GetTypes().Where(t=>owners.Contains(t.FullName)).SelectMany(t=>t.Fields).ToDictionary(f=>f.FullName);
+        foreach(var m in module.GetTypes().SelectMany(t=>t.Methods).Where(m=>m.HasBody))
+            foreach(var i in m.Body.Instructions)
+                if(i.Operand is IField f && f.FieldSig!=null && owners.Contains(f.DeclaringType.FullName))i.Operand=fields[f.FullName];
+                else if(i.Operand is IMethod called && called.MethodSig!=null && owners.Contains(called.DeclaringType.FullName))
+                { if(!methods.TryGetValue(called.FullName,out var replacement))throw new InvalidDataException("Unmapped: "+called.FullName+"; choices: "+string.Join(";",methods.Keys.Where(k=>k.Contains("::"+called.Name+"(")))); i.Operand=replacement; }
+        var digest=SHA256.HashData(File.ReadAllBytes(baseline).Concat(File.ReadAllBytes(helper)).ToArray());
+        module.Assembly.Name="HowToFishTrainer.Runtime.R29."+Convert.ToHexString(digest)[..16]; module.Mvid=new Guid(digest.AsSpan(0,16));
+        module.Write(output);
+        using var final=ModuleDefMD.Load(output);
+        var after=final.GetTypes().SelectMany(t=>t.Methods).ToDictionary(m=>m.FullName,Body);
+        var allowed=new HashSet<string>{"GameplayLaunch..ctor","GameplayFlight..ctor","GameplayHooks.Plan","GameplayRuntime.TryInstallGroup",
+            "GameplayRuntime.EnsureBeforeLock","GameplayRuntime.Validate","GameplayRuntime.Configured","GameplayRuntime.ClearProjectiles",
+            "GameplayRuntime.Launch","GameplayRuntime.BeforeSingle","GameplayRuntime.BeforeMultiple","GameplayRuntime.AfterLaunch",
+            "GameplayRuntime.RegisterLaunch","GameplayRuntime.Track","GameplayRuntime..cctor","CombatBridgeRuntime.TryHandle",
+            "MagicRangeRenderer.OnGUI","MagicRangeRenderer.OnDestroy","MagicRangeRenderer.DrawEntities","MagicRangeRenderer.ScreenLine","MagicRangeRenderer.DrawLockCorners","PredictiveAimRuntime.Velocity"};
+        var changed=new List<string>();
+        foreach(var pair in before)
+        {
+            if(!after.TryGetValue(pair.Key,out var body))throw new InvalidDataException("Removed method: "+pair.Key);
+            if(body==pair.Value)continue;
+            var m=final.GetTypes().SelectMany(t=>t.Methods).Single(m=>m.FullName==pair.Key);
+            if(!allowed.Contains(m.DeclaringType.Name+"."+m.Name))throw new InvalidDataException("Unreviewed change: "+pair.Key);
+            changed.Add(pair.Key);
+        }
+        if(final.GetAssemblyRefs().Any(r=>r.Name=="ProjectileR29"))throw new InvalidDataException("Helper dependency leaked");
+        File.WriteAllText(Path.Combine(Path.GetDirectoryName(output),"runtime-audit.json"),JsonSerializer.Serialize(new {
+            passed=true,parent=Hash(baseline),runtime=Hash(output),game=Hash(game),changed,retained=before.Count-changed.Count,
+            added=after.Keys.Except(before.Keys).ToArray(),gameStarted=false},new JsonSerializerOptions{WriteIndented=true}));
     }
 
     static void PatchWorldDrops(string[] args)

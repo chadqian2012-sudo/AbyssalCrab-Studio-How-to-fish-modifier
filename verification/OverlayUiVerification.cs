@@ -136,7 +136,24 @@ static class OverlayUiVerification
         Check(cards.All(card => Find<TextBlock>(card).Any(t => t.Text.Contains("角标") && t.Text.Contains("右 Ctrl"))),
             "Main and floating entity cards describe the lock marker and the right Ctrl hold shortcut");
         var editors = views.Select(view => Find<TextBox>(Find<NumericInputBox>(view).Single(n => ReferenceEquals(n.Input,input))).Single()).ToArray();
-        var actions = cards.Select(card => Find<Button>(card).Single(b => Equals(b.Content,"应用显示距离"))).ToArray();
+        var actions = cards.Select(card => Find<Button>(card).Single(b => ReferenceEquals(b.Command,vm.ApplyEntityOverlayCommand))).ToArray();
+        var backends=cards.Select(card=>Find<ComboBox>(card).Single(b=>ReferenceEquals(b.ItemsSource,vm.EntityOverlayBackends))).ToArray();
+        backends[0].SelectedIndex=1;Pump();
+        Check(vm.EntityOverlayBackend==1&&backends[1].SelectedIndex==1,"Main and floating entity cards share the comparison renderer selection");
+        backends[1].SelectedIndex=0;Pump();
+        Check(vm.EntityOverlayBackend==0&&backends[0].SelectedIndex==0,"Choosing original C# in the panel updates the main card without applying");
+        var magic=vm.AllFeatures.Single(f=>f.Descriptor.Id=="combat.silent_aim");
+        for(int i=0;i<views.Length;i++)
+        {
+            var radiusEditor=Find<NumericInputBox>(views[i]).Single(n=>ReferenceEquals(n.Input,magic.MagicSplashRadiusInput));
+            var apply=Find<Button>(views[i]).Single(b=>ReferenceEquals(b.DataContext,magic)&&Equals(b.Content,"应用追踪设置"));
+            radiusEditor.BringIntoView();Pump();
+            Render(i==0?mainView:overlayRoot,Path.Combine(output,"r29-area-"+i+".png"),i==0?1400:620,i==0?800:680);
+            Check(InsideScrollViewports(radiusEditor,new Rect(0,0,radiusEditor.ActualWidth,radiusEditor.ActualHeight)),"Area radius editor is reachable in "+(i==0?"main":"floating")+" combat page");
+            apply.BringIntoView();Pump();
+            Render(i==0?mainView:overlayRoot,Path.Combine(output,"r29-area-apply-"+i+".png"),i==0?1400:620,i==0?800:680);
+            Check(InsideScrollViewports(apply,new Rect(0,0,apply.ActualWidth,apply.ActualHeight)),"Full expanded magic card apply button is reachable in "+(i==0?"main":"floating")+" page");
+        }
         for (int i=0;i<editors.Length;i++)
         {
             editors[i].BringIntoView(new Rect(0,0,150,editors[i].ActualHeight)); Pump();

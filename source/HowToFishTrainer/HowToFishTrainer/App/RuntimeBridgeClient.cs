@@ -40,6 +40,20 @@ public sealed class RuntimeBridgeClient : IGameRuntimeClient, IAsyncDisposable
 
 	public Guid SessionId => _session;
 
+    internal static string PrepareOverlayLibrary(string directory)
+    {
+        byte[] bytes = ReadEmbeddedBytes("abyssalcrab_overlay.dll");
+        string hash = Convert.ToHexString(SHA256.HashData(bytes));
+        string path = Path.Combine(directory, hash, "abyssalcrab_overlay.dll");
+        if (File.Exists(path))
+        {
+            using var existing = File.OpenRead(path);
+            if (Convert.ToHexString(SHA256.HashData(existing)) == hash) return path;
+        }
+        AtomicLocalFile.WriteBytes(path, bytes);
+        return path;
+    }
+
 	private RuntimeBridgeClient(NamedPipeClientStream pipe, MonoRemoteGateway gateway, byte[] entitlementSecret)
 	{
 		_pipe = pipe;

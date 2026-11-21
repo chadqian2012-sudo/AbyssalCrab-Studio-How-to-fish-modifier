@@ -127,10 +127,18 @@ namespace AbyssalCrab.Runtime
         public Component Target;
         public float Angle, Distance, Strength;
         public bool Head;
-        public float NextScan, PointTime;
-        public Vector3 CachedPoint;
-        public bool HasPoint;
+        public bool Splash, Wide, Lethal;
+        public float SplashRadius, WidthRadius;
     }
-    public sealed class GameplayFlight { public GameplayLaunch Volley; public float LastSeen; }
+    public sealed class GameplayFlight
+    {
+        public GameplayLaunch Volley;
+        public Component Target;
+        public float LastSeen, NextScan;
+        public uint Id;
+        public bool Impact;
+        public Vector3 ImpactPoint;
+        public readonly HashSet<Component> Damaged = new HashSet<Component>();
+    }
     public sealed class GameplayExplosion { public Player Owner; public readonly Dictionary<Creature,int> Damage = new Dictionary<Creature,int>(); }
 }

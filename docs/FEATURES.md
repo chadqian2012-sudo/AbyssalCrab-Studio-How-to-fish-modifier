@@ -1,5 +1,27 @@
 # 功能指南 | Feature Guide
 
+## r29 候选：子弹分别保留目标，范围效果需要手动开启
+
+魔法子弹的每颗弹丸分别保存目标。目标仍存活、可攻击、在追踪距离内且路径可见时，保留该目标。目标失效后才重新选择，仍按 Boss、动物、玩家的顺序，同类优先最近；不会因为另一个目标靠近就抢走正在飞行的子弹。初次发射的多颗子弹可以选择同一目标，这不是平均分配火力。
+
+「命中点溅射」「加粗弹道」「范围内强制击杀」默认都关闭。溅射半径默认 2 米，允许 0.1–20 米；弹道判定半径默认 0.5 米，允许 0.05–5 米。两者支持小数，点击「应用追踪设置」后用于新发射子弹。
+
+溅射以原生碰撞命中点为中心；加粗使用本次弹道段周围的范围，不改变其他枪械共用的弹种宽度。同一颗子弹的新增范围效果，对同一实体最多追加一次伤害。普通直接命中继续由游戏结算，普通范围伤害不再重复追加到直接命中的实体。
+
+范围效果不检查掩体遮挡，因此墙后处于该范围内的实体也可能受到影响。子弹原有的撞墙和消失规则保留；这不是让弹丸无限穿墙。勾选强制击杀时，已启用的溅射或弹道范围内目标被设为死亡，直接命中的目标也可被升级为强制击杀。它需要房主端同步；非房主开启时返回明确错误。
+
+不勾选「锁定队友」时，追踪和新增范围效果都排除队友，始终排除自己。勾选后普通范围伤害仍遵循原生友伤规则；强制击杀会直接影响范围内的队友。取消队友选项立即生效，也会排除已经发射的子弹所追踪的队友。关闭魔法子弹、紧急停用和断开清理后，不再追加范围伤害。
+
+Each projectile owns its target; a valid target is retained, with Boss/animal/player priority on acquisition or reacquisition. Splash, wider trajectory hit detection and lethal area effects default off. Added area hits ignore cover, deduplicate by projectile and entity, and obey the teammate selection while always excluding the local player. Host authority is required for lethal synchronization. The original projectile collision and damage remain in place.
+
+## r29 候选：原版 C# 与 Rust 标注可以切换对比
+
+「实体标注」新增绘制方式选择：原版 C#、批量 C#、批量 Rust。默认原版 C#。选择后点击「应用标注设置」，成功回执显示实际方式。主窗口与悬浮窗共用选择；参数预设和退出保存会记住选择。新游戏进程启动后，需手动应用试验方式；恢复设置不会加载原生库或自行开启战斗功能。
+
+Rust 负责骨骼线、红框和准心连线的二维裁剪及细线四边形生成。Unity 模型读取、骨骼连接、世界坐标投影仍在 C#。批量 C# 与批量 Rust 使用相同输入和绘制方式，便于区分语言计算收益与批量绘制收益。原版 C# 绘制路径和上一版文件保留；切回原版不需要重启游戏。魔法子弹范围圈不参与这次替换。
+
+The experimental Rust backend handles clipping and line geometry only. Unity object access and projection remain managed. Original C#, batched C#, and batched Rust are selectable; the original is the default and remains available for rollback. Actual game rendering and frame-rate changes still require live comparison.
+
 ## 一键清理地上散落的物品 | Clear loose world drops
 
 进入自己的单人或房主世界，打开「金钱背包」，点击「一键清理掉落物」。主窗口和悬浮窗都可以搜索「清场」。它会分批回收地面的武器、普通物品、动物尸体，以及修改器在当前世界召唤、仍能核实来源的活体。例如，召唤的海鸥和野生海鸥混在一起时，清理只会带走召唤的海鸥。

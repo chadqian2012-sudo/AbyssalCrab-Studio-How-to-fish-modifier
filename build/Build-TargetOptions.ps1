@@ -5,15 +5,17 @@ param(
     [string]$ParentRuntimePath='',
     [string]$OutputDirectory='',
     [switch]$WorldDrops,
+    [switch]$ProjectileR29,
+    [string]$CargoPath='',
     [string]$ParentCorePath=''
 )
 $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSScriptRoot
 $stage=if($OutputDirectory){[IO.Path]::GetFullPath($OutputDirectory)}elseif($WorldDrops){Join-Path $PSScriptRoot 'staging\world-drops'}else{Join-Path $PSScriptRoot 'staging\combat-challenge'}
 $runtime=Join-Path $root 'source\HowToFishTrainer\HowToFishTrainer.Runtime.dll'
-$parentName=if($WorldDrops){'r27-runtime.dll'}else{'r23-runtime.dll'}
+$parentName=if($ProjectileR29){'r28b-runtime.dll'}elseif($WorldDrops){'r27-runtime.dll'}else{'r23-runtime.dll'}
 $parent=Join-Path $stage $parentName
-$expected=if($WorldDrops){'de14b34c34e894d8e1b992d549918c643a30d1c8cfb4ed3b0ab4b24f8704787a'}else{'36d5f71f02f9dd21ffcd37aaf7f0266732c6783c84b86802d6186ffc37db56ee'}
+$expected=if($ProjectileR29){'f310e47c0f89eff9d2858662a138e52e035622eb183b18162a35b0049c011b87'}elseif($WorldDrops){'de14b34c34e894d8e1b992d549918c643a30d1c8cfb4ed3b0ab4b24f8704787a'}else{'36d5f71f02f9dd21ffcd37aaf7f0266732c6783c84b86802d6186ffc37db56ee'}
 $DotnetPath=(Resolve-Path -LiteralPath $DotnetPath).Path
 $GameManagedDirectory=(Resolve-Path -LiteralPath $GameManagedDirectory).Path
 $DnlibPath=(Resolve-Path -LiteralPath $DnlibPath).Path
@@ -46,6 +48,18 @@ $gameReferences+=@($parent,(Join-Path $root 'source\HowToFishTrainer\0Harmony.dl
 $netReferences=Get-ChildItem -LiteralPath (Join-Path $refs.FullName 'ref\net8.0') -Filter '*.dll' -File | Select-Object -ExpandProperty FullName
 if([IO.Path]::GetFullPath($DnlibPath) -ne (Join-Path $stage 'dnlib.dll')){Copy-Item -LiteralPath $DnlibPath -Destination (Join-Path $stage 'dnlib.dll') -Force}
 Compile 'PatchTargetOptions' @((Join-Path $PSScriptRoot 'PatchSpin.cs'),(Join-Path $PSScriptRoot 'PatchTargetOptions.cs')) ($netReferences+@($DnlibPath)) 'PatchTargetOptions'
+if($ProjectileR29){
+    if(!$CargoPath){$CargoPath=(Get-Command cargo -ErrorAction Stop).Source}
+    & $CargoPath rustc --release --offline --locked --target x86_64-pc-windows-msvc --manifest-path (Join-Path $root 'native\overlay\Cargo.toml') -- -C target-feature=+crt-static
+    if($LASTEXITCODE -ne 0){throw 'Rust overlay build failed'}
+    Copy-Item -LiteralPath (Join-Path $root 'native\overlay\target\x86_64-pc-windows-msvc\release\abyssalcrab_overlay.dll') -Destination (Join-Path $root 'source\HowToFishTrainer\abyssalcrab_overlay.dll') -Force
+    Compile 'ProjectileR29' @(($names+@('GameplayHooks.cs','OverlayMeshKernel.cs','OverlayBatchRenderer.cs'))|ForEach-Object {Join-Path $PSScriptRoot $_}) $gameReferences
+    $candidate=Join-Path $stage 'candidate-runtime.dll'
+    & $DotnetPath (Join-Path $stage 'PatchTargetOptions.dll') --projectile-r29 $parent (Join-Path $stage 'ProjectileR29.dll') $candidate (Join-Path $GameManagedDirectory 'Assembly-CSharp.dll')
+    if($LASTEXITCODE -ne 0){throw 'r29 Runtime audit failed'}
+    Copy-Item -LiteralPath $candidate -Destination $runtime -Force
+    return
+}
 if($WorldDrops){
     $core=Join-Path $root 'patched\HowToFishTrainer.Core.dll'
     $parentCore=Join-Path $stage 'r27-core.dll'

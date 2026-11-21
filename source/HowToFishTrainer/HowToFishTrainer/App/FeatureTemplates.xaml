@@ -64,7 +64,15 @@
                 <app:NumericInputBox Input="{Binding MagicStrengthInput}"/>
               </UniformGrid>
               <ComboBox ItemsSource="{Binding MagicTriggerModes}" DisplayMemberPath="Label" SelectedItem="{Binding MagicTrigger}" Margin="0,8,0,0" AutomationProperties.Name="魔法子弹触发方式"/>
-              <CheckBox Content="锁定队友" IsChecked="{Binding MagicTargetTeammates}" IsEnabled="{Binding CanInteract}" Margin="0,8,0,0" ToolTip="勾选后把其他存活玩家加入目标；取消后排除所有队友。友伤和伤害结算仍由游戏决定，切换后立即应用。"/>
+              <CheckBox Content="命中点溅射" IsChecked="{Binding MagicSplash}" IsEnabled="{Binding CanInteract}" Margin="0,8,0,0"/>
+              <TextBlock Text="溅射半径（米，0.1–20）" Style="{StaticResource Muted}" FontSize="10" Margin="0,4,0,0"/>
+              <app:NumericInputBox Input="{Binding MagicSplashRadiusInput}" Margin="0,4,0,0"/>
+              <CheckBox Content="加粗弹道" IsChecked="{Binding MagicWide}" IsEnabled="{Binding CanInteract}" Margin="0,8,0,0"/>
+              <TextBlock Text="弹道判定半径（米，0.05–5）" Style="{StaticResource Muted}" FontSize="10" Margin="0,4,0,0"/>
+              <app:NumericInputBox Input="{Binding MagicWidthRadiusInput}" Margin="0,4,0,0"/>
+              <CheckBox Content="范围内强制击杀" IsChecked="{Binding MagicLethal}" IsEnabled="{Binding CanInteract}" Margin="0,8,0,0"/>
+              <TextBlock Text="范围伤害忽略掩体；每颗子弹对同一目标只追加一次伤害。强制击杀需要房主端同步，作用于已启用的溅射或弹道范围。应用后对新发射子弹生效。" Style="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,5,0,0"/>
+              <CheckBox Content="锁定队友" IsChecked="{Binding MagicTargetTeammates}" IsEnabled="{Binding CanInteract}" Margin="0,8,0,0" ToolTip="勾选后其他存活玩家参与追踪和范围伤害；取消后本功能排除队友，切换后立即应用。普通伤害沿用游戏友伤规则；范围强制击杀会直接影响勾选的队友。"/>
               <Button Content="应用追踪设置" Command="{Binding ApplyMagicCommand}" IsEnabled="{Binding CanApplyMagic}" Style="{StaticResource PrimaryButton}" Margin="0,8,0,0"/>
               <TextBlock Text="开启后显示追踪角度示意圈；随开镜视野缩放，距离仍按上方米数筛选。" Style="{StaticResource Muted}" TextWrapping="Wrap" FontSize="10" Margin="0,6,0,0"/>
               <TextBlock Text="{Binding Status}" Style="{StaticResource Muted}" TextWrapping="Wrap" FontSize="10" Margin="0,6,0,0"/>

@@ -31,11 +31,11 @@ for name in sorted(names):
     if len(set(hashes.values()))!=1 or len(types)!=1:raise ValueError('Payload differs: '+name+' '+str(hashes))
     rows.append({'path':name,'type':next(iter(types)),'sha256_by_package':hashes,'identical':True})
 resources=[]
-for name in ['HowToFishTrainer.Runtime.dll','0Harmony.dll']:
+for name in ['HowToFishTrainer.Runtime.dll','0Harmony.dll','abyssalcrab_overlay.dll']:
     payload=(root/'source/HowToFishTrainer'/name).read_bytes()
     for label,(directory,_,_) in packages.items():
         if payload not in (directory/'HowToFishTrainer.dll').read_bytes():raise ValueError('Current embedded bytes are missing: '+label+'/'+name)
     resources.append({'name':name,'sha256':hashlib.sha256(payload).hexdigest(),'matches_current_source_bytes':True})
 report={'passed':True,'inputs':{label:{'path':str(inputs[label]),'sha256':package[1]['input_sha256']} for label,package in packages.items()},'rows':rows,'embedded_resources':resources,'executables_started':False}
 (output/'package-payload-equivalence.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
-print('Both packages contain',len(rows),'byte-identical active payloads and current Runtime/Harmony bytes')
+print('Both packages contain',len(rows),'byte-identical active payloads and current Runtime/Harmony/Rust bytes')

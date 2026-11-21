@@ -23,6 +23,7 @@
     <None Remove="0Harmony.dll" />
     <EmbeddedResource Include="HowToFishTrainer.Runtime.dll" LogicalName="HowToFishTrainer.Runtime.dll" />
     <EmbeddedResource Include="0Harmony.dll" LogicalName="0Harmony.dll" />
+    <EmbeddedResource Include="abyssalcrab_overlay.dll" LogicalName="abyssalcrab_overlay.dll" />
     <ApplicationDefinition Remove="HowToFishTrainer\App\App.xaml" />
     <ApplicationDefinition Include="HowToFishTrainer\App\App.xaml" Generator="MSBuild:Compile" SubType="Designer" LogicalName="app.xaml" />
     <Page Remove="HowToFishTrainer\App\ActivationWindow.xaml" />

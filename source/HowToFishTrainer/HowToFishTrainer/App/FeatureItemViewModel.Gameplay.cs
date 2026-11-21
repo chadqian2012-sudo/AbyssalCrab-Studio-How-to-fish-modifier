@@ -75,6 +75,12 @@ public sealed partial class FeatureItemViewModel
     public NumericInput MagicAngleInput { get; } = new("捕获角度（度）", 8, .5, 180);
     public NumericInput MagicDistanceInput { get; } = new("追踪距离（米）", 35, 1, 1000);
     public NumericInput MagicStrengthInput { get; } = new("追踪强度（%）", 100, 0, 100);
+    public NumericInput MagicSplashRadiusInput { get; } = new("溅射半径（米）", 2, .1, 20);
+    public NumericInput MagicWidthRadiusInput { get; } = new("弹道半径（米）", .5, .05, 5);
+    private bool _magicSplash, _magicWide, _magicLethal;
+    public bool MagicSplash { get => _magicSplash; set { if(_magicSplash==value)return; _magicSplash=value; Changed(); NotifyStateChanged(); } }
+    public bool MagicWide { get => _magicWide; set { if(_magicWide==value)return; _magicWide=value; Changed(); NotifyStateChanged(); } }
+    public bool MagicLethal { get => _magicLethal; set { if(_magicLethal==value)return; _magicLethal=value; Changed(); NotifyStateChanged(); } }
     public IReadOnlyList<AimAssistTriggerOption> MagicTriggerModes { get; } = new[] {
         new AimAssistTriggerOption("ads", "仅开镜射击时追踪", "以开枪时是否开镜为准"), new AimAssistTriggerOption("fire", "所有射击均追踪", "开镜与不开镜的射击均追踪") };
     private AimAssistTriggerOption? _magicTrigger;
@@ -98,11 +104,12 @@ public sealed partial class FeatureItemViewModel
         get => _magicTrigger ?? MagicTriggerModes[1];
         set { if (value == null || value != MagicTriggerModes[0] && value != MagicTriggerModes[1] || _magicTrigger == value) return; _magicTrigger = value; Changed(); }
     }
-    public bool CanApplyMagic => IsMagicBullet && Enabled && CanInteract && !MagicAngleInput.HasError && !MagicDistanceInput.HasError && !MagicStrengthInput.HasError;
+    public bool CanApplyMagic => IsMagicBullet && Enabled && CanInteract && !MagicAngleInput.HasError && !MagicDistanceInput.HasError && !MagicStrengthInput.HasError && !MagicSplashRadiusInput.HasError && !MagicWidthRadiusInput.HasError;
     public ICommand ApplyMagicCommand => new RelayCommand(() => { if (CanApplyMagic) _ = ExecuteToggleAsync(true, true); });
     public JsonElement MagicArguments(bool enabled) => enabled ? JsonSerializer.SerializeToElement(new {
         enabled, angle = MagicAngleInput.Value, distance = MagicDistanceInput.Value,
         strength = MagicStrengthInput.Value, trigger = MagicTrigger.Value,
+        splash = MagicSplash, wide = MagicWide, lethal = MagicLethal, splashRadius = MagicSplashRadiusInput.Value, widthRadius = MagicWidthRadiusInput.Value,
         targetTeammates = MagicTargetTeammates, entityOverlayDistance = EntityOverlayDistanceInput.LastValidValue })
         : JsonSerializer.SerializeToElement(new { enabled, entityOverlayDistance = EntityOverlayDistanceInput.LastValidValue });
 }

@@ -653,7 +653,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 	{
 		EntityOverlayDistanceInput = entityOverlayDistanceInput ?? new NumericInput("显示距离（米）", 200, 1, 1000);
 		Descriptor = descriptor;
-        foreach (var input in new[] { MagicAngleInput, MagicDistanceInput, MagicStrengthInput })
+        foreach (var input in new[] { MagicAngleInput, MagicDistanceInput, MagicStrengthInput, MagicSplashRadiusInput, MagicWidthRadiusInput })
             input.PropertyChanged += (_, _) => Changed(nameof(CanApplyMagic));
 		_runtime = runtime;
 		_capabilities = capabilities;
@@ -798,7 +798,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 	{
         if (desired && _executionBlockReason?.Invoke() is string reason) { RevertToggle(false); Status=reason; StateLabel="待开启"; NotifyStateChanged(); return; }
 		bool previous = previousState ?? !desired;
-        if (IsMagicBullet && desired && !argumentsOverride.HasValue && NumericInput.FirstError(MagicAngleInput, MagicDistanceInput, MagicStrengthInput) is string magicError && magicError.Length > 0)
+        if (IsMagicBullet && desired && !argumentsOverride.HasValue && NumericInput.FirstError(MagicAngleInput, MagicDistanceInput, MagicStrengthInput, MagicSplashRadiusInput, MagicWidthRadiusInput) is string magicError && magicError.Length > 0)
         { Status = magicError; RevertToggle(previous); return; }
         double spinSpeed = 4d;
         bool spinAutoJump = SpinAutoJump;

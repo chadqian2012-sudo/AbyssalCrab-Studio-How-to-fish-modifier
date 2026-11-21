@@ -27,6 +27,13 @@ namespace AbyssalCrab.Runtime
         private static readonly List<Projectile> Expired = new List<Projectile>();
         private static float _nextPrune;
         private static GameplayLaunch _latestVolley;
+        private static GameplayLaunch _launch;
+        private static bool _splash, _wide, _lethal;
+        private static float _splashRadius = 2, _widthRadius = .5f;
+        private static Collider[] _areaColliders = new Collider[128];
+        private static AccessTools.FieldRef<Creature,FishNet.Object.Synchronizing.SyncVar<int>> _creatureHp;
+        private static AccessTools.FieldRef<PlayerVitals,FishNet.Object.Synchronizing.SyncVar<int>> _playerHp;
+        private static AccessTools.FieldRef<ProjectileManager,float> _catchUpSpeed;
         private static Component _guidedTarget;
         private static float _highlightUntil;
         private static float _nextDashWarning, _nextShotWarning;
@@ -68,7 +75,12 @@ namespace AbyssalCrab.Runtime
                 var plan=GameplayHooks.Plan(group,typeof(GameplayRuntime));
                 if(group==1) _swimming=AccessTools.FieldRefAccess<PlayerMovement,bool>("_isSwimming");
                 if(group==2) { _vitalsPlayer=AccessTools.FieldRefAccess<PlayerVitals,Player>("_player"); _playerDamageMultiplier=AccessTools.FieldRefAccess<PlayerVitals,float>("_playerDamageMultiplier"); }
-                if(group==4) { _nextId=AccessTools.FieldRefAccess<ProjectileManager,uint>("_nextId"); _aimPercent=AccessTools.FieldRefAccess<Weapon,float>("_aimPercent"); }
+                if(group==4) {
+                    _nextId=AccessTools.FieldRefAccess<ProjectileManager,uint>("_nextId"); _aimPercent=AccessTools.FieldRefAccess<Weapon,float>("_aimPercent");
+                    _catchUpSpeed=AccessTools.FieldRefAccess<ProjectileManager,float>("_catchUpSpeed");
+                    _creatureHp=AccessTools.FieldRefAccess<Creature,FishNet.Object.Synchronizing.SyncVar<int>>("_hp");
+                    _playerHp=AccessTools.FieldRefAccess<PlayerVitals,FishNet.Object.Synchronizing.SyncVar<int>>("_syncedHealth");
+                }
                 GameplayHooks.Install(_harmony,plan);_readyGroups|=group;
                 if(group==1)_dashError=null;else if(group==2)_damageError=null;else _projectileError=null;
                 return true;
@@ -85,6 +97,8 @@ namespace AbyssalCrab.Runtime
             int group=id=="player.air_dash.lock"?1:id=="combat.one_hit"?2:id=="combat.silent_aim"?4:0;
             if(group==0)return;
             if(args.Value<bool?>("enabled")==false)return;
+            if(id=="combat.silent_aim" && args.Value<bool?>("lethal")==true && (!Server.Instance || !Server.Instance.IsServerInitialized))
+                throw new NotSupportedException("范围秒杀需要房主端同步生命值；当前客户端无法执行。");
             if(_harmony==null)_harmony=new Harmony("HowToFishTrainer.RuntimeBridge");
             if(!TryInstallGroup(group))throw new NotSupportedException("对应功能钩子暂不可用，可稍后重新开启。"+Error(group));
         }
@@ -99,6 +113,9 @@ namespace AbyssalCrab.Runtime
             Require(args, "angle", .5, 180, true); Require(args, "distance", 1, 1000, true); Require(args, "strength", 0, 100, true);
             if (args["trigger"] != null && (args["trigger"].Type != JTokenType.String || args.Value<string>("trigger") != "ads" && args.Value<string>("trigger") != "fire")) throw new ArgumentException("trigger 必须为 ads 或 fire");
             if (args["targetTeammates"] != null && args["targetTeammates"].Type != JTokenType.Boolean) throw new ArgumentException("targetTeammates 必须是布尔值");
+            foreach (string option in new[] { "splash", "wide", "lethal" })
+                if (args[option] != null && args[option].Type != JTokenType.Boolean) throw new ArgumentException(option + " 必须是布尔值");
+            Require(args, "splashRadius", .1, 20, true); Require(args, "widthRadius", .05, 5, true);
             return true;
         }
         private static void Require(JObject a, string key, double min, double max, bool optional)
@@ -122,6 +139,8 @@ namespace AbyssalCrab.Runtime
                 { GameplayTargeting.ConfigureTeammates(false); MagicRangeRenderer.Refresh(host); return result; }
                 _angle = args.Value<float?>("angle") ?? 8; _distance = args.Value<float?>("distance") ?? 35;
                 _strength = args.Value<float?>("strength") ?? 100; _trigger = args.Value<string>("trigger") ?? "fire";
+                _splash = args.Value<bool?>("splash") ?? false; _wide = args.Value<bool?>("wide") ?? false; _lethal = args.Value<bool?>("lethal") ?? false;
+                _splashRadius = args.Value<float?>("splashRadius") ?? 2; _widthRadius = args.Value<float?>("widthRadius") ?? .5f;
                 GameplayTargeting.ConfigureTeammates(args.Value<bool?>("targetTeammates") ?? false);
                 MagicRangeRenderer.Configure(host, _angle);
             }
@@ -134,7 +153,7 @@ namespace AbyssalCrab.Runtime
         private static void ClearProjectiles()
         {
             Shots.Clear(); Expired.Clear(); _nextPrune = 0;
-            _latestVolley = null; _guidedTarget = null;
+            _latestVolley = null; _launch = null; _guidedTarget = null;
         }
         public static Component HighlightedShotTarget()
         {
@@ -236,17 +255,18 @@ namespace AbyssalCrab.Runtime
         }
         private static GameplayLaunch Launch(ProjectileManager manager, Player owner, WeaponInfo info, bool local, bool forbidden, Vector3 pos)
         {
-            if (!ShotReady(owner,info,local,forbidden) || _strength<=0) return null;
+            if (!ShotReady(owner,info,local,forbidden)) return null;
             Vector3 point; var t=GameplayTargeting.Select(owner.Camera.CamTransform.position,owner.Camera.CamTransform.forward,pos,_distance,_angle,_head,out point);
-            return new GameplayLaunch { StartId=_nextId(manager),Target=t,Angle=_angle,Distance=_distance,Strength=_strength,Head=_head,NextScan=Time.unscaledTime+.05f,PointTime=Time.fixedTime,CachedPoint=point,HasPoint=t!=null };
+            return new GameplayLaunch { StartId=_nextId(manager),Target=t,Angle=_angle,Distance=_distance,Strength=_strength,Head=_head,
+                Splash=_splash, Wide=_wide, Lethal=_lethal, SplashRadius=_splashRadius, WidthRadius=_widthRadius };
         }
         public static void BeforeSingle(ProjectileManager __instance, Player owner, WeaponInfo weaponInfo, bool isLocal, bool fromNpc, Vector3 pos, out GameplayLaunch __state)
-        { __state=null; try { __state=Launch(__instance,owner,weaponInfo,isLocal,fromNpc,pos); } catch(Exception e) { Warn(e,false); } }
+        { __state=_launch; try { _launch=Launch(__instance,owner,weaponInfo,isLocal,fromNpc,pos); } catch(Exception e) { _launch=null; Warn(e,false); } }
         public static void BeforeMultiple(ProjectileManager __instance, Player owner, WeaponInfo weaponInfo, bool isLocal, bool canHitOwner, Vector3 pos, out GameplayLaunch __state)
-        { __state=null; try { __state=Launch(__instance,owner,weaponInfo,isLocal,canHitOwner,pos); } catch(Exception e) { Warn(e,false); } }
+        { __state=_launch; try { _launch=Launch(__instance,owner,weaponInfo,isLocal,canHitOwner,pos); } catch(Exception e) { _launch=null; Warn(e,false); } }
         public static void AfterLaunch(ProjectileManager __instance, Player owner, WeaponInfo weaponInfo, GameplayLaunch __state)
         {
-            try { RegisterLaunch(__instance,owner,weaponInfo,__state); }
+            try { RegisterLaunch(__instance,owner,weaponInfo,_launch); }
             catch(Exception e) { Warn(e,false); }
         }
         private static void RegisterLaunch(ProjectileManager __instance, Player owner, WeaponInfo weaponInfo, GameplayLaunch __state)
@@ -255,37 +275,131 @@ namespace AbyssalCrab.Runtime
             uint count=unchecked(_nextId(__instance)-__state.StartId);
             if (count == 0) return;
             _latestVolley = __state;
-            if (Shots.Count >= 1024) return;
-            foreach(var p in __instance.GetType(weaponInfo.ProjectileType).Projectiles)
-                if(p.IsLocal&&p.Owner==owner&&unchecked(p.Id-__state.StartId)<count)
-                    if(Shots.Count<1024)Shots[p]=new GameplayFlight {Volley=__state,LastSeen=Time.unscaledTime};
+            var type=__instance.GetType(weaponInfo.ProjectileType);
+            if(type.IsHitScan)return;
+            foreach(var p in type.Projectiles)
+                if(p.IsLocal&&p.Owner==owner&&unchecked(p.Id-__state.StartId)<count&&!type.ProjectilesToRemove.Contains(p))
+                    if(!Shots.ContainsKey(p))Shots[p]=NewFlight(p,__state);
+        }
+        public static Exception EndLaunch(Exception __exception, GameplayLaunch __state)
+        { _launch=__state; return __exception; }
+        private static GameplayFlight NewFlight(Projectile projectile, GameplayLaunch config)
+        { return new GameplayFlight { Volley=config, Target=config.Target, Id=projectile.Id, LastSeen=Time.unscaledTime }; }
+        private static GameplayFlight Flight(Projectile projectile)
+        {
+            if (_host==null || !_host.IsLockEnabled("combat.silent_aim") || projectile==null || !projectile.IsLocal ||
+                projectile.Owner!=Player.LocalPlayer || projectile.FromNpc || !projectile.Owner || projectile.Owner.IsDeinitializing || IslandManager.IsLoading) return null;
+            GameplayFlight flight;
+            if (Shots.TryGetValue(projectile,out flight) && flight.Id==projectile.Id) return flight;
+            if (_launch==null || unchecked(projectile.Id-_launch.StartId)>=unchecked(_nextId(ProjectileManager.Instance)-_launch.StartId)) return null;
+            flight=NewFlight(projectile,_launch); Shots[projectile]=flight; return flight;
         }
         public static void TrackProjectile(Projectile projectile)
         {
             try { Track(projectile); }
             catch(Exception e) { if(projectile!=null)Shots.Remove(projectile);Warn(e,false); }
         }
+        public static void BeforeProjectileHit(Projectile projectile, RaycastHit hit, out GameplayFlight __state)
+        {
+            __state=Flight(projectile);
+            if(__state==null)return;
+            __state.Impact=true; __state.ImpactPoint=hit.point;
+            var item=ItemManager.Get(hit.collider);
+            Component target=item&&item.Creature ? (Component)item.Creature : PlayerManager.GetPlayerFromBodyPart(hit.transform);
+            // The original hit owns direct damage. Lethal mode upgrades it in Area after the original returns.
+            if(target && !__state.Volley.Lethal)__state.Damaged.Add(target);
+        }
+        public static void AfterProjectileHit(Projectile projectile, GameplayFlight __state)
+        {
+            if(__state==null)return;
+            if(__state.Volley.Splash)Area(projectile,__state,__state.ImpactPoint,__state.ImpactPoint,__state.Volley.SplashRadius);
+        }
+        public static void BeforeProjectileScan(Projectile projectile, out GameplayFlight __state)
+        { TrackProjectile(projectile); __state=Flight(projectile); if(__state!=null)__state.Impact=false; }
+        public static void AfterProjectileScan(Projectile projectile, ProjectileType type, GameplayFlight __state)
+        {
+            if(__state==null)return;
+            if(__state.Volley.Wide)
+            {
+                float step=Time.fixedDeltaTime*(1+projectile.CatchingUpToDo*_catchUpSpeed(ProjectileManager.Instance));
+                Vector3 end=__state.Impact?__state.ImpactPoint:projectile.Position+projectile.Velocity*step;
+                if(!type.ProjectilesToRemove.Contains(projectile)||__state.Impact)
+                    Area(projectile,__state,projectile.Position,end,__state.Volley.WidthRadius);
+            }
+            if(type.ProjectilesToRemove.Contains(projectile))Shots.Remove(projectile);
+        }
+        public static void BeforeHitscan(Projectile projectile, out GameplayFlight __state)
+        { __state=Flight(projectile); }
+        public static void AfterHitscan(Projectile projectile, float __result, GameplayFlight __state)
+        {
+            if(__state==null)return;
+            if(__state.Volley.Wide && !float.IsNaN(__result) && !float.IsInfinity(__result) && __result>0)
+                Area(projectile,__state,projectile.Position,__state.Impact?__state.ImpactPoint:projectile.Position+projectile.Velocity.normalized*__result,__state.Volley.WidthRadius);
+            Shots.Remove(projectile);
+        }
+        private static void Area(Projectile projectile, GameplayFlight flight, Vector3 from, Vector3 to, float radius)
+        {
+            if(_host==null||!_host.IsLockEnabled("combat.silent_aim")||IslandManager.IsLoading||!projectile.Owner||projectile.Owner!=Player.LocalPlayer)return;
+            var server=Server.Instance;
+            if(!server||flight.Volley.Lethal&&!server.IsServerInitialized)return;
+            int count;
+            while((count=Physics.OverlapCapsuleNonAlloc(from,to,radius,_areaColliders,~0,QueryTriggerInteraction.Collide))==_areaColliders.Length)
+                Array.Resize(ref _areaColliders,checked(_areaColliders.Length*2));
+            // Collect first: native death callbacks may change scene objects or trigger another hit.
+            List<Component> targets=null;
+            for(int i=0;i<count;i++)
+            {
+                Collider collider=_areaColliders[i]; _areaColliders[i]=null;
+                var item=ItemManager.Get(collider);
+                Component target=item&&item.Creature?(Component)item.Creature:PlayerManager.GetPlayerFromBodyPart(collider.transform);
+                Vector3 point;
+                if(!GameplayTargeting.Point(target,out point)||!flight.Damaged.Add(target))continue;
+                if(targets==null)targets=new List<Component>();
+                targets.Add(target);
+            }
+            if(targets==null)return;
+            foreach(var target in targets)
+            {
+                Vector3 point;
+                if(!GameplayTargeting.Point(target,out point))continue;
+                var creature=target as Creature;
+                if(flight.Volley.Lethal)
+                {
+                    if(creature)_creatureHp(creature).Value=0;
+                    else
+                    {
+                        var player=(Player)target;
+                        _playerHp(player.Vitals).Value=0;
+                        if(!player.Dying.DeadPlayer)player.Dying.ServerDie(Vector3.zero);
+                    }
+                }
+                else if(creature)server.HitCreature(creature,projectile.Owner,projectile.Damage,point,projectile.Velocity.normalized);
+                else server.HitPlayer((Player)target,projectile.Damage,Vector3.zero,point,0,projectile.Owner);
+            }
+        }
         private static void Track(Projectile projectile)
         {
             if (_host==null || !_host.IsLockEnabled("combat.silent_aim")) { ClearProjectiles(); return; }
             float now=Time.unscaledTime;
             if(now>=_nextPrune){_nextPrune=now+.5f;Expired.Clear();foreach(var pair in Shots)if(now-pair.Value.LastSeen>1)Expired.Add(pair.Key);foreach(var p in Expired)Shots.Remove(p);}
-            GameplayFlight flight; if(!Shots.TryGetValue(projectile,out flight)||!projectile.IsLocal||projectile.Owner!=Player.LocalPlayer||projectile.FromNpc)return;
+            GameplayFlight flight=Flight(projectile); if(flight==null)return;
             flight.LastSeen=now;var state=flight.Volley; Vector3 point;
+            if(state.Strength<=0)return;
             if(!projectile.Owner||projectile.Owner.IsDeinitializing||IslandManager.IsLoading){Shots.Remove(projectile);return;}
-            bool alive=GameplayTargeting.Point(state.Target,out point);
-            if(now>=state.NextScan||!ReferenceEquals(state.Target,null)&&!alive)
-            {state.NextScan=now+.05f;state.Target=GameplayTargeting.Select(projectile.Position,projectile.Velocity.normalized,projectile.Position,state.Distance,state.Angle,state.Head,out point);state.CachedPoint=point;state.PointTime=Time.fixedTime;state.HasPoint=state.Target!=null;}
-            if(ReferenceEquals(state.Target,null))return;
-            if(!state.HasPoint||state.PointTime!=Time.fixedTime)
-            {state.HasPoint=GameplayTargeting.AimPoint(state.Target,projectile.Position,state.Head,out point);state.CachedPoint=point;state.PointTime=Time.fixedTime;}
-            if(!state.HasPoint)return;point=state.CachedPoint;
-            Vector3 difference=point-projectile.Position;
-            if(difference.sqrMagnitude>state.Distance*state.Distance||!GameplayTargeting.Clear(projectile.Position,point))return;
+            bool valid=GameplayTargeting.AimPoint(flight.Target,projectile.Position,state.Head,out point) &&
+                (point-projectile.Position).sqrMagnitude<=state.Distance*state.Distance && GameplayTargeting.Clear(projectile.Position,point);
+            if(!valid)
+            {
+                bool lost=!ReferenceEquals(flight.Target,null); flight.Target=null;
+                if(!lost && now<flight.NextScan)return;
+                flight.NextScan=now+.05f;
+                flight.Target=GameplayTargeting.Select(projectile.Position,projectile.Velocity.normalized,projectile.Position,state.Distance,state.Angle,state.Head,out point);
+                if(ReferenceEquals(flight.Target,null))return;
+            }
             float speed=projectile.Velocity.magnitude;
-            Vector3 launch=GameplayTargeting.LaunchDirection(state.Target,point,projectile.Position,projectile.Velocity,projectile.GravityForce,false);
+            Vector3 launch=GameplayTargeting.LaunchDirection(flight.Target,point,projectile.Position,projectile.Velocity,projectile.GravityForce,false);
             projectile.Velocity=Vector3.RotateTowards(projectile.Velocity,launch.normalized*speed,GameplayPolicy.TurnRadians(state.Strength,Time.fixedDeltaTime),0);
-            if (ReferenceEquals(state, _latestVolley)) MarkGuidance(state.Target);
+            if (ReferenceEquals(state, _latestVolley)) MarkGuidance(flight.Target);
         }
         public static bool TryHandle(TrainerBridgeHost host, JObject envelope)
         {

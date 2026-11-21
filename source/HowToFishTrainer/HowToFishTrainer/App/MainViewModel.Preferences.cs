@@ -79,6 +79,7 @@ public sealed partial class MainViewModel
             if(p.General.Text("spinCurve") is string curve && SpinCurves.Contains(curve)) SpinCurve=curve;
             RestoreNumber(p.General,"refillLimit",RefillLimitInput);
             RestoreNumber(p.General,"entityOverlayDistance",EntityOverlayDistanceInput);
+            if (p.General.TryGetValue("entityOverlayBackend",out var backend) && backend.ValueKind == System.Text.Json.JsonValueKind.Number && backend.TryGetInt32(out int selectedBackend)) EntityOverlayBackend=selectedBackend;
             var t = p.Teleport;
             TeleportPointQuery = t.Text("query") ?? TeleportPointQuery;
             string group = t.Text("selectedGroup") ?? SelectedTeleportGroup;
@@ -205,6 +206,7 @@ public sealed partial class MainViewModel
             p.General.Put("soundEnabled", SoundEnabled); p.General.Put("page", SelectedPage.Category);
             p.General.Put("spinCurve", SpinCurve);p.General.Put("refillLimit",RefillLimitInput.LastValidValue);
             p.General.Put("entityOverlayDistance",EntityOverlayDistanceInput.LastValidValue);
+            p.General.Put("entityOverlayBackend",EntityOverlayBackend);
             p.General.Put("combatFeedback",CombatFeedback.Capture());
             p.General.Put("animalCounts",FunEventsPage.Events.Where(c=>c.HasAnimalCount).ToDictionary(c=>c.Id,c=>c.RequestedCount));
             var t = p.Teleport;
