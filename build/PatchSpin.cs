@@ -28,6 +28,7 @@ internal static class PatchSpin
         if (updateMethods.Length == 0) targetModule.Types.Add(target);
         var originalMethods = target.Methods.ToDictionary(m => m.FullName);
         var importer = new Importer(targetModule, ImporterOptions.TryToUseTypeDefs, default, new Mapper(targetModule));
+        if (updateMethods.Length == 0 && source.BaseType != null) target.BaseType = importer.Import(source.BaseType);
         var fields = new Dictionary<FieldDef, FieldDef>();
         foreach (var field in source.Fields)
         {
@@ -49,6 +50,7 @@ internal static class PatchSpin
                 continue;
             }
             var copy = new MethodDefUser(method.Name, importer.Import(method.MethodSig), method.ImplAttributes, method.Attributes);
+            if (method.ImplMap != null) copy.ImplMap = new ImplMapUser(new ModuleRefUser(targetModule, method.ImplMap.Module.Name), method.ImplMap.Name, method.ImplMap.Attributes);
             foreach (var param in method.ParamDefs) copy.ParamDefs.Add(new ParamDefUser(param.Name, param.Sequence, param.Attributes));
             target.Methods.Add(copy); methods.Add(method, copy);
         }

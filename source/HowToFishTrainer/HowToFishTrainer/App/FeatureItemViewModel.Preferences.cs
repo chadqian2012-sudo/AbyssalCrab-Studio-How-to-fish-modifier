@@ -13,7 +13,8 @@ public sealed partial class FeatureItemViewModel
     internal double LastValidSpinSpeed => _lastValidSpinSpeed;
 
     internal IReadOnlyDictionary<string, NumericInput> ParameterInputs => IsMagicBullet ? new Dictionary<string, NumericInput> {
-        ["angle"] = MagicAngleInput, ["distance"] = MagicDistanceInput, ["strength"] = MagicStrengthInput } : Descriptor.Control switch {
+        ["angle"] = MagicAngleInput, ["distance"] = MagicDistanceInput, ["strength"] = MagicStrengthInput,
+        ["splashRadius"] = MagicSplashRadiusInput, ["widthRadius"] = MagicWidthRadiusInput } : Descriptor.Control switch {
         FeatureControl.Number => new Dictionary<string, NumericInput> { ["value"] = ValueInput },
         FeatureControl.Generator => new Dictionary<string, NumericInput> {
             ["quantity"] = QuantityInput, ["distance"] = DistanceInput, ["weight"] = WeightInput },
@@ -30,6 +31,7 @@ public sealed partial class FeatureItemViewModel
         {
             values.Put("magicTrigger", MagicTrigger.Value);
             values.Put("targetTeammates", MagicTargetTeammates);
+            values.Put("splash", MagicSplash); values.Put("wide", MagicWide); values.Put("lethal", MagicLethal);
         }
         if (IsSpin)
         {
@@ -94,6 +96,9 @@ public sealed partial class FeatureItemViewModel
             {
                 MagicTrigger = MagicTriggerModes.FirstOrDefault(t => t.Value == values.Text("magicTrigger")) ?? MagicTriggerModes[1];
                 MagicTargetTeammates = values.Boolean("targetTeammates") ?? false;
+                MagicSplash = values.Boolean("splash") ?? false;
+                MagicWide = values.Boolean("wide") ?? false;
+                MagicLethal = values.Boolean("lethal") ?? false;
             }
             foreach (var pair in ParameterInputs)
             {

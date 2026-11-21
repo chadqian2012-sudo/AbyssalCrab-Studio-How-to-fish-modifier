@@ -47,8 +47,12 @@ namespace AbyssalCrab.Runtime
             {
                 Call(host, "ValidateAuthority", new object[] { id });
                 float distance = MagicRangePolicy.CheckedDistance(args["distance"]);
+                var backendToken = args["backend"];
+                if (backendToken != null && backendToken.Type != JTokenType.Integer) throw new ArgumentException("标注绘制方式无效");
+                int backend = backendToken == null ? OverlayBatchRenderer.Backend : (int)backendToken;
+                OverlayBatchRenderer.Configure(backend, args.Value<string>("nativePath"));
                 MagicRangeRenderer.ConfigureDistance(host, distance);
-                Call(host, "Reply", new object[] { correlation, true, "实体标注显示距离已应用", new JObject { ["distance"] = distance }, false, true });
+                Call(host, "Reply", new object[] { correlation, true, "实体标注设置已应用", new JObject { ["distance"] = distance, ["backend"] = backend }, false, true });
                 return true;
             }
             if (id == "combat.feedback.configure")

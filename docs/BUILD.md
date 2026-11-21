@@ -1,5 +1,25 @@
 # 构建指南 | Build Guide
 
+## r29 从 r28b 制作增量补丁，并编译独立 Rust 库
+
+使用 r28b Runtime、同版 Core/Memory、当前已核对的游戏程序集，以及 Windows x64 MSVC Rust 工具链。此分支仍采用原桌面打包脚本。Rust 没有第三方 crate 依赖；使用静态 C 运行库，不要求使用者安装 Visual C++ 运行库。构建机需要 MSVC 链接器与 Windows SDK。
+
+```powershell
+& '.\build\Build-TargetOptions.ps1' -ProjectileR29 -CargoPath '<cargo>/cargo.exe' -DotnetPath '<SDK>/dotnet.exe' -GameManagedDirectory '<game>/How to Fish_Data/Managed' -DnlibPath '<dnlib>/dnlib.dll' -ParentRuntimePath '<r28b>/HowToFishTrainer.Runtime.dll' -OutputDirectory 'build/staging/projectile-r29'
+& '.\build\Build-Release.ps1' -PackageMode SingleFile -DotnetPath '<SDK>/dotnet.exe' -PackageCache '<NuGet cache>' -OutputDirectory '<candidate-default>'
+& '.\build\Build-Release.ps1' -PackageMode CompressedSingleFile -DotnetPath '<SDK>/dotnet.exe' -PackageCache '<NuGet cache>' -OutputDirectory '<candidate-compressed>'
+```
+
+补丁程序校验父 Runtime 与游戏程序集哈希，只允许列出的旧方法变化。原生声明和委托的元数据也随补丁保留。Rust DLL 嵌入桌面程序；首次手动应用 Rust 方式时，按文件内容哈希写入当前用户临时目录，再从绝对路径加载。两种单文件包都核对 Runtime、Harmony 和 Rust 的实际嵌入字节。
+
+定向离线核验执行实际候选方法的模拟场景，并比较最终 Runtime 内的 C# 计算方法与真实 Rust DLL。`--app` 应指向本次成品提取的桌面 DLL，不能指向历史构建：
+
+```powershell
+python '.\build\Verify-ProjectileR29.py' --dotnet '<SDK>/dotnet.exe' --game '<game>/How to Fish_Data/Managed/Assembly-CSharp.dll' --app '<extracted-package>/HowToFishTrainer.dll'
+```
+
+The r29 path requires the verified r28b parent, builds the dependency-free x64 Rust library with static CRT, and audits the incremental managed patch. The focused checks run fake-engine projectile scenarios and actual patched managed/native geometry, without starting or attaching to a game.
+
 ## 工程 | Project
 
 - 项目文件 | Project file: `source/HowToFishTrainer/HowToFishTrainer.csproj`

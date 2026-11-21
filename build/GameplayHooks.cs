@@ -33,9 +33,11 @@ namespace AbyssalCrab.Runtime
             }
             else if (group == 4)
             {
-                plan.Add(Hook(handlers,typeof(ProjectileManager),"AddProjectile","BeforeSingle","AfterLaunch"));
-                plan.Add(Hook(handlers,typeof(ProjectileManager),"AddProjectiles","BeforeMultiple","AfterLaunch"));
-                plan.Add(Hook(handlers,typeof(ProjectileManager),"UpdateProjectileScan","TrackProjectile",null));
+                plan.Add(Hook(handlers,typeof(ProjectileManager),"AddProjectile","BeforeSingle","AfterLaunch","EndLaunch"));
+                plan.Add(Hook(handlers,typeof(ProjectileManager),"AddProjectiles","BeforeMultiple","AfterLaunch","EndLaunch"));
+                plan.Add(Hook(handlers,typeof(ProjectileManager),"UpdateProjectileScan","BeforeProjectileScan","AfterProjectileScan"));
+                plan.Add(Hook(handlers,typeof(ProjectileManager),"Hit","BeforeProjectileHit","AfterProjectileHit"));
+                plan.Add(Hook(handlers,typeof(ProjectileManager),"HitScan","BeforeHitscan","AfterHitscan"));
             }
             else throw new ArgumentOutOfRangeException("group");
             foreach(var p in plan) { Validate(p.Original,p.Prefix); Validate(p.Original,p.Postfix); Validate(p.Original,p.Finalizer); }

@@ -37,6 +37,7 @@ verification/
 *.json
 *.log
 *.zip
+native/**/target/
 
 # Handoff prompts and raw agent working notes are not product documentation
 README-UI与动画优化Prompt.md

@@ -49,13 +49,13 @@ namespace AbyssalCrab.Runtime
         private void OnDestroy()
         {
             _visuals.Clear(); _expired.Clear(); _catalog.Clear();
-            if (ReferenceEquals(_instance, this)) { _instance = null; _active = false; _host = null; }
+            if (ReferenceEquals(_instance, this)) { OverlayBatchRenderer.ReleaseVisuals(); _instance = null; _active = false; _host = null; }
         }
         private void OnGUI()
         {
             if (!_active || !ReferenceEquals(_instance, this))
             {
-                if (ReferenceEquals(_instance,this)) { _instance=null; _host=null; }
+                if (ReferenceEquals(_instance,this)) { OverlayBatchRenderer.ReleaseVisuals(); _instance=null; _host=null; }
                 UnityEngine.Object.Destroy(gameObject); return;
             }
             if (Event.current == null || Event.current.type != EventType.Repaint || !Application.isFocused ||
@@ -75,11 +75,15 @@ namespace AbyssalCrab.Runtime
             {
                 var keyboard = Keyboard.current;
                 if (keyboard == null || !keyboard.rightCtrlKey.isPressed)
+                {
+                    OverlayBatchRenderer.Begin();
                     DrawEntities(camera, viewport, previousMatrix);
+                    OverlayBatchRenderer.Flush();
+                }
                 if (silent && player.Holding && player.Holding.HeldItem && player.Holding.HeldItem.Weapon)
                     DrawRange(camera, viewport, previousMatrix);
             }
-            finally { GUI.matrix = previousMatrix; GUI.color = previousColor; }
+            finally { OverlayBatchRenderer.Collecting = false; GUI.matrix = previousMatrix; GUI.color = previousColor; }
         }
         private void DrawRange(Camera camera, Rect viewport, Matrix4x4 matrix)
         {
@@ -146,6 +150,15 @@ namespace AbyssalCrab.Runtime
                 GUI.color = Color.red;
                 float topY = Screen.height - box.yMax;
                 var pixel = Texture2D.whiteTexture;
+                if (OverlayBatchRenderer.Collecting)
+                {
+                    OverlayBatchRenderer.Add(new Vector2(box.xMin,box.yMin),new Vector2(box.xMax,box.yMin),viewport,Color.red,1);
+                    OverlayBatchRenderer.Add(new Vector2(box.xMin,box.yMax),new Vector2(box.xMax,box.yMax),viewport,Color.red,1);
+                    OverlayBatchRenderer.Add(new Vector2(box.xMin,box.yMin),new Vector2(box.xMin,box.yMax),viewport,Color.red,1);
+                    OverlayBatchRenderer.Add(new Vector2(box.xMax,box.yMin),new Vector2(box.xMax,box.yMax),viewport,Color.red,1);
+                }
+                else
+                {
                 if (box.width >= .1f)
                 {
                     GUI.DrawTexture(new Rect(box.xMin, topY - .5f, box.width, 1), pixel);
@@ -155,6 +168,7 @@ namespace AbyssalCrab.Runtime
                 {
                     GUI.DrawTexture(new Rect(box.xMin - .5f, topY, 1, box.height), pixel);
                     GUI.DrawTexture(new Rect(box.xMax - .5f, topY, 1, box.height), pixel);
+                }
                 }
                 for (int bone = 0; bone < visual.Bones.Count; bone++)
                 {
@@ -183,6 +197,14 @@ namespace AbyssalCrab.Runtime
             for (int i = 0; i < 4; i++)
             {
                 bool left = (i & 1) == 0, upper = (i & 2) == 0;
+                if (OverlayBatchRenderer.Collecting)
+                {
+                    float x=left?box.xMin:box.xMax-length, y=upper?box.yMax-thickness*.5f:box.yMin+thickness*.5f;
+                    OverlayBatchRenderer.Add(new Vector2(x,y),new Vector2(x+length,y),box,GUI.color,thickness);
+                    x=left?box.xMin+thickness*.5f:box.xMax-thickness*.5f; y=upper?box.yMax-length:box.yMin;
+                    OverlayBatchRenderer.Add(new Vector2(x,y),new Vector2(x,y+length),box,GUI.color,thickness);
+                    continue;
+                }
                 GUI.DrawTexture(new Rect(left ? box.xMin : box.xMax - length, upper ? top : bottom - thickness,
                     length, thickness), Texture2D.whiteTexture);
                 GUI.DrawTexture(new Rect(left ? box.xMin : box.xMax - thickness, upper ? top : bottom - length,
@@ -232,6 +254,7 @@ namespace AbyssalCrab.Runtime
         }
         private static void ScreenLine(Vector2 from, Vector2 to, Rect viewport, Matrix4x4 matrix)
         {
+            if (OverlayBatchRenderer.Collecting) { OverlayBatchRenderer.Add(from,to,viewport,GUI.color,1); return; }
             float x0=from.x,y0=from.y,x1=to.x,y1=to.y;
             if (!EntityOverlayGeometry.ClipLine(ref x0,ref y0,ref x1,ref y1,viewport.xMin,viewport.yMin,viewport.xMax,viewport.yMax)) return;
             if ((x1-x0)*(x1-x0)+(y1-y0)*(y1-y0) < .01f) return;

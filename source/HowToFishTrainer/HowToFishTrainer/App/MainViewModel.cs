@@ -535,6 +535,9 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
 	public AimAssistViewModel AimAssist { get; }
 
     public NumericInput EntityOverlayDistanceInput { get; } = new("显示距离（米）", 200, 1, 1000);
+    public string[] EntityOverlayBackends { get; } = { "原版 C#", "批量 C#（对照）", "批量 Rust（试验）" };
+    private int _entityOverlayBackend;
+    public int EntityOverlayBackend { get => _entityOverlayBackend; set { if (value >= 0 && value < EntityOverlayBackends.Length && Set(ref _entityOverlayBackend, value)) SchedulePreferencesSave(); } }
     private bool _entityOverlayBusy;
     private string _entityOverlayStatus = "等待连接 · 显示距离尚未应用";
     public string EntityOverlayStatus { get => _entityOverlayStatus; private set => Set(ref _entityOverlayStatus, value); }
@@ -556,13 +559,16 @@ public sealed partial class MainViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(CanApplyEntityOverlay));
         try
         {
+            int backend = EntityOverlayBackend;
+            string? nativePath = backend == 2 ? RuntimeBridgeClient.PrepareOverlayLibrary(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "AbyssalCrab Studio", "overlay")) : null;
             var result = await runtime.ExecuteAsync(new FeatureCommand("view.entity_overlay.configure",
-                JsonSerializer.SerializeToElement(new { distance = EntityOverlayDistanceInput.LastValidValue }), Capability.OwnedPlayer), CancellationToken.None);
+                JsonSerializer.SerializeToElement(new { distance = EntityOverlayDistanceInput.LastValidValue, backend, nativePath }), Capability.OwnedPlayer), CancellationToken.None);
             if (!Current()) return;
             if (result.Succeeded && result.Applied is JsonElement applied && applied.ValueKind == JsonValueKind.Object
                 && applied.TryGetProperty("distance", out var distance) && distance.ValueKind == JsonValueKind.Number && distance.TryGetDouble(out double actual)
-                && EntityOverlayDistanceInput.IsValidValue(actual))
-                EntityOverlayStatus = FormattableString.Invariant($"显示距离应用成功 · {actual:G} 米");
+                && EntityOverlayDistanceInput.IsValidValue(actual)
+                && applied.TryGetProperty("backend", out var actualBackend) && actualBackend.TryGetInt32(out int selected) && selected == backend)
+                EntityOverlayStatus = FormattableString.Invariant($"显示距离应用成功 · {actual:G} 米 · {EntityOverlayBackends[selected]}");
             else EntityOverlayStatus = "实体标注应用失败 · " + result.Message;
         }
         catch (Exception ex)
