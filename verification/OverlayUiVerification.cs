@@ -138,10 +138,24 @@ static class OverlayUiVerification
         var editors = views.Select(view => Find<TextBox>(Find<NumericInputBox>(view).Single(n => ReferenceEquals(n.Input,input))).Single()).ToArray();
         var actions = cards.Select(card => Find<Button>(card).Single(b => ReferenceEquals(b.Command,vm.ApplyEntityOverlayCommand))).ToArray();
         var backends=cards.Select(card=>Find<ComboBox>(card).Single(b=>ReferenceEquals(b.ItemsSource,vm.EntityOverlayBackends))).ToArray();
+        var projection = cards.Select(card => Find<CheckBox>(card).Single(b => Equals(b.Content, "Rust 三维投影"))).ToArray();
+        var selection = cards.Select(card => Find<CheckBox>(card).Single(b => Equals(b.Content, "Rust 辅助瞄准筛选与排序"))).ToArray();
+        projection[0].IsChecked = true;
+        selection[1].IsChecked = true;
         backends[0].SelectedIndex=1;Pump();
-        Check(vm.EntityOverlayBackend==1&&backends[1].SelectedIndex==1,"Main and floating entity cards share the comparison renderer selection");
+        Check(vm.EntityOverlayBackend==1&&backends[1].SelectedIndex==1&&projection[1].IsChecked==true&&selection[0].IsChecked==true,"Main and floating entity cards share the comparison renderer selection");
+        for (int i = 0; i < cards.Length; i++)
+        {
+            selection[i].BringIntoView(); Pump();
+            Render(i == 0 ? mainView : overlayRoot, Path.Combine(output, "rust-kernels-" + i + ".png"),
+                i == 0 ? 1400 : 620, i == 0 ? 800 : 680);
+            Check(InsideScrollViewports(selection[i], new Rect(0, 0, selection[i].ActualWidth, selection[i].ActualHeight)),
+                "Rust selection checkbox is reachable in the " + (i == 0 ? "main" : "floating") + " window");
+        }
+        projection[1].IsChecked = false;
+        selection[0].IsChecked = false;
         backends[1].SelectedIndex=0;Pump();
-        Check(vm.EntityOverlayBackend==0&&backends[0].SelectedIndex==0,"Choosing original C# in the panel updates the main card without applying");
+        Check(vm.EntityOverlayBackend==0&&backends[0].SelectedIndex==0&&!vm.RustProjection&&!vm.RustSelection,"Choosing original C# in the panel updates the main card without applying");
         var magic=vm.AllFeatures.Single(f=>f.Descriptor.Id=="combat.silent_aim");
         for(int i=0;i<views.Length;i++)
         {

@@ -19,6 +19,7 @@ sealed class OptionsRuntime : IGameRuntimeClient
     public TaskCompletionSource<RuntimeCommandResult>? PendingProof;
     public TaskCompletionSource<RuntimeCommandResult>? PendingOverlay;
     public double? OverlayReadbackDistance;
+    public bool? SelectionReadback;
     public ValueTask<RuntimeCommandResult> ExecuteAsync(FeatureCommand command, CancellationToken token)
     {
         Commands.Add(command);
@@ -31,7 +32,7 @@ sealed class OptionsRuntime : IGameRuntimeClient
             "catalog.items" => new { items = Array.Empty<object>() },
             "catalog.islands" => new { islands = Array.Empty<object>() },
             "features.proofs" => new { features = Array.Empty<object>() },
-            "view.entity_overlay.configure" => new { distance = OverlayReadbackDistance ?? command.Arguments.GetProperty("distance").GetDouble(), backend = command.Arguments.GetProperty("backend").GetInt32() },
+            "view.entity_overlay.configure" => new { distance = OverlayReadbackDistance ?? command.Arguments.GetProperty("distance").GetDouble(), backend = command.Arguments.GetProperty("backend").GetInt32(), rustProjection = command.Arguments.GetProperty("rustProjection").GetBoolean(), rustSelection = SelectionReadback ?? command.Arguments.GetProperty("rustSelection").GetBoolean() },
             _ => new { applied = true }
         };
         var json = JsonSerializer.SerializeToElement(data);
@@ -131,6 +132,11 @@ static class TargetOptionsVerification
         restored.ApplyEntityOverlayAsync().GetAwaiter().GetResult();
         Check(restoredRuntime.Last("view.entity_overlay.configure").Arguments.GetProperty("distance").GetDouble()==320.75&&restored.EntityOverlayStatus.Contains("320.5")&&restored.EntityOverlayDistanceInput.Text=="320.75", "Independent configuration sends the decimal draft, reports runtime readback and keeps the draft");
         Check(restoredRuntime.Commands.Count(c=>c.FeatureId.StartsWith("combat."))==combatBefore&&restored.AimAssist.Enabled&&card.Enabled, "Display-only apply leaves both combat toggles untouched and sends no combat request");
+        restoredRuntime.SelectionReadback = true;
+        restored.ApplyEntityOverlayAsync().GetAwaiter().GetResult();
+        Check(restored.EntityOverlayStatus.Contains("回执与设置不符") && !restored.RustSelection,
+            "A successful reply with an unexpected kernel is reported as a mismatch");
+        restoredRuntime.SelectionReadback = null;
         restoredRuntime.Reject=true;restored.ApplyEntityOverlayAsync().GetAwaiter().GetResult();
         Check(restored.EntityOverlayStatus.Contains("失败")&&restored.CanApplyEntityOverlay&&restored.EntityOverlayDistanceInput.Text=="320.75", "Rejected display-only apply reports failure and releases the controls without changing the draft");
         restoredRuntime.Reject=false;restoredRuntime.Throw=true;restored.ApplyEntityOverlayAsync().GetAwaiter().GetResult();
@@ -165,10 +171,10 @@ static class TargetOptionsVerification
             Check(!oldApply.IsCompleted&&!paging.CanApplyEntityOverlay, "A pending display apply makes its shared button unavailable");
             paging.SuspendConnection();var next=new OptionsRuntime{PendingOverlay=new()};paging.Connect(next,caps);Pump();
             var newApply=paging.ApplyEntityOverlayAsync();paging.EntityOverlayDistanceInput.Text="bad";
-            var oldData=JsonSerializer.SerializeToElement(new{distance=450.5,backend=0});
+            var oldData=JsonSerializer.SerializeToElement(new{distance=450.5,backend=0,rustProjection=false,rustSelection=false});
             first.PendingOverlay.SetResult(new RuntimeCommandResult(true,"old",oldData,oldData,false));Pump();
             Check(oldApply.IsCompleted&&!newApply.IsCompleted&&paging.EntityOverlayStatus=="已连接 · 显示距离待应用", "An old connection reply cannot publish a display distance into the new session");
-            var newData=JsonSerializer.SerializeToElement(new{distance=450.25,backend=0});
+            var newData=JsonSerializer.SerializeToElement(new{distance=450.25,backend=0,rustProjection=false,rustSelection=false});
             next.PendingOverlay.SetResult(new RuntimeCommandResult(true,"new",newData,newData,false));Pump();
             Check(newApply.IsCompleted&&paging.EntityOverlayStatus.Contains("450.25")&&paging.EntityOverlayDistanceInput.Text=="bad", "Only the current display reply updates confirmation and preserves a newer invalid draft");
             paging.EntityOverlayDistanceInput.Text="500";
@@ -247,20 +253,20 @@ static class TargetOptionsVerification
         {
             var extraStore=new OptionsStore();var extraRuntime=new OptionsRuntime();
             var extra=new MainViewModel(preferencesStore:extraStore,experiencePath:Path.Combine(args[0],"r29-options.json"));
-            var extraCard=Magic(extra);Check(!extraCard.MagicSplash&&!extraCard.MagicWide&&!extraCard.MagicLethal&&extra.EntityOverlayBackend==0,"r29 damage extensions default off and original C# remains default");
+            var extraCard=Magic(extra);Check(!extraCard.MagicSplash&&!extraCard.MagicWide&&!extraCard.MagicLethal&&!extra.RustProjection&&!extra.RustSelection&&extra.EntityOverlayBackend==0,"r29 damage extensions default off and original C# remains default");
             extraCard.MagicSplash=true;extraCard.MagicWide=true;extraCard.MagicLethal=true;extraCard.MagicSplashRadiusInput.Text="3.25";extraCard.MagicWidthRadiusInput.Text="0.75";
-            extra.EntityOverlayBackend=1;extra.ClosePreferences();
+            extra.EntityOverlayBackend=1;extra.RustProjection=true;extra.ClosePreferences();
             var loaded=new MainViewModel(preferencesStore:extraStore,experiencePath:Path.Combine(args[0],"r29-loaded.json"));var loadedCard=Magic(loaded);
-            Check(loadedCard.MagicSplash&&loadedCard.MagicWide&&loadedCard.MagicLethal&&loadedCard.MagicSplashRadiusInput.Value==3.25&&loadedCard.MagicWidthRadiusInput.Value==.75&&loaded.EntityOverlayBackend==1,"r29 options and decimal radii survive restart");
+            Check(loadedCard.MagicSplash&&loadedCard.MagicWide&&loadedCard.MagicLethal&&loadedCard.MagicSplashRadiusInput.Value==3.25&&loadedCard.MagicWidthRadiusInput.Value==.75&&loaded.RustProjection&&!loaded.RustSelection&&loaded.EntityOverlayBackend==1,"r29 options and decimal radii survive restart");
             loaded.Connect(extraRuntime,caps);Pump();loadedCard=Magic(loaded);loadedCard.Enabled=true;Pump();var applied=extraRuntime.Last("combat.silent_aim").Arguments;
             Check(applied.GetProperty("splash").GetBoolean()&&applied.GetProperty("wide").GetBoolean()&&applied.GetProperty("lethal").GetBoolean()&&applied.GetProperty("splashRadius").GetDouble()==3.25&&applied.GetProperty("widthRadius").GetDouble()==.75,"Manual enable submits the restored area settings");
             loadedCard.MagicTargetTeammates=true;Pump();loadedCard.MagicSplashRadiusInput.Text="-";loadedCard.MagicLethal=false;loadedCard.MagicTargetTeammates=false;Pump();applied=extraRuntime.Last("combat.silent_aim").Arguments;
             Check(!applied.GetProperty("targetTeammates").GetBoolean()&&applied.GetProperty("lethal").GetBoolean()&&applied.GetProperty("splashRadius").GetDouble()==3.25,"Teammate exclusion remains immediate and preserves applied area values despite newer drafts");
             Check(!loadedCard.CanApplyMagic,"Invalid radius blocks apply without clamping the draft");
             loaded.SelectedPage=loaded.Pages.First(p=>p!=loaded.SelectedPage);loadedCard=Magic(loaded);Check(loadedCard.MagicSplashRadiusInput.Text=="-","Invalid radius draft survives category changes");
-            loaded.ApplyEntityOverlayAsync().GetAwaiter().GetResult();Check(extraRuntime.Last("view.entity_overlay.configure").Arguments.GetProperty("backend").GetInt32()==1&&loaded.EntityOverlayStatus.Contains("批量 C#"),"Overlay applies the requested comparison backend with explicit readback");
-            loaded.PresetName="r29-area";loaded.SavePresetCommand.Execute(null);loadedCard.MagicWide=false;loaded.EntityOverlayBackend=0;loaded.ApplySelectedPresetAsync().GetAwaiter().GetResult();Pump();loadedCard=Magic(loaded);
-            Check(loadedCard.MagicWide&&!loadedCard.Enabled&&loaded.EntityOverlayBackend==1,"Preset restores r29 settings but does not enable damage");
+            loaded.ApplyEntityOverlayAsync().GetAwaiter().GetResult();Check(extraRuntime.Last("view.entity_overlay.configure").Arguments.GetProperty("backend").GetInt32()==1&&loaded.EntityOverlayStatus.Contains("批量 C#")&&loaded.EntityOverlayStatus.Contains("投影 Rust · 选敌 C#")&&File.Exists(extraRuntime.Last("view.entity_overlay.configure").Arguments.GetProperty("nativePath").GetString()),"Overlay applies the requested comparison backend with explicit readback");
+            loaded.PresetName="r29-area";loaded.SavePresetCommand.Execute(null);loadedCard.MagicWide=false;loaded.EntityOverlayBackend=0;loaded.RustProjection=false;loaded.RustSelection=true;loaded.ApplySelectedPresetAsync().GetAwaiter().GetResult();Pump();loadedCard=Magic(loaded);
+            Check(loadedCard.MagicWide&&!loadedCard.Enabled&&loaded.EntityOverlayBackend==1&&loaded.RustProjection&&!loaded.RustSelection,"Preset restores r29 settings but does not enable damage");
             extra.CloseExperience();loaded.CloseExperience();loaded.ClosePreferences();
         }
         Check(MagicRangePolicy.Project(30,90,2000,1000,out radius,out shortForm) && Math.Abs(radius-288.6751346)<.0001 && !shortForm, "Circle projection matches perspective half-angle math");

@@ -7,15 +7,18 @@ param(
     [switch]$WorldDrops,
     [switch]$ProjectileR29,
     [string]$CargoPath='',
-    [string]$ParentCorePath=''
+    [string]$ParentCorePath='',
+    [switch]$RustKernels
 )
 $ErrorActionPreference='Stop'
+if($ProjectileR29){throw 'Build the historical r29 from its merged source. Use -RustKernels to patch r29 with the current source.'}
+if($RustKernels -and $WorldDrops){throw 'Select either -RustKernels or -WorldDrops.'}
 $root=Split-Path -Parent $PSScriptRoot
-$stage=if($OutputDirectory){[IO.Path]::GetFullPath($OutputDirectory)}elseif($WorldDrops){Join-Path $PSScriptRoot 'staging\world-drops'}else{Join-Path $PSScriptRoot 'staging\combat-challenge'}
+$stage=if($OutputDirectory){[IO.Path]::GetFullPath($OutputDirectory)}elseif($RustKernels){Join-Path $PSScriptRoot 'staging\rust-kernels'}elseif($WorldDrops){Join-Path $PSScriptRoot 'staging\world-drops'}else{Join-Path $PSScriptRoot 'staging\combat-challenge'}
 $runtime=Join-Path $root 'source\HowToFishTrainer\HowToFishTrainer.Runtime.dll'
-$parentName=if($ProjectileR29){'r28b-runtime.dll'}elseif($WorldDrops){'r27-runtime.dll'}else{'r23-runtime.dll'}
+$parentName=if($RustKernels){'r29-runtime.dll'}elseif($WorldDrops){'r27-runtime.dll'}else{'r23-runtime.dll'}
 $parent=Join-Path $stage $parentName
-$expected=if($ProjectileR29){'f310e47c0f89eff9d2858662a138e52e035622eb183b18162a35b0049c011b87'}elseif($WorldDrops){'de14b34c34e894d8e1b992d549918c643a30d1c8cfb4ed3b0ab4b24f8704787a'}else{'36d5f71f02f9dd21ffcd37aaf7f0266732c6783c84b86802d6186ffc37db56ee'}
+$expected=if($RustKernels){'6c99e369c784d76ee76b045ec37590ba52586cae478f2d0f7164d80596fc2efe'}elseif($WorldDrops){'de14b34c34e894d8e1b992d549918c643a30d1c8cfb4ed3b0ab4b24f8704787a'}else{'36d5f71f02f9dd21ffcd37aaf7f0266732c6783c84b86802d6186ffc37db56ee'}
 $DotnetPath=(Resolve-Path -LiteralPath $DotnetPath).Path
 $GameManagedDirectory=(Resolve-Path -LiteralPath $GameManagedDirectory).Path
 $DnlibPath=(Resolve-Path -LiteralPath $DnlibPath).Path
@@ -48,19 +51,25 @@ $gameReferences+=@($parent,(Join-Path $root 'source\HowToFishTrainer\0Harmony.dl
 $netReferences=Get-ChildItem -LiteralPath (Join-Path $refs.FullName 'ref\net8.0') -Filter '*.dll' -File | Select-Object -ExpandProperty FullName
 if([IO.Path]::GetFullPath($DnlibPath) -ne (Join-Path $stage 'dnlib.dll')){Copy-Item -LiteralPath $DnlibPath -Destination (Join-Path $stage 'dnlib.dll') -Force}
 Compile 'PatchTargetOptions' @((Join-Path $PSScriptRoot 'PatchSpin.cs'),(Join-Path $PSScriptRoot 'PatchTargetOptions.cs')) ($netReferences+@($DnlibPath)) 'PatchTargetOptions'
-if($ProjectileR29){
-    if(!$CargoPath){$CargoPath=(Get-Command cargo -ErrorAction Stop).Source}
-    & $CargoPath rustc --release --offline --locked --target x86_64-pc-windows-msvc --manifest-path (Join-Path $root 'native\overlay\Cargo.toml') -- -C target-feature=+crt-static
-    if($LASTEXITCODE -ne 0){throw 'Rust overlay build failed'}
-    Copy-Item -LiteralPath (Join-Path $root 'native\overlay\target\x86_64-pc-windows-msvc\release\abyssalcrab_overlay.dll') -Destination (Join-Path $root 'source\HowToFishTrainer\abyssalcrab_overlay.dll') -Force
-    Compile 'ProjectileR29' @(($names+@('GameplayHooks.cs','OverlayMeshKernel.cs','OverlayBatchRenderer.cs'))|ForEach-Object {Join-Path $PSScriptRoot $_}) $gameReferences
+if($RustKernels){
+    Compile 'RustKernels' @(($names+@('GameplayHooks.cs','OverlayMeshKernel.cs','OverlayBatchRenderer.cs'))|ForEach-Object {Join-Path $PSScriptRoot $_}) $gameReferences
     $candidate=Join-Path $stage 'candidate-runtime.dll'
-    & $DotnetPath (Join-Path $stage 'PatchTargetOptions.dll') --projectile-r29 $parent (Join-Path $stage 'ProjectileR29.dll') $candidate (Join-Path $GameManagedDirectory 'Assembly-CSharp.dll')
-    if($LASTEXITCODE -ne 0){throw 'r29 Runtime audit failed'}
-    Copy-Item -LiteralPath $candidate -Destination $runtime -Force
-    return
-}
-if($WorldDrops){
+    & $DotnetPath (Join-Path $stage 'PatchTargetOptions.dll') --rust-kernels $parent (Join-Path $stage 'RustKernels.dll') $candidate (Join-Path $GameManagedDirectory 'Assembly-CSharp.dll')
+    if($LASTEXITCODE -ne 0){throw 'Rust kernels Runtime audit failed'}
+    if(!$CargoPath){$CargoPath=(Get-Command cargo -ErrorAction Stop).Source}
+    $nativeTarget=Join-Path $stage 'native'
+    & $CargoPath rustc --release --offline --locked --target x86_64-pc-windows-msvc --target-dir $nativeTarget --manifest-path (Join-Path $root 'native\overlay\Cargo.toml') -- -C target-feature=+crt-static
+    if($LASTEXITCODE -ne 0){throw 'Rust overlay build failed'}
+    $nativeCandidate=Join-Path $nativeTarget 'x86_64-pc-windows-msvc\release\abyssalcrab_overlay.dll'
+    $auditPath=Join-Path $stage 'runtime-audit.json'
+    $audit=Get-Content -Raw -LiteralPath $auditPath | ConvertFrom-Json
+    $nativeHash=(Get-FileHash -LiteralPath $nativeCandidate -Algorithm SHA256).Hash.ToLowerInvariant()
+    $audit|Add-Member -NotePropertyName nativeSha256 -NotePropertyValue $nativeHash
+    $audit|ConvertTo-Json -Depth 8|Set-Content -LiteralPath $auditPath -Encoding utf8
+    $files=[ordered]@{runtime=$runtime;native=(Join-Path $root 'source\HowToFishTrainer\abyssalcrab_overlay.dll')}
+    $candidates=@{runtime=$candidate;native=$nativeCandidate}
+    $hashes=@{runtime=$audit.runtime;native=$nativeHash}
+}elseif($WorldDrops){
     $core=Join-Path $root 'patched\HowToFishTrainer.Core.dll'
     $parentCore=Join-Path $stage 'r27-core.dll'
     if(!(Test-Path -LiteralPath $parentCore)){
@@ -75,26 +84,41 @@ if($WorldDrops){
     if($LASTEXITCODE -ne 0){throw 'Cleanup patch or original-method verification failed'}
     $audit=Get-Content -Raw -LiteralPath (Join-Path $stage 'runtime-audit.json') | ConvertFrom-Json
     $files=[ordered]@{runtime=$runtime;core=$core}
+    $candidates=@{runtime=(Join-Path $stage 'candidate-runtime.dll');core=(Join-Path $stage 'candidate-core.dll')}
+    $hashes=@{runtime=$audit.runtime.sha256;core=$audit.core.sha256}
+}
+if($RustKernels -or $WorldDrops){
     $suffix=[guid]::NewGuid().ToString('N')
     $installed=@()
     try{
         foreach($kind in $files.Keys){
             $path=$files[$kind]+'.'+$suffix+'.new'
-            Copy-Item -LiteralPath (Join-Path $stage ('candidate-'+$kind+'.dll')) -Destination $path
-            if((Get-FileHash -LiteralPath $path).Hash -ne $audit.$kind.sha256){throw "Staged $kind changed after verification"}
+            Copy-Item -LiteralPath $candidates[$kind] -Destination $path
+            if((Get-FileHash -LiteralPath $path).Hash -ne $hashes[$kind]){throw "Staged $kind changed after verification"}
         }
         foreach($file in $files.Values){
-            [IO.File]::Replace($file+'.'+$suffix+'.new',$file,$file+'.'+$suffix+'.previous')
+            if([IO.File]::Exists($file)){
+                [IO.File]::Replace($file+'.'+$suffix+'.new',$file,$file+'.'+$suffix+'.previous')
+            }else{
+                [IO.File]::Move($file+'.'+$suffix+'.new',$file)
+            }
             $installed+=$file
         }
     }catch{
-        foreach($file in $installed){[IO.File]::Replace($file+'.'+$suffix+'.previous',$file,[System.Management.Automation.Language.NullString]::Value)}
+        foreach($file in $installed){
+            $backup=$file+'.'+$suffix+'.previous'
+            if([IO.File]::Exists($backup)){
+                [IO.File]::Replace($backup,$file,[System.Management.Automation.Language.NullString]::Value)
+            }else{
+                [IO.File]::Delete($file)
+            }
+        }
         throw
     }finally{
         foreach($file in $files.Values){[IO.File]::Delete($file+'.'+$suffix+'.new')}
     }
     foreach($file in $installed){[IO.File]::Delete($file+'.'+$suffix+'.previous')}
-    Write-Output "Verified cleanup Runtime and Core installed in $root"
+    Write-Output "Verified $($files.Keys -join ' and ') installed in $root"
     return
 }
 Compile 'EntityOverlayRuntime' @($names|ForEach-Object {Join-Path $PSScriptRoot $_}) $gameReferences

@@ -7,6 +7,8 @@ namespace AbyssalCrab.Runtime
 {
     public delegate int OverlayBuildDelegate(IntPtr input,int count,IntPtr output,int capacity);
     public delegate int OverlayAbiDelegate();
+    public delegate int ProjectionDelegate(IntPtr camera, IntPtr input, int count, IntPtr output, int capacity);
+    public delegate int SelectionDelegate(IntPtr input, int count, float maximumSquared, float minimumAlignment, IntPtr output, int capacity);
     public static class OverlayBatchRenderer
     {
         private static float[] _input=new float[13*512],_output=new float[12*512];
@@ -14,6 +16,9 @@ namespace AbyssalCrab.Runtime
         private static Material _material;
         private static IntPtr _library;
         private static OverlayBuildDelegate _build;
+        private static ProjectionDelegate _project;
+        private static SelectionDelegate _select;
+        public static bool RustProjection, RustSelection;
         public static int Backend;
         public static bool Collecting;
         [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
@@ -22,9 +27,12 @@ namespace AbyssalCrab.Runtime
         private static extern IntPtr GetProcAddress(IntPtr library,string name);
         [DllImport("kernel32.dll")] private static extern bool FreeLibrary(IntPtr library);
         public static void Configure(int backend,string path)
+            => ConfigureKernels(backend, path, false, false);
+
+        public static void ConfigureKernels(int backend, string path, bool rustProjection, bool rustSelection)
         {
             if(backend<0||backend>2)throw new ArgumentOutOfRangeException("backend");
-            if(backend==2 && _build==null)
+            if((backend == 2 || rustProjection || rustSelection) && _build == null)
             {
                 if(string.IsNullOrEmpty(path)||!System.IO.Path.IsPathRooted(path))throw new ArgumentException("Rust 标注库路径无效");
                 IntPtr library=LoadLibraryExW(path,IntPtr.Zero,0x100|0x1000);
@@ -34,12 +42,70 @@ namespace AbyssalCrab.Runtime
                     IntPtr abi=GetProcAddress(library,"overlay_abi"),build=GetProcAddress(library,"overlay_build");
                     if(abi==IntPtr.Zero||build==IntPtr.Zero||((OverlayAbiDelegate)Marshal.GetDelegateForFunctionPointer(abi,typeof(OverlayAbiDelegate)))()!=1)
                         throw new InvalidOperationException("Rust 标注库版本不匹配");
-                    _build=(OverlayBuildDelegate)Marshal.GetDelegateForFunctionPointer(build,typeof(OverlayBuildDelegate)); _library=library;
+                    IntPtr project = GetProcAddress(library, "overlay_project");
+                    IntPtr select = GetProcAddress(library, "overlay_select");
+                    if (project == IntPtr.Zero || select == IntPtr.Zero)
+                        throw new InvalidOperationException("Rust 库缺少投影或选敌接口，请核对版本");
+                    var projectCall = (ProjectionDelegate)Marshal.GetDelegateForFunctionPointer(project, typeof(ProjectionDelegate));
+                    var selectCall = (SelectionDelegate)Marshal.GetDelegateForFunctionPointer(select, typeof(SelectionDelegate));
+                    _build = (OverlayBuildDelegate)Marshal.GetDelegateForFunctionPointer(build, typeof(OverlayBuildDelegate));
+                    _project = projectCall;
+                    _select = selectCall;
+                    _library = library;
                 }
                 catch { FreeLibrary(library); throw; }
             }
-            Backend=backend;
+            Backend = backend;
+            RustProjection = rustProjection;
+            RustSelection = rustSelection;
         }
+        public static void NativeProject(float[] camera, float[] input, int count, float[] output)
+        {
+            if (camera.Length != 37 || count < 0 || count > input.Length / 7 || count > output.Length / 5)
+                throw new ArgumentException("无效投影缓冲区");
+            if (count == 0) return;
+            GCHandle cameraPin = default(GCHandle), inputPin = default(GCHandle), outputPin = default(GCHandle);
+            try
+            {
+                cameraPin = GCHandle.Alloc(camera, GCHandleType.Pinned);
+                inputPin = GCHandle.Alloc(input, GCHandleType.Pinned);
+                outputPin = GCHandle.Alloc(output, GCHandleType.Pinned);
+                int written = _project(cameraPin.AddrOfPinnedObject(), inputPin.AddrOfPinnedObject(), count,
+                    outputPin.AddrOfPinnedObject(), output.Length / 5);
+                if (written != count) throw new InvalidOperationException("Rust 投影输出数量不符");
+            }
+            finally
+            {
+                if (outputPin.IsAllocated) outputPin.Free();
+                if (inputPin.IsAllocated) inputPin.Free();
+                if (cameraPin.IsAllocated) cameraPin.Free();
+            }
+        }
+
+        public static bool TryNativeSelection(float[] input, int count, float maximumSquared,
+            float minimumAlignment, int[] output, out int selectedCount)
+        {
+            selectedCount = 0;
+            if (_select == null || count < 0 || count > input.Length / 3 || output.Length < count) return false;
+            if (count == 0) return true;
+            GCHandle inputPin = default(GCHandle), outputPin = default(GCHandle);
+            try
+            {
+                inputPin = GCHandle.Alloc(input, GCHandleType.Pinned);
+                outputPin = GCHandle.Alloc(output, GCHandleType.Pinned);
+                int result = _select(inputPin.AddrOfPinnedObject(), count, maximumSquared, minimumAlignment,
+                    outputPin.AddrOfPinnedObject(), output.Length);
+                if (result < 0 || result > count) return false;
+                selectedCount = result;
+                return true;
+            }
+            finally
+            {
+                if (outputPin.IsAllocated) outputPin.Free();
+                if (inputPin.IsAllocated) inputPin.Free();
+            }
+        }
+
         public static void Begin() { _count=0; Collecting=Backend!=0; }
         public static void Add(Vector2 from,Vector2 to,Rect clip,Color color,float width)
         {

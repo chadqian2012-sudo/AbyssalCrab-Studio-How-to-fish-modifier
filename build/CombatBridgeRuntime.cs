@@ -50,9 +50,17 @@ namespace AbyssalCrab.Runtime
                 var backendToken = args["backend"];
                 if (backendToken != null && backendToken.Type != JTokenType.Integer) throw new ArgumentException("标注绘制方式无效");
                 int backend = backendToken == null ? OverlayBatchRenderer.Backend : (int)backendToken;
-                OverlayBatchRenderer.Configure(backend, args.Value<string>("nativePath"));
+                var projection = args["rustProjection"];
+                var selection = args["rustSelection"];
+                if ((projection != null && projection.Type != JTokenType.Boolean) ||
+                    (selection != null && selection.Type != JTokenType.Boolean))
+                    throw new ArgumentException("投影和选敌方式必须使用布尔值");
+                OverlayBatchRenderer.ConfigureKernels(backend, args.Value<string>("nativePath"),
+                    projection == null ? OverlayBatchRenderer.RustProjection : (bool)projection,
+                    selection == null ? OverlayBatchRenderer.RustSelection : (bool)selection);
                 MagicRangeRenderer.ConfigureDistance(host, distance);
-                Call(host, "Reply", new object[] { correlation, true, "实体标注设置已应用", new JObject { ["distance"] = distance, ["backend"] = backend }, false, true });
+                Call(host, "Reply", new object[] { correlation, true, "实体标注设置已应用", new JObject { ["distance"] = distance, ["backend"] = OverlayBatchRenderer.Backend,
+                    ["rustProjection"] = OverlayBatchRenderer.RustProjection, ["rustSelection"] = OverlayBatchRenderer.RustSelection }, false, true });
                 return true;
             }
             if (id == "combat.feedback.configure")

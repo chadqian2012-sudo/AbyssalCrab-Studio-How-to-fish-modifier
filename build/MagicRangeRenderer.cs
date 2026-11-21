@@ -18,6 +18,13 @@ namespace AbyssalCrab.Runtime
         private readonly List<Component> _expired = new List<Component>();
         private readonly HashSet<Component> _catalog = new HashSet<Component>();
         private readonly Vector3[] _corners = new Vector3[8], _projected = new Vector3[8];
+        private const int ProjectionInputStride = 7, ProjectionResultStride = 5;
+        private readonly List<Component> _projectionTargets = new List<Component>();
+        private readonly List<int> _projectedBoneEnds = new List<int>();
+        private readonly float[] _projectionCamera = new float[37];
+        private float[] _projectionInput = new float[ProjectionInputStride * 128];
+        private float[] _projectionBoxes = new float[ProjectionResultStride * 128];
+        private float[] _projectionBones = new float[ProjectionResultStride * 512];
         private int _catalogRevision = -1;
         private static Vector2[] BuildCircle()
         {
@@ -83,7 +90,11 @@ namespace AbyssalCrab.Runtime
                 if (silent && player.Holding && player.Holding.HeldItem && player.Holding.HeldItem.Weapon)
                     DrawRange(camera, viewport, previousMatrix);
             }
-            finally { OverlayBatchRenderer.Collecting = false; GUI.matrix = previousMatrix; GUI.color = previousColor; }
+            finally
+            {
+                _projectionTargets.Clear();
+                OverlayBatchRenderer.Collecting = false; GUI.matrix = previousMatrix; GUI.color = previousColor;
+            }
         }
         private void DrawRange(Camera camera, Rect viewport, Matrix4x4 matrix)
         {
@@ -122,28 +133,42 @@ namespace AbyssalCrab.Runtime
             bool? haveAim = null;
             Vector3 origin = camera.transform.position;
             float maximum = _distance * _distance;
+            bool rustProjection = OverlayBatchRenderer.RustProjection && !camera.stereoEnabled;
+            if (rustProjection)
+            {
+                ProjectEntities(camera, viewport, targets, origin, maximum, revision);
+                targets = _projectionTargets;
+            }
+            int boneStart = 0;
             for (int i = 0; i < targets.Count; i++)
             {
-                Component target = targets[i]; Vector3 point;
-                if (!GameplayTargeting.DisplayPoint(target, out point, false) || (point-origin).sqrMagnitude > maximum) continue;
-                EntityOverlayVisual visual;
-                if (!_visuals.TryGetValue(target, out visual))
-                { visual = new EntityOverlayVisual(target); _visuals.Add(target, visual); }
-                visual.Refresh(revision);
-                Bounds bounds; Rect box;
-                if (visual.TryBounds(out bounds))
+                Component target = targets[i];
+                EntityOverlayVisual visual = null;
+                Rect box;
+                if (!rustProjection)
                 {
-                    if (!ProjectBox(camera,viewport,bounds,out box)) continue;
+                    Vector3 point; Bounds bounds;
+                    if (!TryDisplayVisual(target, origin, maximum, revision, out point, out visual)) continue;
+                    if (visual.TryBounds(out bounds))
+                    {
+                        if (!ProjectBox(camera,viewport,bounds,out box)) continue;
+                    }
+                    else
+                    {
+                        Vector3 screen = camera.WorldToScreenPoint(point);
+                        if (!EntityOverlayGeometry.Finite(screen.x) || !EntityOverlayGeometry.Finite(screen.y) ||
+                            !EntityOverlayGeometry.Finite(screen.z) || screen.z < camera.nearClipPlane) continue;
+                        float left=Math.Max(viewport.xMin,screen.x-4), right=Math.Min(viewport.xMax,screen.x+4);
+                        float bottom=Math.Max(viewport.yMin,screen.y-6), top=Math.Min(viewport.yMax,screen.y+6);
+                        if (right <= left || top <= bottom) continue;
+                        box=Rect.MinMaxRect(left,bottom,right,top);
+                    }
                 }
                 else
                 {
-                    Vector3 screen = camera.WorldToScreenPoint(point);
-                    if (!EntityOverlayGeometry.Finite(screen.x) || !EntityOverlayGeometry.Finite(screen.y) ||
-                        !EntityOverlayGeometry.Finite(screen.z) || screen.z < camera.nearClipPlane) continue;
-                    float left=Math.Max(viewport.xMin,screen.x-4), right=Math.Min(viewport.xMax,screen.x+4);
-                    float bottom=Math.Max(viewport.yMin,screen.y-6), top=Math.Min(viewport.yMax,screen.y+6);
-                    if (right <= left || top <= bottom) continue;
-                    box=Rect.MinMaxRect(left,bottom,right,top);
+                    int s = i * ProjectionResultStride;
+                    if (_projectionBoxes[s] == 0) continue;
+                    box = Rect.MinMaxRect(_projectionBoxes[s+1], _projectionBoxes[s+2], _projectionBoxes[s+3], _projectionBoxes[s+4]);
                 }
                 // Both box paths already clip to the viewport. The four edges are axis-aligned.
                 GUI.matrix = matrix;
@@ -170,12 +195,23 @@ namespace AbyssalCrab.Runtime
                     GUI.DrawTexture(new Rect(box.xMax - .5f, topY, 1, box.height), pixel);
                 }
                 }
-                for (int bone = 0; bone < visual.Bones.Count; bone++)
+                if (rustProjection)
                 {
-                    var from = visual.Bones[bone]; var to = visual.Parents[bone];
-                    if (from && to && from.gameObject.activeInHierarchy && to.gameObject.activeInHierarchy)
-                        WorldLine(camera, box, from.position, to.position, matrix);
+                    int end = _projectedBoneEnds[i];
+                    for (; boneStart < end; boneStart++)
+                    {
+                        int s = boneStart * ProjectionResultStride;
+                        if (_projectionBones[s] != 0)
+                            ScreenLine(new Vector2(_projectionBones[s+1], _projectionBones[s+2]),
+                                new Vector2(_projectionBones[s+3], _projectionBones[s+4]), box, matrix);
+                    }
                 }
+                else
+                    for (int bone = 0; bone < visual.Bones.Count; bone++)
+                    {
+                        Vector3 from, to;
+                        if (TryBonePositions(visual, bone, out from, out to)) WorldLine(camera, box, from, to, matrix);
+                    }
                 if (!haveAim.HasValue)
                     haveAim = EntityOverlayProjection.TryAimPoint(_host, camera, out aim);
                 if (haveAim.Value)
@@ -186,6 +222,87 @@ namespace AbyssalCrab.Runtime
                 if (ReferenceEquals(target, aimTarget) || ReferenceEquals(target, shotTarget))
                     DrawLockCorners(box, matrix);
             }
+        }
+        private bool TryDisplayVisual(Component target, Vector3 origin, float maximum, int revision,
+            out Vector3 point, out EntityOverlayVisual visual)
+        {
+            visual = null;
+            if (!GameplayTargeting.DisplayPoint(target, out point, false) || (point-origin).sqrMagnitude > maximum) return false;
+            if (!_visuals.TryGetValue(target, out visual))
+            { visual = new EntityOverlayVisual(target); _visuals.Add(target, visual); }
+            visual.Refresh(revision);
+            return true;
+        }
+        private static bool TryBonePositions(EntityOverlayVisual visual, int bone, out Vector3 from, out Vector3 to)
+        {
+            var child = visual.Bones[bone]; var parent = visual.Parents[bone];
+            if (child && parent && child.gameObject.activeInHierarchy && parent.gameObject.activeInHierarchy)
+            {
+                from = child.position; to = parent.position;
+                return true;
+            }
+            from = to = default(Vector3);
+            return false;
+        }
+        private void ProjectEntities(Camera camera, Rect viewport, IReadOnlyList<Component> targets,
+            Vector3 origin, float maximum, int revision)
+        {
+            for (int i = 0; i < targets.Count; i++)
+            {
+                Component target = targets[i]; Vector3 point; EntityOverlayVisual visual;
+                if (!TryDisplayVisual(target, origin, maximum, revision, out point, out visual)) continue;
+                Bounds bounds;
+                if (visual.TryBounds(out bounds)) QueueProjection(_projectionTargets.Count, 1, bounds.center, bounds.extents);
+                else QueueProjection(_projectionTargets.Count, 0, point, default(Vector3));
+                _projectionTargets.Add(target);
+            }
+            if (_projectionTargets.Count == 0) return;
+
+            // Both batches use the same view, CPU projection and pixel viewport from this repaint.
+            Matrix4x4 view = camera.worldToCameraMatrix, projection = camera.projectionMatrix;
+            for (int row = 0; row < 4; row++)
+                for (int column = 0; column < 4; column++)
+                {
+                    int s = row * 4 + column;
+                    _projectionCamera[s] = view[row, column];
+                    _projectionCamera[16 + s] = projection[row, column];
+                }
+            _projectionCamera[32] = viewport.x; _projectionCamera[33] = viewport.y;
+            _projectionCamera[34] = viewport.width; _projectionCamera[35] = viewport.height;
+            _projectionCamera[36] = camera.nearClipPlane;
+            ProjectBatch(_projectionTargets.Count, ref _projectionBoxes);
+
+            // The projected box decides whether to read this entity's bone transforms.
+            _projectedBoneEnds.Clear();
+            int boneCount = 0;
+            for (int i = 0; i < _projectionTargets.Count; i++)
+            {
+                if (_projectionBoxes[i * ProjectionResultStride] != 0)
+                {
+                    EntityOverlayVisual visual = _visuals[_projectionTargets[i]];
+                    for (int bone = 0; bone < visual.Bones.Count; bone++)
+                    {
+                        Vector3 from, to;
+                        if (TryBonePositions(visual, bone, out from, out to)) QueueProjection(boneCount++, 2, from, to);
+                    }
+                }
+                _projectedBoneEnds.Add(boneCount);
+            }
+            if (boneCount > 0) ProjectBatch(boneCount, ref _projectionBones);
+        }
+        private void QueueProjection(int index, int kind, Vector3 a, Vector3 b)
+        {
+            int s = index * ProjectionInputStride;
+            if (s == _projectionInput.Length) Array.Resize(ref _projectionInput, s * 2);
+            _projectionInput[s] = kind;
+            _projectionInput[s+1] = a.x; _projectionInput[s+2] = a.y; _projectionInput[s+3] = a.z;
+            _projectionInput[s+4] = b.x; _projectionInput[s+5] = b.y; _projectionInput[s+6] = b.z;
+        }
+        private void ProjectBatch(int count, ref float[] output)
+        {
+            int size = count * ProjectionResultStride;
+            if (size > output.Length) Array.Resize(ref output, Math.Max(size, output.Length * 2));
+            OverlayBatchRenderer.NativeProject(_projectionCamera, _projectionInput, count, output);
         }
         private static void DrawLockCorners(Rect box, Matrix4x4 matrix)
         {

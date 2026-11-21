@@ -28,6 +28,8 @@ namespace AbyssalCrab.Runtime
         private static AimTargetTrack _target,_silentTarget;
         private static readonly List<AimTargetTrack> Targets=new List<AimTargetTrack>(128);
         private static readonly List<AimTargetTrack> Candidates=new List<AimTargetTrack>(128);
+        private static float[] _selectionInput;
+        private static int[] _selectionOutput;
         private static readonly Dictionary<Component,AimTargetTrack> Cache=new Dictionary<Component,AimTargetTrack>();
         private static readonly Comparison<AimTargetTrack> Order=new Comparison<AimTargetTrack>(CompareTargets);
         private static readonly Dictionary<Type,Dictionary<string,MemberInfo>> Members=new Dictionary<Type,Dictionary<string,MemberInfo>>();
@@ -273,18 +275,61 @@ namespace AbyssalCrab.Runtime
         {
             _scans++;RefreshCatalog(Time.unscaledTime,entering);Candidates.Clear();point=default(Vector3);
             _aliveRejected=0;_nearestCenterDistance=float.MaxValue;_bestAlignment=-1;
-            foreach(var t in Targets)
+            float maximumSquared = _range * _range, minimumAlignment = cameraLock ? -1f : _acquireCos;
+            int count = Targets.Count;
+            bool rust = cameraLock && OverlayBatchRenderer.RustSelection && count != 0;
+            if (rust && (_selectionOutput == null || _selectionOutput.Length < count))
             {
-                if(!Alive(t)){_aliveRejected++;continue;}
+                int capacity = Math.Max(count, _selectionOutput == null ? 128 : _selectionOutput.Length * 2);
+                _selectionInput = new float[capacity * 3];
+                _selectionOutput = new int[capacity];
+            }
+            for (int i = 0; i < count; i++)
+            {
+                var t = Targets[i];
+                if (!Alive(t))
+                {
+                    _aliveRejected++;
+                    if (rust) _selectionInput[i * 3] = float.NaN;
+                    continue;
+                }
                 Vector3 direction=Center(t)-origin;float d=direction.sqrMagnitude;
                 float centerDistance=Mathf.Sqrt(d), alignment=Vector3.Dot(forward,direction)/centerDistance;
                 _nearestCenterDistance=Math.Min(_nearestCenterDistance,centerDistance);_bestAlignment=Math.Max(_bestAlignment,alignment);
-                if(!AimLockPolicy.Eligible(d,alignment,_range*_range,cameraLock?-1f:_acquireCos))continue;
-                t.DistanceSquared=d;Candidates.Add(t);
+                if (rust)
+                {
+                    int offset = i * 3;
+                    _selectionInput[offset] = d;
+                    _selectionInput[offset + 1] = alignment;
+                    _selectionInput[offset + 2] = GameplayTargeting.Priority(t.Target);
+                }
+                else if (AimLockPolicy.Eligible(d, alignment, maximumSquared, minimumAlignment))
+                {
+                    t.DistanceSquared = d;
+                    Candidates.Add(t);
+                }
             }
-            Candidates.Sort(Order);
+            bool ordered = false;
+            if (rust)
+            {
+                int selected;
+                ordered = OverlayBatchRenderer.TryNativeSelection(_selectionInput, count, maximumSquared, minimumAlignment, _selectionOutput, out selected);
+                // For equal keys, rebuild in catalog order and let Mono reproduce its original tie order.
+                int length = ordered ? selected : count;
+                for (int i = 0; i < length; i++)
+                {
+                    int index = ordered ? _selectionOutput[i] : i;
+                    int offset = index * 3;
+                    float d = _selectionInput[offset];
+                    if (!ordered && !AimLockPolicy.Eligible(d, _selectionInput[offset + 1], maximumSquared, minimumAlignment)) continue;
+                    var t = Targets[index];
+                    t.DistanceSquared = d;
+                    Candidates.Add(t);
+                }
+            }
+            if (!ordered) Candidates.Sort(Order);
             _lastCandidates=Candidates.Count;
-            foreach(var t in Candidates)if(Valid(t,origin,forward,muzzle,cameraLock?-1f:_acquireCos,true,out point)){_selectedScanDistance=Mathf.Sqrt(t.DistanceSquared);return t;}
+            foreach(var t in Candidates)if(Valid(t,origin,forward,muzzle,minimumAlignment,true,out point)){_selectedScanDistance=Mathf.Sqrt(t.DistanceSquared);return t;}
             return null;
         }
 
