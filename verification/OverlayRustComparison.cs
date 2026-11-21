@@ -24,6 +24,57 @@ static class OverlayRustComparison {
   var a=GCHandle.Alloc(input,GCHandleType.Pinned);var b=GCHandle.Alloc(output,GCHandleType.Pinned);
   try{return fn(a.AddrOfPinnedObject(),count,b.AddrOfPinnedObject(),output.Length/12);}finally{b.Free();a.Free();}
  }
+ delegate bool Select(float[] input, int count, float range, float alignment, int[] output, out int written);
+
+ static void CheckKernels(Type bridge, string dll) {
+  var configure = bridge.GetMethod("ConfigureKernels").CreateDelegate<Action<int,string,bool,bool>>();
+  var project = bridge.GetMethod("NativeProject").CreateDelegate<Action<float[],float[],int,float[]>>();
+  var select = bridge.GetMethod("TryNativeSelection").CreateDelegate<Select>();
+  bool Flag(string name) => (bool)bridge.GetField(name).GetValue(null);
+  configure(0, null, false, false);
+  bool refused = false;
+  try { configure(0, Path.Combine(Path.GetDirectoryName(dll), "absent-test-library.dll"), true, true); }
+  catch (System.ComponentModel.Win32Exception) { refused = true; }
+  Check(refused && !Flag("RustProjection") && !Flag("RustSelection"), "Failed native load leaves both C# paths selected");
+  configure(0, dll, true, false);
+  Check(Flag("RustProjection") && !Flag("RustSelection") && (int)bridge.GetField("Backend").GetValue(null)==0,
+      "Projection can run independently with the original renderer and C# target selection");
+
+  // Camera at (3, 4, 5) facing +Z. Non-centred viewport and shifted perspective.
+  var camera = new float[37];
+  camera[0]=camera[5]=camera[15]=1; camera[10]=-1;
+  camera[3]=-3; camera[7]=-4; camera[11]=5;
+  camera[16]=2; camera[18]=-.25f; camera[21]=1; camera[22]=.125f; camera[30]=-1;
+  camera[32]=17; camera[33]=31; camera[34]=800; camera[35]=600; camera[36]=1;
+  var random=new Random(317);
+  const int count=4096;
+  var input=new float[count*7]; var expected=new float[count*5]; var output=new float[count*5];
+  for(int i=0;i<count;i++) {
+   int src=i*7, dst=i*5;
+   float x=(float)random.NextDouble()*24-12,y=(float)random.NextDouble()*24-12,z=(float)random.NextDouble()*18-3;
+   input[src+1]=x;input[src+2]=y;input[src+3]=z;
+   float depth=z-5;
+   if(depth<1) continue;
+   double px=17+400*(1.25+2.0*(x-3)/depth), py=31+300*(.875+(y-4)/depth);
+   double x0=Math.Max(17,px-4), x1=Math.Min(817,px+4), y0=Math.Max(31,py-6), y1=Math.Min(631,py+6);
+   if(x0>=x1||y0>=y1) continue;
+   expected[dst]=1; expected[dst+1]=(float)x0; expected[dst+2]=(float)y0; expected[dst+3]=(float)x1; expected[dst+4]=(float)y1;
+  }
+  project(camera,input,count,output);
+  Check(Enumerable.Range(0,count).All(i=>output[5*i]==expected[5*i] && (expected[5*i]==0 ||
+    Enumerable.Range(1,4).All(j=>Math.Abs(output[5*i+j]-expected[5*i+j])<.001f))),
+    "4096 points agree with independent translated perspective/viewport oracle within 0.001 pixel");
+  configure(1, dll, false, true);
+  Check(!Flag("RustProjection") && Flag("RustSelection"), "C# projection and Rust selection can be applied together");
+  float[] rows={ 3,-1,2, 50,0,0, 2,1,1, float.NaN,1,0, 101,1,0, 5,float.NaN,0, 3,1,0 };
+  var order=new int[7];
+  Check(select(rows,7,100,-1,order,out int n)&&n==4&&order.Take(n).SequenceEqual(new[]{6,1,2,0}),
+    "Patched target selector preserves priority, distance, full-angle and finite-input rules");
+  rows[3]=3;
+  Check(!select(rows,7,100,-1,order,out _), "Exact priority/distance tie returns to the original managed sort");
+  configure(0,null,false,false);
+  Check(!Flag("RustProjection")&&!Flag("RustSelection"), "Both comparison paths switch back in the same process");
+ }
  static void Main(string[] args) {
   using var module=ModuleDefMD.Load(args[0]);using var game=ModuleDefMD.Load(args[3]);
   var runtime=module.Find("AbyssalCrab.Runtime.GameplayRuntime",false);var manager=game.Find("ProjectileManager",false);
@@ -49,6 +100,7 @@ static class OverlayRustComparison {
   try {
    var native=Marshal.GetDelegateForFunctionPointer<NativeBuild>(NativeLibrary.GetExport(library,"overlay_build"));
    var imported=asm.GetType("AbyssalCrab.Runtime.OverlayBatchRenderer",true);
+   CheckKernels(imported, Path.GetFullPath(args[1]));
    imported.GetMethod("Configure").Invoke(null,new object[]{2,Path.GetFullPath(args[1])});
    var importedCall=(Func<float[],int,float[],int>)imported.GetMethod("NativeBuild").CreateDelegate(typeof(Func<float[],int,float[],int>));
    var probe=Input(12,5);var probeOut=new float[144];

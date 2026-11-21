@@ -1,5 +1,13 @@
 # 功能指南 | Feature Guide
 
+## 标注投影和辅助瞄准选敌可以分别切换
+
+在「武器战斗 → 实体标注」选择「Rust 三维投影」或「Rust 辅助瞄准筛选与排序」，再点「应用标注设置」。两个选项默认关闭，可以单独开启，也可以配合已有的三种线条绘制方式。状态栏会显示本次成功应用的选择。取消对应勾选并再次应用，即恢复该项 C# 实现。预设与重启保存选择，新游戏进程需要手动应用。
+
+投影处理红框、骨骼端点和定位框。可见实体的连线仍指向该帧红框中心。立体相机沿用 Unity 的投影。选敌按原来的 Boss、动物、玩家优先级和距离排序。相同优先级且等距时，沿用游戏当前 C# 排序。队友开关和遮挡判定仍在原位置生效。
+
+The projection and aim-assist candidate processing switches are independent. Both default to the existing C# paths. Apply a switch in the entity overlay settings to compare it in the current session. Clearing and applying the same switch restores C#. The line renderer is selected separately.
+
 ## r29 候选：子弹分别保留目标，范围效果需要手动开启
 
 魔法子弹的每颗弹丸分别保存目标。目标仍存活、可攻击、在追踪距离内且路径可见时，保留该目标。目标失效后才重新选择，仍按 Boss、动物、玩家的顺序，同类优先最近；不会因为另一个目标靠近就抢走正在飞行的子弹。初次发射的多颗子弹可以选择同一目标，这不是平均分配火力。

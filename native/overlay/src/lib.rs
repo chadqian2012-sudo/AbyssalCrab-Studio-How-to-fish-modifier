@@ -1,3 +1,6 @@
+mod projection;
+mod selection;
+
 fn boundary(p: f64, q: f64, start: &mut f64, end: &mut f64) -> bool {
     if p == 0.0 { return q >= 0.0; }
     let t = q / p;

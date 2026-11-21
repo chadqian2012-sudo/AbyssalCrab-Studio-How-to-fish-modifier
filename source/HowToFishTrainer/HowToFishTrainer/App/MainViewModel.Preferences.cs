@@ -80,6 +80,8 @@ public sealed partial class MainViewModel
             RestoreNumber(p.General,"refillLimit",RefillLimitInput);
             RestoreNumber(p.General,"entityOverlayDistance",EntityOverlayDistanceInput);
             if (p.General.TryGetValue("entityOverlayBackend",out var backend) && backend.ValueKind == System.Text.Json.JsonValueKind.Number && backend.TryGetInt32(out int selectedBackend)) EntityOverlayBackend=selectedBackend;
+            RustProjection = p.General.Boolean("rustProjection") ?? false;
+            RustSelection = p.General.Boolean("rustSelection") ?? false;
             var t = p.Teleport;
             TeleportPointQuery = t.Text("query") ?? TeleportPointQuery;
             string group = t.Text("selectedGroup") ?? SelectedTeleportGroup;
@@ -207,6 +209,8 @@ public sealed partial class MainViewModel
             p.General.Put("spinCurve", SpinCurve);p.General.Put("refillLimit",RefillLimitInput.LastValidValue);
             p.General.Put("entityOverlayDistance",EntityOverlayDistanceInput.LastValidValue);
             p.General.Put("entityOverlayBackend",EntityOverlayBackend);
+            p.General.Put("rustProjection", RustProjection);
+            p.General.Put("rustSelection", RustSelection);
             p.General.Put("combatFeedback",CombatFeedback.Capture());
             p.General.Put("animalCounts",FunEventsPage.Events.Where(c=>c.HasAnimalCount).ToDictionary(c=>c.Id,c=>c.RequestedCount));
             var t = p.Teleport;

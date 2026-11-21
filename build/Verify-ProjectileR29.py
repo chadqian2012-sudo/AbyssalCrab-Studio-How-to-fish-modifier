@@ -1,7 +1,10 @@
 """Compile actual changed projectile methods against an offline fake engine, then compare final geometry IL and Rust."""
 import argparse, pathlib, re, subprocess, json, os
-p=argparse.ArgumentParser();p.add_argument('--dotnet',required=True);p.add_argument('--game',required=True);p.add_argument('--app',required=True);a=p.parse_args()
-root=pathlib.Path(__file__).resolve().parent.parent;out=root/'build/staging/projectile-r29/verification';out.mkdir(parents=True,exist_ok=True)
+p=argparse.ArgumentParser();p.add_argument('--dotnet',required=True);p.add_argument('--game',required=True);p.add_argument('--app',required=True)
+p.add_argument('--output', type=pathlib.Path, help='Directory for test assemblies and evidence')
+p.add_argument('--dnlib', type=pathlib.Path, help='Path to the build-time dnlib assembly')
+a=p.parse_args()
+root=pathlib.Path(__file__).resolve().parent.parent;out=(a.output or (root/'build/staging/projectile-r29/verification')).resolve();out.mkdir(parents=True,exist_ok=True)
 sdkroot=pathlib.Path(a.dotnet).parent;sdk=sorted((sdkroot/'sdk').glob('8.*'),key=lambda x:tuple(map(int,x.name.split('.'))))[-1]
 pack=sorted((sdkroot/'packs/Microsoft.NETCore.App.Ref').glob('8.*'),key=lambda x:tuple(map(int,x.name.split('.'))))[-1]
 source=(root/'build/GameplayRuntime.cs').read_text(encoding='utf-8-sig')
@@ -32,5 +35,5 @@ def compile_run(name,files,extra,args):
     env=os.environ.copy();env['DOTNET_TieredCompilation']='0'
     subprocess.run([a.dotnet,str(dll)]+list(map(str,args)),check=True,cwd=out,env=env)
 compile_run('ProjectileBehavior',[out/'Candidate.cs',root/'verification/ProjectileR29Verification.cs'],[],[out/'projectile-behavior.json'])
-dnlib=root/'build/staging/combat-challenge/dnlib.dll';(out/'dnlib.dll').write_bytes(dnlib.read_bytes())
+dnlib=(a.dnlib or (root/'build/staging/combat-challenge/dnlib.dll')).resolve();(out/'dnlib.dll').write_bytes(dnlib.read_bytes())
 compile_run('RustComparison',[root/'verification/OverlayRustComparison.cs'],[dnlib],[root/'source/HowToFishTrainer/HowToFishTrainer.Runtime.dll',root/'source/HowToFishTrainer/abyssalcrab_overlay.dll',out/'rust-comparison.json',pathlib.Path(a.game).resolve(),pathlib.Path(a.app).resolve()])

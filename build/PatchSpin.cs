@@ -20,6 +20,12 @@ internal static class PatchSpin
     internal static TypeDef Clone(ModuleDef targetModule, string helper, string typeName, params string[] updateMethods)
     {
         using var sourceModule = ModuleDefMD.Load(helper);
+        return Clone(targetModule, sourceModule, typeName, updateMethods);
+    }
+
+    internal static TypeDef Clone(ModuleDef targetModule, ModuleDef sourceModule, string typeName,
+        string[] updateMethods, bool addFields = false)
+    {
         var source = sourceModule.GetTypes().Single(t => t.FullName == typeName);
         if (source.NestedTypes.Count != 0) throw new Exception("Helper must have no nested types");
         TypeDef target = updateMethods.Length == 0
@@ -32,11 +38,14 @@ internal static class PatchSpin
         var fields = new Dictionary<FieldDef, FieldDef>();
         foreach (var field in source.Fields)
         {
-            if (updateMethods.Length != 0)
+            var existing = target.Fields.SingleOrDefault(f => f.Name == field.Name);
+            if (existing != null)
             {
-                fields.Add(field, target.Fields.Single(f => f.FullName == field.FullName));
+                if (existing.FullName != field.FullName) throw new InvalidDataException("Field signature changed: " + field.FullName);
+                fields.Add(field, existing);
                 continue;
             }
+            if (updateMethods.Length != 0 && !addFields) throw new InvalidDataException("Unexpected field: " + field.FullName);
             var copy = new FieldDefUser(field.Name, importer.Import(field.FieldSig), field.Attributes);
             if (field.HasConstant) copy.Constant = new ConstantUser(field.Constant.Value);
             target.Fields.Add(copy); fields.Add(field, copy);

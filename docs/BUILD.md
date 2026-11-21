@@ -1,24 +1,24 @@
 # 构建指南 | Build Guide
 
-## r29 从 r28b 制作增量补丁，并编译独立 Rust 库
+## Rust 对照版以已交付的 r29 为基线
 
-使用 r28b Runtime、同版 Core/Memory、当前已核对的游戏程序集，以及 Windows x64 MSVC Rust 工具链。此分支仍采用原桌面打包脚本。Rust 没有第三方 crate 依赖；使用静态 C 运行库，不要求使用者安装 Visual C++ 运行库。构建机需要 MSVC 链接器与 Windows SDK。
+准备 r29 合并交付版的 Runtime、Core、Memory 和 Harmony，以及同次核对的游戏程序集。构建机需要 .NET 8、Windows x64 MSVC Rust 工具链、MSVC 链接器和 Windows SDK。Rust 库使用静态 C 运行库。
 
 ```powershell
-& '.\build\Build-TargetOptions.ps1' -ProjectileR29 -CargoPath '<cargo>/cargo.exe' -DotnetPath '<SDK>/dotnet.exe' -GameManagedDirectory '<game>/How to Fish_Data/Managed' -DnlibPath '<dnlib>/dnlib.dll' -ParentRuntimePath '<r28b>/HowToFishTrainer.Runtime.dll' -OutputDirectory 'build/staging/projectile-r29'
+& '.\build\Build-TargetOptions.ps1' -RustKernels -CargoPath '<cargo>/cargo.exe' -DotnetPath '<SDK>/dotnet.exe' -GameManagedDirectory '<game>/How to Fish_Data/Managed' -DnlibPath '<dnlib>/dnlib.dll' -ParentRuntimePath '<r29>/HowToFishTrainer.Runtime.dll'
 & '.\build\Build-Release.ps1' -PackageMode SingleFile -DotnetPath '<SDK>/dotnet.exe' -PackageCache '<NuGet cache>' -OutputDirectory '<candidate-default>'
 & '.\build\Build-Release.ps1' -PackageMode CompressedSingleFile -DotnetPath '<SDK>/dotnet.exe' -PackageCache '<NuGet cache>' -OutputDirectory '<candidate-compressed>'
 ```
 
-补丁程序校验父 Runtime 与游戏程序集哈希，只允许列出的旧方法变化。原生声明和委托的元数据也随补丁保留。Rust DLL 嵌入桌面程序；首次手动应用 Rust 方式时，按文件内容哈希写入当前用户临时目录，再从绝对路径加载。两种单文件包都核对 Runtime、Harmony 和 Rust 的实际嵌入字节。
+构建校验 r29 Runtime 与游戏程序集的哈希。审计逐一比较旧方法，并核对原生函数声明。Runtime 和 Rust 库都构建成功后，再复制到桌面项目供打包。重建历史 r29 时，从 r29 的合并源码运行 `-ProjectileR29`。
 
-定向离线核验执行实际候选方法的模拟场景，并比较最终 Runtime 内的 C# 计算方法与真实 Rust DLL。`--app` 应指向本次成品提取的桌面 DLL，不能指向历史构建：
+离线核验用模拟场景复查弹丸逻辑，并比较候选 Runtime 的 C# 计算与真实 Rust DLL。`--app` 指向从本次成品提取的桌面 DLL。
 
 ```powershell
-python '.\build\Verify-ProjectileR29.py' --dotnet '<SDK>/dotnet.exe' --game '<game>/How to Fish_Data/Managed/Assembly-CSharp.dll' --app '<extracted-package>/HowToFishTrainer.dll'
+python '.\build\Verify-ProjectileR29.py' --dotnet '<SDK>/dotnet.exe' --game '<game>/How to Fish_Data/Managed/Assembly-CSharp.dll' --app '<extracted-package>/HowToFishTrainer.dll' --output 'build/staging/rust-kernels/verification' --dnlib 'build/staging/rust-kernels/dnlib.dll'
 ```
 
-The r29 path requires the verified r28b parent, builds the dependency-free x64 Rust library with static CRT, and audits the incremental managed patch. The focused checks run fake-engine projectile scenarios and actual patched managed/native geometry, without starting or attaching to a game.
+The Rust comparison build patches the verified r29 Runtime and builds the x64 Rust library with the static CRT. The audit checks existing methods and native declarations before packaging. Use the merged r29 source and `-ProjectileR29` to reproduce the historical r29 build. The offline checks exercise simulated projectile behavior and the candidate's C# and Rust kernels.
 
 ## 工程 | Project
 
@@ -64,7 +64,7 @@ The default mode creates a Windows x64 self-contained single file and does not r
 
 ## r24 以已交付的 r23 为父版本 | Patch the shipped r23 runtime
 
-重建历史 r24 时请使用 r24 对应的 Git 提交。当前分支构建 r28 的命令见本页开头。
+重建历史 r24 时请使用 r24 对应的 Git 提交。当前分支的构建命令见本页开头。
 
 补丁输入为 r23 默认版内嵌运行时、对应的游戏 Managed 程序集、Harmony 及 dnlib。先生成并验证运行时，再用上面的发布入口分别打包。两种 EXE 都需要解包核验。
 
@@ -110,6 +110,6 @@ The standalone journal project is `source/AnglerCompanion/AnglerCompanion.csproj
 ## 历史 r23 构建证据附录 | r23 build evidence appendix
 
 - 父 Runtime / Required parent Runtime: r22b, SHA-256 `b5bf1fb7fa166ec4c500d03231594862af4784d01805497446d425f99206f210`.
-- 当前 Runtime 审计 / Current Runtime audit: `build/staging/entity-overlay/runtime-audit.json`.
+- r23 Runtime 审计 / r23 Runtime audit: `build/staging/entity-overlay/runtime-audit.json`.
 - 离线检查及完整哈希 / Offline checks and complete hashes: see the r23 appendix in [VERIFICATION.md](VERIFICATION.md).
 - 两种包的逐文件比对 / Final-package comparison: `build/package-audit-r23/package-payload-equivalence.json`.
