@@ -1,3 +1,4 @@
+#nullable enable annotations
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -37,6 +38,14 @@ public sealed class FishingViewModel : INotifyPropertyChanged, IDisposable
     private int _backupContext;
     private readonly HashSet<int> _discovered = new();
     private readonly List<FishingSpecies> _catalog = FishingCatalog.All.ToList();
+    private readonly Dictionary<Guid, int[]> _searchBySession = new();
+    private int[]? _searchAll;
+    private string?[]? _searchText;
+    private (long[] Times, byte[] Sessions, int[] Order)? _nativeSearch;
+    private CompareInfo? _statisticsCulture, _displayCulture;
+    private Dictionary<string, (int Count, double? BestKg)> _speciesTotals = new();
+    private readonly Dictionary<Guid, int> _weightRecords = new();
+    private int _totalLogged;
     public event PropertyChangedEventHandler? PropertyChanged;
     public ObservableCollection<FishingSession> Sessions { get; } = new();
     public ObservableCollection<FishingCatch> Catches { get; } = new();
@@ -70,8 +79,24 @@ public sealed class FishingViewModel : INotifyPropertyChanged, IDisposable
     public string Note { get => _note; set => Set(ref _note, value ?? ""); }
     public string CatchTime { get => _catchTime; set => Set(ref _catchTime, value ?? ""); }
     public string SessionName { get => _sessionName; set => Set(ref _sessionName, value ?? ""); }
-    public string Query { get => _query; set { if (Set(ref _query, value ?? "")) RefreshRows(); } }
-    public FishingSession? SelectedSession { get => _selectedSession; set { if (Set(ref _selectedSession, value)) RefreshRows(); } }
+    public string Query
+    {
+        get => _query;
+        set
+        {
+            if (!Set(ref _query, value ?? "")) return;
+            RefreshViews(catches: true, codex: true);
+        }
+    }
+    public FishingSession? SelectedSession
+    {
+        get => _selectedSession;
+        set
+        {
+            if (!Set(ref _selectedSession, value)) return;
+            if (!RefreshViews(catches: true, codex: false)) RefreshSummary();
+        }
+    }
     public FishingCatch? SelectedCatch { get => _selectedCatch; set => Set(ref _selectedCatch, value); }
     public SaveBackupEntry? SelectedBackup { get => _selectedBackup; set => Set(ref _selectedBackup, value); }
     public string SaveRoot
@@ -90,7 +115,7 @@ public sealed class FishingViewModel : INotifyPropertyChanged, IDisposable
         set
         {
             if (Busy || value == _data.Account) return;
-            if (Change(d => d.Account = value ?? "")) { Changed(); _discovered.Clear(); RefreshRows(); _lastCodexRead = DateTimeOffset.MinValue; }
+            if (Change(d => d.Account = value ?? "")) { Changed(); _discovered.Clear(); RefreshCodex(); _lastCodexRead = DateTimeOffset.MinValue; }
         }
     }
     public bool AutoBackup
@@ -161,7 +186,8 @@ public sealed class FishingViewModel : INotifyPropertyChanged, IDisposable
     {
         var entries = species.Where(s => s.Id >= 0 && !string.IsNullOrWhiteSpace(s.Name)).DistinctBy(s => s.Id).ToArray();
         if (entries.Length == 0) return;
-        _catalog.Clear(); _catalog.AddRange(entries); Changed(nameof(SpeciesNames)); RefreshRows();
+        _catalog.Clear(); _catalog.AddRange(entries); Changed(nameof(SpeciesNames));
+        RefreshCodex(); RefreshPersonalStats();
     }
     public void BeginSession()
     {
@@ -211,26 +237,85 @@ public sealed class FishingViewModel : INotifyPropertyChanged, IDisposable
         if (active == null) { BeginSession(); active = _data.Sessions.SingleOrDefault(s => s.Ended == null); if (active == null) return; }
         var entry = new FishingCatch(Guid.NewGuid(), active.Id, new DateTimeOffset(dt), name, (int)CountInput.Value, kg, Place.Trim(), Equipment.Trim(), Note.Trim());
         if (Change(d => { d.Catches.Add(entry); d.LastSpecies = name; d.LastCount = entry.Count; d.LastWeightKg = kg; d.LastPlace = entry.Place; d.LastEquipment = entry.Equipment; }))
-        { RefreshAll(active.Id); CatchTime = DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture); Status = $"已补记 {name} ×{entry.Count}；同批数量的重量按每条填写"; }
+        { RefreshCatchHistory(active.Id); CatchTime = DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture); Status = $"已补记 {name} ×{entry.Count}；同批数量的重量按每条填写"; }
     }
     public void DeleteSelectedCatch()
     {
         if (!CanEdit || SelectedCatch == null) return;
         Guid id = SelectedCatch.Id;
-        if (Change(d => d.Catches.RemoveAll(c => c.Id == id))) { RefreshAll(); Status = "已删除选中的日志记录"; }
+        if (Change(d => d.Catches.RemoveAll(c => c.Id == id))) { RefreshCatchHistory(); Status = "已删除选中的日志记录"; }
+    }
+    private void RefreshCatchHistory(Guid? selected = null)
+    {
+        _searchBySession.Clear(); _searchAll = null; _searchText = null; _nativeSearch = null;
+        _statisticsCulture = null;
+        RefreshAll(selected);
     }
     private void RefreshAll(Guid? selected = null)
     {
         Guid? id = selected ?? SelectedSession?.Id;
         Sessions.Clear(); foreach (var s in _data.Sessions.OrderByDescending(s => s.Started)) Sessions.Add(s);
         _selectedSession = Sessions.FirstOrDefault(s => s.Id == id) ?? Sessions.FirstOrDefault(s => s.Ended == null) ?? Sessions.FirstOrDefault();
-        Changed(nameof(SelectedSession)); Changed(nameof(SpeciesNames)); Changed(nameof(ActiveSessionText)); RefreshRows();
+        Changed(nameof(SelectedSession)); Changed(nameof(SpeciesNames)); Changed(nameof(ActiveSessionText));
+        if (!RefreshViews(catches: true, codex: true))
+        {
+            RefreshSummary();
+            RefreshPersonalStats();
+        }
     }
-    private void RefreshRows()
+    private int[] BuildSearchRows(Guid? session)
     {
-        var id = SelectedSession?.Id; var query = Query.Trim();
-        // Build all-time species totals once; both the codex and global summary use them.
-        var totals = new Dictionary<string, (int Count, double? BestKg)>(StringComparer.CurrentCultureIgnoreCase);
+        var entries = _data.Catches;
+        if (entries.Count != 0 && FishingNative.Enabled)
+        {
+            if (!_nativeSearch.HasValue)
+            {
+                var times = new long[entries.Count];
+                var sessions = new byte[entries.Count * 16];
+                for (int i = 0; i < entries.Count; i++)
+                {
+                    times[i] = entries[i].At.UtcTicks;
+                    entries[i].SessionId.TryWriteBytes(sessions.AsSpan(i * 16, 16));
+                }
+                _nativeSearch = (times, sessions, new int[entries.Count]);
+            }
+            var (utcTicks, sessionIds, order) = _nativeSearch.Value;
+            if (FishingNative.TryOrderRows(utcTicks, sessionIds, entries.Count, session?.ToByteArray(), order, out int count))
+                return order.AsSpan(0, count).ToArray();
+        }
+        return entries.Select((entry, index) => (Entry: entry, Index: index))
+            .Where(row => !session.HasValue || row.Entry.SessionId == session.Value)
+            .OrderByDescending(row => row.Entry.At).Select(row => row.Index).ToArray();
+    }
+    private void RefreshCatchRows()
+    {
+        var query = Query.Trim();
+        int[] rows;
+        if (SelectedSession is FishingSession session)
+        {
+            if (!_searchBySession.TryGetValue(session.Id, out rows!))
+                _searchBySession[session.Id] = rows = BuildSearchRows(session.Id);
+        }
+        else rows = _searchAll ??= BuildSearchRows(null);
+
+        Catches.Clear();
+        var entries = _data.Catches;
+        var text = query.Length == 0 ? null : (_searchText ??= new string?[entries.Count]);
+        foreach (int index in rows)
+        {
+            var entry = entries[index];
+            if (text == null || (text[index] ??= entry.Species + entry.Place + entry.Equipment + entry.Note)
+                .Contains(query, StringComparison.CurrentCultureIgnoreCase)) Catches.Add(entry);
+        }
+        SelectedCatch = null;
+    }
+    private bool PrepareStatistics()
+    {
+        var culture = CultureInfo.CurrentCulture.CompareInfo;
+        if (ReferenceEquals(_statisticsCulture, culture)) return false;
+
+        var comparer = StringComparer.CurrentCultureIgnoreCase;
+        var totals = new Dictionary<string, (int Count, double? BestKg)>(comparer);
         int totalLogged = 0;
         foreach (var entry in _data.Catches)
         {
@@ -240,27 +325,65 @@ public sealed class FishingViewModel : INotifyPropertyChanged, IDisposable
             totals[entry.Species] = (prior.Count + entry.Count, best);
             totalLogged += entry.Count;
         }
-        Catches.Clear();
-        foreach (var c in _data.Catches.Where(c => (id == null || c.SessionId == id) && (query.Length == 0 || (c.Species + c.Place + c.Equipment + c.Note).Contains(query, StringComparison.CurrentCultureIgnoreCase))).OrderByDescending(c => c.At)) Catches.Add(c);
-        SelectedCatch = null;
+        _weightRecords.Clear();
+        var bestBySpecies = new Dictionary<string, double>(comparer);
+        foreach (var c in _data.Catches.OrderBy(c => c.At))
+            if (c.WeightKg is double weight && (!bestBySpecies.TryGetValue(c.Species, out var previous) || weight > previous))
+            {
+                bestBySpecies[c.Species] = weight;
+                _weightRecords[c.SessionId] = _weightRecords.GetValueOrDefault(c.SessionId) + 1;
+            }
+        _speciesTotals = totals; _totalLogged = totalLogged; _statisticsCulture = culture;
+        return true;
+    }
+    private bool RefreshViews(bool catches, bool codex)
+    {
+        var culture = CultureInfo.CurrentCulture.CompareInfo;
+        bool statisticsChanged = PrepareStatistics();
+        bool refreshStatistics = statisticsChanged || !ReferenceEquals(_displayCulture, culture);
+        if (catches || refreshStatistics) RefreshCatchRows();
+        if (codex || refreshStatistics) RefreshCodexRows();
+        if (refreshStatistics)
+        {
+            RefreshSummary();
+            RefreshPersonalStats();
+            _displayCulture = culture;
+        }
+        return refreshStatistics;
+    }
+    private void RefreshCodex() => RefreshViews(catches: false, codex: true);
+    private void RefreshCodexRows()
+    {
+        var query = Query.Trim();
         Codex.Clear();
         foreach (var s in _catalog.Where(s => query.Length == 0 || s.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase)))
         {
-            totals.TryGetValue(s.Name, out var total);
+            _speciesTotals.TryGetValue(s.Name, out var total);
             Codex.Add(new(s.Id, s.Name, _discovered.Contains(s.Id), total.Count, total.BestKg));
         }
-        Summary = BuildSummary(); PersonalStats = $"日志共 {totalLogged} 条鱼 · {totals.Count} 种 · {_data.Sessions.Count} 局\n图鉴目录 {_catalog.Count} 种；发现状态来源于所选账号的磁盘存档，不能当作钓获数量。";
-        Changed(nameof(Summary)); Changed(nameof(PersonalStats));
+    }
+    private void RefreshPersonalStats()
+    {
+        string stats = $"日志共 {_totalLogged} 条鱼 · {_speciesTotals.Count} 种 · {_data.Sessions.Count} 局\n图鉴目录 {_catalog.Count} 种；发现状态来源于所选账号的磁盘存档，不能当作钓获数量。";
+        if (PersonalStats == stats) return;
+        PersonalStats = stats;
+        Changed(nameof(PersonalStats));
+    }
+    private void RefreshSummary()
+    {
+        string summary = BuildSummary();
+        if (summary == Summary) return;
+        Summary = summary;
+        Changed(nameof(Summary));
     }
     public string BuildSummary()
     {
+        PrepareStatistics();
         var session = SelectedSession; if (session == null) return "暂无场次，请先开始一局或记录鱼获。";
         var fish = _data.Catches.Where(c => c.SessionId == session.Id).ToArray();
         var known = fish.Where(c => c.WeightKg != null).ToArray();
         var biggest = known.OrderByDescending(c => c.WeightKg).FirstOrDefault();
-        int records = 0; var best = new Dictionary<string, double>(StringComparer.CurrentCultureIgnoreCase);
-        foreach (var c in _data.Catches.OrderBy(c => c.At)) if (c.WeightKg is double w)
-        { if ((!best.TryGetValue(c.Species, out var previous) || w > previous) && c.SessionId == session.Id) records++; best[c.Species] = Math.Max(w, best.GetValueOrDefault(c.Species)); }
+        int records = _weightRecords.GetValueOrDefault(session.Id);
         var pending = _pendingSessionEnd?.Id == session.Id ? _pendingSessionEnd : null;
         var end = pending?.Ended ?? session.Ended ?? DateTimeOffset.UtcNow;
         return $"{session.Name}\n{session.Started.LocalDateTime:yyyy-MM-dd HH:mm} — {(pending != null ? "结束待保存" : session.Ended == null ? "进行中" : end.LocalDateTime.ToString("MM-dd HH:mm"))}\n\n" +
@@ -287,7 +410,7 @@ public sealed class FishingViewModel : INotifyPropertyChanged, IDisposable
         _discovered.Clear(); Accounts.Clear();
         try
         {
-            if (!Directory.Exists(SaveRoot)) { CodexStatus = "未找到存档目录，可在存档备份页选择"; RefreshRows(); return; }
+            if (!Directory.Exists(SaveRoot)) { CodexStatus = "未找到存档目录，可在存档备份页选择"; RefreshCodex(); return; }
             SaveBackupService.NoLinks(SaveRoot);
             if (File.Exists(Path.Combine(SaveRoot, "local.txt"))) Accounts.Add("旧版目录");
             foreach (var dir in Directory.GetDirectories(SaveRoot).Where(d => Path.GetFileName(d).All(char.IsAsciiDigit))) { SaveBackupService.NoLinks(dir); Accounts.Add(Path.GetFileName(dir)); }
@@ -295,7 +418,7 @@ public sealed class FishingViewModel : INotifyPropertyChanged, IDisposable
             CodexStatus = Accounts.Count > 1 && !Accounts.Contains(Account) ? "请选择要读取图鉴的账号" : "点击刷新，从磁盘读取图鉴";
         }
         catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException) { CodexStatus = "无法读取账号目录 · " + e.Message; }
-        RefreshRows();
+        RefreshCodex();
     }
     public async Task ReadCodexAsync()
     {
@@ -323,10 +446,10 @@ public sealed class FishingViewModel : INotifyPropertyChanged, IDisposable
                 return entries.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.Object && e.TryGetProperty("ID", out var id) && id.ValueKind == JsonValueKind.Number && id.TryGetInt32(out _)).Select(e => e.GetProperty("ID").GetInt32()).ToHashSet();
             });
             if (_disposed || root != SaveRoot || account != Account) return;
-            _discovered.Clear(); _discovered.UnionWith(ids); RefreshRows();
+            _discovered.Clear(); _discovered.UnionWith(ids); RefreshCodex();
             CodexStatus = $"已读取磁盘图鉴 · 当前目录匹配 {_catalog.Count(s => ids.Contains(s.Id))}/{_catalog.Count} 种 · {DateTime.Now:HH:mm:ss}";
         }
-        catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or ArgumentException) { _discovered.Clear(); RefreshRows(); CodexStatus = "本次图鉴读取失败 · " + e.Message; }
+        catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or ArgumentException) { _discovered.Clear(); RefreshCodex(); CodexStatus = "本次图鉴读取失败 · " + e.Message; }
         finally { Busy = false; }
     }
     public async Task CreateBackupAsync(string reason = "手动备份")
@@ -376,7 +499,7 @@ public sealed class FishingViewModel : INotifyPropertyChanged, IDisposable
             {
                 var ended = now < active.LastActive ? active.LastActive : now;
                 _pendingSessionEnd = active with { LastActive = ended, Ended = ended, EndReason = "游戏退出" };
-                Changed(nameof(ActiveSessionText)); Summary = BuildSummary(); Changed(nameof(Summary));
+                Changed(nameof(ActiveSessionText)); RefreshSummary();
             }
             _gameWasRunning = running;
             bool sessionRecording = SavePendingSessionEnd();
@@ -384,7 +507,7 @@ public sealed class FishingViewModel : INotifyPropertyChanged, IDisposable
             if (sessionRecording && active != null && now - active.LastActive >= TimeSpan.FromSeconds(30))
             {
                 Change(d => d.Sessions[d.Sessions.FindIndex(s => s.Id == active.Id)] = active with { LastActive = now });
-                Changed(nameof(ActiveSessionText)); Summary = BuildSummary(); Changed(nameof(Summary));
+                Changed(nameof(ActiveSessionText)); RefreshSummary();
             }
             if (now - _lastCodexRead >= TimeSpan.FromSeconds(30)) { _lastCodexRead = now; await ReadCodexAsync(); }
             if (!_disposed && AutoBackup && Writable && now - _lastAutoAttempt >= TimeSpan.FromMinutes(10))

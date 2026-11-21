@@ -151,7 +151,9 @@ static class OverlayVerification
         Select(vm, "钓鱼");
         var initialPage = vm.SelectedPage;
         foreach (var (query, id) in new[] { ("锁血", "player.health.lock"), ("陀螺 转速", "player.spin.lock"),
-            ("武器战斗 自瞄", "combat.aim_assist"), ("红框", "view.entity_overlay.configure") })
+            ("武器战斗 自瞄", "combat.aim_assist"), ("红框", "view.entity_overlay.configure"),
+            ("rust", "view.entity_overlay.configure"), ("投影", "view.entity_overlay.configure"),
+            ("Rust 三维投影", "view.entity_overlay.configure"), ("Rust 辅助瞄准筛选与排序", "view.entity_overlay.configure") })
         {
             vm.FeatureQuery = query;
             vm.SelectedSearchHit = vm.SearchResults.Single(h => h.Id == id);
