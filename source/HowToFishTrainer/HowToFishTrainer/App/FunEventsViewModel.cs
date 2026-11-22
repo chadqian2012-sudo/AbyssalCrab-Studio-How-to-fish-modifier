@@ -241,7 +241,7 @@ public sealed class FunEventsViewModel : INotifyPropertyChanged
 
 	private async Task<bool> ExecuteAsync(FunEventCardViewModel card)
 	{
-		if(card.HasAnimalCount && card.CountInput.HasError){CurrentWaveStatus=card.CountInput.Error;return false;}
+		if(card.HasEditableCount && card.CountInput.HasError){CurrentWaveStatus=card.CountInput.Error;return false;}
 		int requestedCount=card.RequestedCount;
 		IGameRuntimeClient runtime = _runtime;
 		int epoch = Volatile.Read(in _connectionEpoch);
@@ -260,7 +260,7 @@ public sealed class FunEventsViewModel : INotifyPropertyChanged
 		{
 			try
 			{
-				object arguments=card.HasAnimalCount ? new { eventId=card.Id, count=requestedCount } : (object)new { eventId=card.Id };
+				object arguments=card.HasEditableCount ? new { eventId=card.Id, count=requestedCount } : (object)new { eventId=card.Id };
 				RuntimeCommandResult runtimeCommandResult = await runtime.ExecuteAsync(Command("fun.event.execute", arguments), CancellationToken.None);
 				if (epoch != Volatile.Read(in _connectionEpoch) || runtime != _runtime)
 				{
@@ -271,13 +271,18 @@ public sealed class FunEventsViewModel : INotifyPropertyChanged
 				JsonElement? applied = runtimeCommandResult.Applied;
 				if (applied.HasValue)
 				{
-					JsonElement valueOrDefault = applied.GetValueOrDefault();
-					ApplyStatus(valueOrDefault);
-                    if(succeeded)SessionSpawnedCount+=Int(valueOrDefault,"registered",0);
-					if(succeeded && card.HasAnimalCount && Int(valueOrDefault,"registered",-1)!=requestedCount)
-					{succeeded=false;CurrentWaveStatus=$"数量核验失败：请求 {requestedCount}，运行时返回 {Int(valueOrDefault,"registered",0)}；请使用配套的新运行时。";}
+					ApplyStatus(applied.Value);
 				}
-				else if(succeeded && card.HasAnimalCount){succeeded=false;CurrentWaveStatus="运行时未返回数量回执，无法确认本波生成结果。";}
+				if (succeeded)
+				{
+					string? error = FeatureItemViewModel.CheckSpawnCount(applied, requestedCount, out int registered);
+					if (registered > 0) SessionSpawnedCount += registered;
+					if (error != null)
+					{
+						CurrentWaveStatus = error;
+						return false;
+					}
+				}
 				return succeeded;
 			}
 			catch (Exception ex)
@@ -387,7 +392,7 @@ public sealed class FunEventsViewModel : INotifyPropertyChanged
 
 	private static int Int(JsonElement value, string name, int fallback)
 	{
-		if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty(name, out var value2) || !value2.TryGetInt32(out var value3))
+		if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty(name, out var value2) || value2.ValueKind != JsonValueKind.Number || !value2.TryGetInt32(out var value3))
 		{
 			return fallback;
 		}

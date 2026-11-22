@@ -66,11 +66,11 @@ Startup shows the window and a notification-area icon. Closing the window keeps 
 
 按住键盘右侧 Ctrl 隐藏红框、骨骼、连线和角标，松开恢复。魔弹范围圈和原有瞄准功能继续工作。游戏需要在前台且能接收键盘输入。
 
-在「趣味小功能」使用海鸥迁徙的数量（1–50 只），手持要测试的枪，关闭自动补群，点击「开始本轮」。单人或房主世界确认整波海鸥已登记后开始计时，最多 60 秒。比较首中用时、有效枪击次数和击落数。命中以本机所选枪械造成的实际扣血为准，同一发散弹可能有多次有效命中。队友击落或飞靶离场不会给你加分。可以手动结束，再换枪开始新一轮。
+在「趣味小功能」使用海鸥迁徙的数量（1–150 只），手持要测试的枪，关闭自动补群，点击「开始本轮」。单人或房主世界确认整波海鸥已登记后开始计时，最多 60 秒。比较首中用时、有效枪击次数和击落数。命中以本机所选枪械造成的实际扣血为准，同一发散弹可能有多次有效命中。队友击落或飞靶离场不会给你加分。可以手动结束，再换枪开始新一轮。
 
 Aim assist marks its current ADS lock with gold corners. Magic bullets briefly mark an actual launch correction or guidance update from the latest volley. Hold **right Ctrl** in game to hide entity marks; releasing it restores them. The tracking circle and combat controls keep working.
 
-For a timed target challenge, enter a solo or host world, equip a gun, turn off automatic replenishment and choose 1–50 migration gulls in Fun Events. The 60-second clock starts after the game registers the wave. Compare time to first confirmed hit, damaging hits and kills from that gun. Shotgun pellets can cause separate damage events. Misses and shot accuracy are not estimated.
+For a timed target challenge, enter a solo or host world, equip a gun, turn off automatic replenishment and choose 1–150 migration gulls in Fun Events. The 60-second clock starts after the game registers the wave. Compare time to first confirmed hit, damaging hits and kills from that gun. Shotgun pellets can cause separate damage events. Misses and shot accuracy are not estimated.
 
 ## r23 实体标注共享显示参数，攻击筛选保持独立 | Entity overlay shares display settings
 
@@ -174,15 +174,21 @@ Teleport points support groups, notes, favorites, colors, icons, and JSON import
 
 Imports merge points: an existing group/name retains its saved coordinates, and only new points are appended. Importing duplicates does not clear the current selection, rebuild existing shortcut objects or discard unfinished coordinate drafts.
 
+## 每波趣味事件最多 150 个，常规生成最多 100 个 | Spawn quantities
+
+在「趣味小功能」的事件卡上填入每波数量。四种物品事件和九种动物事件接受 1–150 的整数。常规物品、活鱼和死鱼接受 1–100 的整数，Boss 一次一只。编辑数量后，点击生成才会执行。满批会逐个生成，请等本批结果再操作。
+
+In Fun Events, choose 1–150 items or animals per wave. Regular generators accept 1–100 items or fish per batch. Boss spawns are limited to one. Enter a whole number and press the generate button. Large batches spawn over time.
+
 ## 角色手感和趣味事件 | Player Feel and Fun Events
 
 移动、冲刺、跳跃和抛竿参数在对应分类顶部的角色手感面板调整。滑块与数字框共用同一参数；输入校验通过后，点击应用才写入。
 
 Movement, sprint, jump, and cast parameters are adjusted in the player-feel panels at the top of their categories. The slider and numeric input share one parameter. A valid value is applied only after clicking **Apply**.
 
-大陀螺转速范围为每秒 2–15 圈。曲线可选固定、10 秒缓慢加速或 4 秒周期脉冲；大陀螺仍需手动开启。海鸥自动补充默认关闭；波数上限为 1–20（默认 3），每波 8 只，并设有冷却和并发限制。出错、清理、断线、世界或预设切换、紧急停用时会停止补充。
+大陀螺转速范围为每秒 2–15 圈。曲线可选固定、10 秒缓慢加速或 4 秒周期脉冲；大陀螺仍需手动开启。海鸥自动补充默认关闭；波数上限为 1–20（默认 3），每波沿用「海鸥迁徙」的数量，默认 8 只，并设有冷却和并发限制。出错、清理、断线、世界或预设切换、紧急停用时会停止补充。
 
-Gyroscope speed ranges from 2 to 15 revolutions per second. Curves include fixed speed, a 10-second gradual ramp, and a 4-second pulse cycle; the gyroscope still requires manual activation. Seagull replenishment is off by default; its wave limit is 1–20 (default 3), with 8 birds per wave, cooldown, and request exclusion. Errors, cleanup, disconnection, world or preset changes, and emergency shutdown stop replenishment.
+Gyroscope speed ranges from 2 to 15 revolutions per second. Curves include fixed speed, a 10-second gradual ramp, and a 4-second pulse cycle; the gyroscope still requires manual activation. Seagull replenishment is off by default; its wave limit is 1–20 (default 3), with the migration count (8 birds by default), a cooldown, and one request at a time. Errors, cleanup, disconnection, world or preset changes, and emergency shutdown stop replenishment.
 
 ## 战斗与辅助瞄准 | Combat and Aim Assist
 

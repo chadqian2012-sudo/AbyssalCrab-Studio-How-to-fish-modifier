@@ -120,7 +120,12 @@ public sealed partial class MainViewModel
         Add("journal.backups", "存档备份与恢复", "解锁中心", "管理存档备份。", "还原存档 回档");
         foreach (var definition in FunEventDefinitions.All)
             Add("fun.event." + definition.Id, definition.Title, "趣味小功能", definition.Description,
-                definition.HasAnimalCount ? "生成动物 数量" : "");
+                definition.Id switch
+                {
+                    "weapon-rain" or "rod-forest" or "frisbee-storm" or "junk-bundle" => "生成物品 数量",
+                    "boss-surprise" => "",
+                    _ => "生成动物 数量"
+                });
         return entries.ToArray();
     }
 

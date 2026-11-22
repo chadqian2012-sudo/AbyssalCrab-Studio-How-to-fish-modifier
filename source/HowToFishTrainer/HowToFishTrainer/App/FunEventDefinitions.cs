@@ -4,8 +4,7 @@ namespace HowToFishTrainer.App;
 
 public static class FunEventDefinitions
 {
-	public const int MaxWaveEntities = 10;
-	public const int MaxAnimalWaveEntities = 50;
+	public const int MaxWaveEntities = 150;
 
 	public const int MinimumSpawnGapMilliseconds = 120;
 

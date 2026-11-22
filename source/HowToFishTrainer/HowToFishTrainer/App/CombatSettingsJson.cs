@@ -15,7 +15,7 @@ public sealed class AnimalCountSettingsConverter : JsonConverter<AnimalCountSett
         using var doc=JsonDocument.ParseValue(ref reader);var result=new AnimalCountSettings();
         if(doc.RootElement.ValueKind==JsonValueKind.Object)
             foreach(var p in doc.RootElement.EnumerateObject())
-                if(p.Value.ValueKind==JsonValueKind.Number&&p.Value.TryGetInt32(out int count)&&count>=1&&count<=50&&FunEventDefinitions.All.Any(d=>d.HasAnimalCount&&d.Id==p.Name))result[p.Name]=count;
+                if(p.Value.ValueKind==JsonValueKind.Number&&p.Value.TryGetInt32(out int count)&&count>=1&&count<=FunEventDefinitions.MaxWaveEntities&&FunEventDefinitions.All.Any(d=>d.HasEditableCount&&d.Id==p.Name))result[p.Name]=count;
         return result;
     }
     public override void Write(Utf8JsonWriter writer,AnimalCountSettings value,JsonSerializerOptions options)
