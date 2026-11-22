@@ -25,6 +25,11 @@ internal static class PatchTargetOptions
     }
     public static void Main(string[] args)
     {
+        if (args[0] == "--spawn-quantities")
+        {
+            PatchSpawnQuantities(args[1]);
+            return;
+        }
         if (args[0] == "--rust-kernels")
         {
             PatchRustKernels(args[1..]);
@@ -122,6 +127,90 @@ internal static class PatchTargetOptions
             retainedMethods = before.Count - changed.Count, changedMethods = changed, addedMethods, noHelperDependency = true, gameInjected = false, gameAssetsWritten = false };
         File.WriteAllText(Path.Combine(Path.GetDirectoryName(output)!, "runtime-audit.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine($"Combat challenge audited: {changed.Count} changed, {before.Count - changed.Count} retained, {addedMethods.Length} new methods; {Hash(output)}");
+    }
+
+    static void PatchSpawnQuantities(string stage)
+    {
+        string helper = Path.Combine(stage, "SpawnQuantities.dll");
+        object WriteAndVerify(ModuleDefMD module, string kind, string parent, Dictionary<string,string> original,
+            params MethodDef[] modified)
+        {
+            string output = Path.Combine(stage, $"candidate-{kind}.dll");
+            var identity = SHA256.HashData(File.ReadAllBytes(parent).Concat(File.ReadAllBytes(helper))
+                .Concat(File.ReadAllBytes(typeof(PatchTargetOptions).Assembly.Location)).ToArray());
+            if (kind == "runtime") module.Assembly.Name = "HowToFishTrainer.Runtime.SpawnQuantities." + Convert.ToHexString(identity)[..16];
+            module.Mvid = new Guid(identity.AsSpan(0, 16));
+            module.Write(output);
+            using var verify = ModuleDefMD.Load(output);
+            var after = verify.GetTypes().SelectMany(t => t.Methods).ToDictionary(m => m.FullName, Body);
+            var changed = original.Keys.Where(k => original[k] != after[k]).ToArray();
+            if (!changed.ToHashSet().SetEquals(modified.Select(m => m.FullName)))
+                throw new InvalidDataException($"Unexpected {kind} changes: " + string.Join(", ", changed));
+            var added = after.Keys.Except(original.Keys).ToArray();
+            var expectedAdded = kind == "core" ? Array.Empty<string>() : new[] {"CheckedCount", "ValidateGeneratorQuantity"};
+            if (!verify.GetTypes().SelectMany(t => t.Methods).Where(m => added.Contains(m.FullName))
+                .Select(m => m.Name.String).OrderBy(n => n).SequenceEqual(expectedAdded))
+                throw new InvalidDataException($"Unexpected {kind} additions");
+            using var baseline = ModuleDefMD.Load(parent);
+            if (!verify.GetAssemblyRefs().Select(r => r.FullName).ToHashSet().SetEquals(baseline.GetAssemblyRefs().Select(r => r.FullName)))
+                throw new InvalidDataException($"Changed {kind} assembly dependencies");
+            return new { sha256 = Hash(output), parent = Hash(parent), retained = original.Count - changed.Length, changed, added };
+        }
+        string corePath = Path.Combine(stage, "r31-core.dll"), runtimePath = Path.Combine(stage, "r31-runtime.dll");
+        if (Hash(corePath) != "6aa9e2c1778c37b02cd72ebc7e1b8c80bc8be6e0b9c08739b7fd2af3e314aee7" ||
+            Hash(runtimePath) != "8c582a20044a1c132d6df54a49082fd74e883f253cc3a7890b21617a0e2caaa1")
+            throw new InvalidDataException("The r31 Core and Runtime are required");
+        using var core = ModuleDefMD.Load(corePath);
+        var previousCore = core.GetTypes().SelectMany(t => t.Methods).ToDictionary(m => m.FullName, Body);
+        var validate = core.Find("HowToFishTrainer.Core.FeatureArgumentValidator", false).Methods.Single(m => m.Name == "IsValid");
+        var il = validate.Body.Instructions;
+        int at = il.IndexOf(il.Single(i => Equals(i.Operand, "quantity"))) + 2;
+        while (!(il[at].Operand is IMethod check && check.Name == "TryInteger")) il.RemoveAt(at);
+        il.Insert(at, Instruction.CreateLdcI4(100));
+        var coreReport = WriteAndVerify(core, "core", corePath, previousCore, validate);
+
+        using var runtime = ModuleDefMD.Load(runtimePath);
+        var previousRuntime = runtime.GetTypes().SelectMany(t => t.Methods).ToDictionary(m => m.FullName, Body);
+        var bridge = PatchSpin.Clone(runtime, helper, "AbyssalCrab.Runtime.CombatBridgeRuntime", "TryHandle", "AdjustDefinition");
+        MethodDef B(string name) => bridge.Methods.Single(m => m.Name == name);
+        var host = runtime.Find("HowToFishTrainer.Runtime.TrainerBridgeHost", false);
+        MethodDef H(string name) => host.Methods.Single(m => m.Name == name);
+        var regular = H("ValidateArguments");
+        il = regular.Body.Instructions;
+        at = il.IndexOf(il.First(i => Equals(i.Operand, "quantity")));
+        int end = il.IndexOf(il.Skip(at).First(i => Equals(i.Operand, "distance"))) - 1;
+        // Keep both targetable loads of 'args'. Replace only the quantity clause between them.
+        for (int i = end - 1; i >= at; i--) il.RemoveAt(i);
+        il.Insert(at, Instruction.Create(OpCodes.Call, B("ValidateGeneratorQuantity")));
+
+        var begin = H("BeginFunEvent");
+        var limits = begin.Body.Instructions.Where(i => i.IsLdcI4() && i.GetLdcI4Value() == 50).ToArray();
+        if (limits.Length != 2) throw new InvalidDataException("Expected wave check and limit message");
+        foreach (var limit in limits) { limit.OpCode = OpCodes.Ldc_I4; limit.Operand = 150; }
+
+        var plan = H("BuildFunInstructions");
+        il = plan.Body.Instructions;
+        if (il[0].Operand != B("HasCustomPlan") || il[1].OpCode != OpCodes.Brfalse || il[1].Operand is not Instruction native)
+            throw new InvalidDataException("Unexpected custom wave branch");
+        var id = host.NestedTypes.Single(t => t.Name == "RuntimeFunDefinition").Methods.Single(m => m.Name == "get_Id");
+        il.Insert(2, Instruction.Create(OpCodes.Ldarg_1));
+        il.Insert(3, Instruction.Create(OpCodes.Callvirt, id));
+        il.Insert(4, Instruction.Create(OpCodes.Call, B("Animal")));
+        il.Insert(5, Instruction.Create(OpCodes.Brfalse, native));
+
+        var jobs = H("ProcessGenerationJobs");
+        jobs.Body.SimplifyBranches();
+        il = jobs.Body.Instructions;
+        at = il.IndexOf(il.Single(i => i.Operand is IMethod m && m.Name == "set_Completed")) + 1;
+        var time = H("Tick").Body.Instructions.First(i => i.Operand is IMethod m && m.Name == "get_realtimeSinceStartup").Operand;
+        il.Insert(at++, Instruction.Create(OpCodes.Ldarg_0));
+        il.Insert(at++, Instruction.Create(OpCodes.Call, (IMethod)time));
+        il.Insert(at, Instruction.Create(OpCodes.Stfld, host.Fields.Single(f => f.Name == "_lastCommandAt")));
+        var runtimeReport = WriteAndVerify(runtime, "runtime", runtimePath, previousRuntime,
+            B("TryHandle"), B("AdjustDefinition"), regular, begin, plan, jobs);
+        File.WriteAllText(Path.Combine(stage, "runtime-audit.json"), JsonSerializer.Serialize(
+            new { passed = true, core = coreReport, runtime = runtimeReport, gameStarted = false },
+            new JsonSerializerOptions { WriteIndented = true }));
     }
 
     static void PatchRustKernels(string[] args)

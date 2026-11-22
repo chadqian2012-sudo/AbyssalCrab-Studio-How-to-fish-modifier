@@ -14,6 +14,18 @@ namespace HowToFishTrainer.App;
 
 public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 {
+    internal const int MaxGenerationQuantity = 100;
+
+    internal static string? CheckSpawnCount(JsonElement? applied, int requested, out int registered)
+    {
+        registered = 0;
+        if (applied is not { ValueKind: JsonValueKind.Object } data ||
+            !data.TryGetProperty("registered", out var count) || count.ValueKind != JsonValueKind.Number ||
+            !count.TryGetInt32(out registered) || registered < 0)
+            return $"请求 {requested} 个，游戏未返回有效登记数。";
+        return registered == requested ? null : $"请求 {requested} 个，游戏实际登记 {registered} 个。";
+    }
+
 	private readonly IGameRuntimeClient? _runtime;
 
 	private readonly CapabilitySet? _capabilities;
@@ -667,7 +679,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
         bool integerValue = descriptor.Control == FeatureControl.Generator || descriptor.Id.StartsWith("money.", StringComparison.Ordinal)
             || descriptor.Id == "fun.slot_machine.rarity" || descriptor.Id == "world.island.load";
         ValueInput = new NumericInput(descriptor.Title, _value, descriptor.Minimum, descriptor.Maximum, integerValue);
-        QuantityInput = new NumericInput("数量", 1, 1, descriptor.Id == "generation.fish" ? 5 : 20, true);
+        QuantityInput = new NumericInput("数量", 1, 1, MaxGenerationQuantity, true);
         DistanceInput = new NumericInput("眼前距离（米）", _distance, 1.5, 8);
 		bool flag = RuntimeFeatureSupport.ImplementedIds.Contains(descriptor.Id);
 		IsAvailable = ((runtime != null && (capabilities?.CanExecute(descriptor.RequiredCapability) ?? false)) & flag) && (descriptor.Control != FeatureControl.Generator || Options.Count > 0);
@@ -1007,7 +1019,19 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
 			OperationReceipt operationReceipt = await new FeatureEngine(runtime).ExecuteAsync(new FeatureCommand(Descriptor.Id, arguments, Descriptor.RequiredCapability, SaveAfter && CanRequestNativeSave), capabilities, CancellationToken.None);
 			Status = operationReceipt.Message;
 			IsSuccessful = operationReceipt.Status == ReceiptStatus.Succeeded;
-			if (IsSuccessful && Descriptor.Control == FeatureControl.Generator) { _generated?.Invoke(this,invokedParameters); NotifyCatalogExperience(); }
+			if (IsSuccessful && Descriptor.Control == FeatureControl.Generator)
+			{
+				string? error = CheckSpawnCount(operationReceipt.Applied, arguments.GetProperty("quantity").GetInt32(), out _);
+				if (error != null)
+				{
+					IsSuccessful = false;
+					StateLabel = "未确认生成";
+					Status = error;
+					return;
+				}
+				_generated?.Invoke(this, invokedParameters);
+				NotifyCatalogExperience();
+			}
 			StateLabel = operationReceipt.Status switch
 			{
 				ReceiptStatus.Succeeded => "已完成", 

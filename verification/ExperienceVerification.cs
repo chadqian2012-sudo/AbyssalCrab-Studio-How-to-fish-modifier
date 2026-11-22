@@ -23,6 +23,7 @@ sealed class ExperienceRuntime : IGameRuntimeClient
 {
     public readonly List<FeatureCommand> Commands=new();
     public bool FailClear,FailWave;
+    public int? RegisteredCount;
     public Func<FeatureCommand,Task<RuntimeCommandResult>>? GullCommand;
     public TaskCompletionSource<RuntimeCommandResult>? ClearPending;
     public TaskCompletionSource<RuntimeCommandResult>? SpinPending,GenerationPending;
@@ -38,7 +39,17 @@ sealed class ExperienceRuntime : IGameRuntimeClient
             new{id=5,name="Apple",fish=false,kind="食品"},new{id=21,name="Fish",fish=true,kind="鱼类"}}};
         if(command.FeatureId=="catalog.islands")data=new{islands=new[]{new{index=1,key="island:a",name="A",rawName="A",available=true,runtimeIndex=1,sceneBuildIndex=2}}};
         if(command.FeatureId=="fun.event.catalog")data=new{events=FunEventDefinitions.All.Select(e=>new{id=e.Id,available=true,reason="fixture"}).ToArray(),totalFunEntities=8,currentWaveCount=8};
-        if(command.FeatureId=="fun.event.execute"){ok=!FailWave;data=new{registered=8,totalFunEntities=8};}
+        if(command.FeatureId=="fun.event.execute")
+        {
+            ok=!FailWave;
+            int count=command.Arguments.TryGetProperty("count",out var waveCount)?waveCount.GetInt32():1;
+            data=new{requested=count,registered=RegisteredCount??count,totalFunEntities=count};
+        }
+        if(command.FeatureId is "generation.item" or "generation.fish")
+        {
+            int count=command.Arguments.GetProperty("quantity").GetInt32();
+            data=new{requested=count,completed=count,registered=RegisteredCount??count};
+        }
         if(command.FeatureId=="players.catalog")data=new{players=Array.Empty<object>()};
         if(command.FeatureId=="features.proofs")data=Array.Empty<object>();
         if(command.FeatureId=="casino.status")data=new{available=true,outcomeMode="black",multiplier=2,remainingRounds=0};
@@ -62,36 +73,44 @@ static class ExperienceVerification
     static FeatureItemViewModel Feature(MainViewModel vm,string id){var d=FeatureRegistry.Find(id)!;vm.SelectedPage=vm.Pages.Single(p=>p.Category==MainViewModel.DisplayCategory(d.Id,d.Category));return vm.Features.Single(f=>f.Descriptor.Id==id);}
     static async Task VerifySlowWaveTransport()
     {
-        async Task<bool> ReplyAfterNormalDeadline(string featureId)
+        async Task<int?> ReplyAfterNormalDeadline(string featureId, object arguments, int registered, int delaySeconds)
         {
             string name="AbyssalCrab.Fixture."+Guid.NewGuid().ToString("N");
-            using var limit=new CancellationTokenSource(TimeSpan.FromSeconds(24));
+            using var limit=new CancellationTokenSource(TimeSpan.FromSeconds(delaySeconds + 15));
             using var server=new NamedPipeServerStream(name,PipeDirection.InOut,1,PipeTransmissionMode.Byte,PipeOptions.Asynchronous|PipeOptions.CurrentUserOnly);
             using var client=new NamedPipeClientStream(".",name,PipeDirection.InOut,PipeOptions.Asynchronous);
             await Task.WhenAll(server.WaitForConnectionAsync(limit.Token),client.ConnectAsync(limit.Token));
             // Only the pipe is exercised. No process gateway or game is constructed.
             var bridge=(RuntimeBridgeClient)Activator.CreateInstance(typeof(RuntimeBridgeClient),BindingFlags.Instance|BindingFlags.NonPublic,
                 null,new object?[]{client,null,Array.Empty<byte>()},null)!;
-            var call=bridge.ExecuteAsync(new FeatureCommand(featureId,JsonSerializer.SerializeToElement(new{}),Capability.HostWorld),limit.Token).AsTask();
+            var call=bridge.ExecuteAsync(new FeatureCommand(featureId,JsonSerializer.SerializeToElement(arguments),Capability.HostWorld),limit.Token).AsTask();
             byte[] header=new byte[4];
             await server.ReadExactlyAsync(header,limit.Token);
             var request=new byte[BinaryPrimitives.ReadInt32LittleEndian(header)];
             await server.ReadExactlyAsync(request,limit.Token);
             using var payload=JsonDocument.Parse(request);
-            await Task.Delay(TimeSpan.FromSeconds(14),limit.Token);
+            await Task.Delay(TimeSpan.FromSeconds(delaySeconds),limit.Token);
             if (!call.IsCompleted)
             {
                 var root=payload.RootElement;
-                var response=JsonSerializer.SerializeToUtf8Bytes(new { protocolVersion=1,session=root.GetProperty("session"),correlationId=root.GetProperty("correlationId"),ok=true,message="fixture" });
+                var response=JsonSerializer.SerializeToUtf8Bytes(new { protocolVersion=1,session=root.GetProperty("session"),correlationId=root.GetProperty("correlationId"),ok=true,message="fixture",applied=new { registered } });
                 BinaryPrimitives.WriteInt32LittleEndian(header,response.Length);
                 await server.WriteAsync(header,limit.Token);await server.WriteAsync(response,limit.Token);
             }
-            try{return (await call).Succeeded;}
-            catch(OperationCanceledException) when(!limit.IsCancellationRequested){return false;}
+            try{return (await call).Applied?.GetProperty("registered").GetInt32();}
+            catch(OperationCanceledException) when(!limit.IsCancellationRequested){return null;}
         }
-        var replies=await Task.WhenAll(ReplyAfterNormalDeadline("fun.challenge.start"),ReplyAfterNormalDeadline("fun.event.execute"));
-        Check(replies[0],"A late flight challenge start receipt survives the ordinary 12-second deadline on the real pipe client");
-        Check(!replies[1],"An ordinary animal wave retains the normal transport deadline on the same delayed pipe fixture");
+        var replies=await Task.WhenAll(
+            ReplyAfterNormalDeadline("fun.challenge.start",new { count=8 },8,14),
+            ReplyAfterNormalDeadline("fun.event.execute",new { count=8 },8,14),
+            ReplyAfterNormalDeadline("generation.item",new { quantity=100 },100,14),
+            ReplyAfterNormalDeadline("generation.fish",new { quantity=100 },100,36),
+            ReplyAfterNormalDeadline("fun.event.execute",new { count=150 },150,29),
+            ReplyAfterNormalDeadline("fun.challenge.start",new { count=150 },150,32));
+        Check(replies[0]==8,"A late flight challenge start receipt survives the ordinary 12-second deadline on the real pipe client");
+        Check(replies[1]==null,"A small animal wave retains its 12-second deadline on the same delayed pipe fixture");
+        Check(replies[2]==100 && replies[3]==100,"Full item and fish batches receive their registered counts after the previous deadline");
+        Check(replies[4]==150 && replies[5]==150,"Full waves and flight challenges receive all 150 registrations after paced generation");
     }
     static void VerifyGullChallenge(string folder)
     {
@@ -99,7 +118,7 @@ static class ExperienceVerification
         var runtime = new ExperienceRuntime();
         vm.Connect(runtime,CapabilityMatrix.For(SessionMode.Host,false)); Pump();
         JsonElement Score(string id, bool active, int hits=0, int kills=0) => JsonSerializer.SerializeToElement(new {
-            gullChallenge = new { roundId=id, active, total=8, hits, kills, firstHitSeconds=hits>0 ? (double?)1.25 : null, reason="本轮结束" } });
+            gullChallenge = new { roundId=id, active, total=150, hits, kills, firstHitSeconds=hits>0 ? (double?)1.25 : null, reason="本轮结束" } });
         RuntimeCommandResult Ok(JsonElement data) => new(true,"确认",data,data,false);
         string id = "";
         int Writes() => runtime.Commands.Count(c=>c.FeatureId.StartsWith("fun.challenge."));
@@ -108,32 +127,32 @@ static class ExperienceVerification
         Check(vm.CanStartGullChallenge && !vm.CanStopGullChallenge && Writes()==0,"Connecting exposes the challenge without starting a round");
         vm.GullMigration.CountInput.Text="2.5"; Await(vm.RunGullChallengeAsync(true));
         Check(Writes()==0&&!vm.CanStartGullChallenge,"An invalid fractional migration count cannot spawn a challenge wave");
-        vm.GullMigration.CountInput.Text="8";vm.AutoRefill=true; Await(vm.RunGullChallengeAsync(true));
+        vm.GullMigration.CountInput.Text="150";vm.AutoRefill=true; Await(vm.RunGullChallengeAsync(true));
         Check(Writes()==0 && !vm.CanStartGullChallenge,"Auto-refill blocks challenge starts");vm.AutoRefill=false;
         var pending=new TaskCompletionSource<RuntimeCommandResult>();
         runtime.GullCommand=c=>{id=c.Arguments.GetProperty("roundId").GetString()!;return pending.Task;};
         var start=vm.RunGullChallengeAsync(true);
         Await(vm.RunGullChallengeAsync(true));vm.AutoRefill=true;
         Check(Writes()==1 && !vm.AutoRefill && !vm.CanStopGullChallenge && Guid.TryParseExact(id,"N",out _) &&
-              runtime.Commands.Last().Arguments.GetProperty("count").GetInt32()==8,"Concurrent clicks send one explicit start with a new round ID and shared wave count");
+              runtime.Commands.Last().Arguments.GetProperty("count").GetInt32()==150,"Concurrent clicks send one explicit start with a new round ID and shared wave count");
         pending.SetResult(Ok(Score(id,true)));Await(start);
         Check(vm.CanStopGullChallenge && !vm.CanStartGullChallenge && vm.GullChallengeStatus.Contains("尚未命中"),"The acknowledged round can be ended and has no fabricated first hit");
         vm.UpdateExperienceSession(Score("unrelated",false,5,4));Check(vm.CanStopGullChallenge && vm.GullChallengeStatus.Contains("尚未命中"),"Unrelated round snapshots never overwrite live scores");
-        vm.UpdateExperienceSession(Score(id,true,3,2));Check(vm.GullChallengeStatus.Contains("首中 1.25 秒") && vm.GullChallengeStatus.Contains("有效命中 3 次") && vm.GullChallengeStatus.Contains("击落 2/8"),"Session scores show actual first-hit time, hits and kills for the matching wave");
+        vm.UpdateExperienceSession(Score(id,true,3,2));Check(vm.GullChallengeStatus.Contains("首中 1.25 秒") && vm.GullChallengeStatus.Contains("有效命中 3 次") && vm.GullChallengeStatus.Contains("击落 2/150"),"Session scores show actual first-hit time, hits and kills for the matching wave");
         vm.UpdateExperienceSession(Score(id,false,4,3));vm.UpdateExperienceSession(Score(id,true,2,1));
-        Check(vm.CanStartGullChallenge && !vm.CanStopGullChallenge && vm.GullChallengeStatus.Contains("击落 3/8") && Writes()==1,"A completed score rejects a late active snapshot and never restarts automatically");
+        Check(vm.CanStartGullChallenge && !vm.CanStopGullChallenge && vm.GullChallengeStatus.Contains("击落 3/150") && Writes()==1,"A completed score rejects a late active snapshot and never restarts automatically");
 
         string lost="";runtime.GullCommand=c=>{lost=c.Arguments.GetProperty("roundId").GetString()!;return Task.FromException<RuntimeCommandResult>(new IOException("回包丢失"));};
         Await(vm.RunGullChallengeAsync(true));Check(vm.CanStartGullChallenge && vm.CanStopGullChallenge,"Missing start acknowledgement permits a retry or end without claiming success");
         vm.GullMigration.CountInput.Text="5";
         runtime.GullCommand=c=>Task.FromResult(Ok(Score(c.Arguments.GetProperty("roundId").GetString()!,true)));
         Await(vm.RunGullChallengeAsync(true));
-        Check(runtime.Commands.Last().Arguments.GetProperty("roundId").GetString()==lost && runtime.Commands.Last().Arguments.GetProperty("count").GetInt32()==8,"A retried start keeps the same round ID and submitted count");
+        Check(runtime.Commands.Last().Arguments.GetProperty("roundId").GetString()==lost && runtime.Commands.Last().Arguments.GetProperty("count").GetInt32()==150,"A retried start keeps the same round ID and submitted count");
         pending=new();runtime.GullCommand=c=>pending.Task;
         var stop=vm.RunGullChallengeAsync(false);int before=Writes();Await(vm.RunGullChallengeAsync(false));
         Check(Writes()==before && runtime.Commands.Last().Arguments.GetProperty("roundId").GetString()==lost,"Repeated stops send a single request scoped to the current round");
         vm.ResetWorldContext();pending.SetResult(Ok(Score(lost,true,5,4)));Await(stop);
-        Check(vm.CanStartGullChallenge && !vm.CanStopGullChallenge && !vm.GullChallengeStatus.Contains("击落 4/8"),"A stale completion cannot revive a challenge after world change");
+        Check(vm.CanStartGullChallenge && !vm.CanStopGullChallenge && !vm.GullChallengeStatus.Contains("击落 4/150"),"A stale completion cannot revive a challenge after world change");
 
         pending=new();runtime.GullCommand=c=>{id=c.Arguments.GetProperty("roundId").GetString()!;return pending.Task;};
         start=vm.RunGullChallengeAsync(true);Await(vm.EmergencyDisableAsync());
@@ -154,12 +173,87 @@ static class ExperienceVerification
         vm.Disconnect();Check(!vm.CanStartGullChallenge && !vm.CanStopGullChallenge,"Disconnected controls cannot send round commands");
         vm.CloseExperience();vm.ClosePreferences();
     }
+    static void VerifySpawnQuantities(string folder)
+    {
+        var prefs = new ExperiencePreferenceStore();
+        string experience = Path.Combine(folder, "spawn", "experience.json");
+        var vm = new MainViewModel(preferencesStore:prefs, experiencePath:experience);
+        var runtime = new ExperienceRuntime();
+        vm.Connect(runtime, CapabilityMatrix.For(SessionMode.Host,false));
+        Pump();
+        var waves = vm.FunEventsPage;
+        var editable = waves.Events.Where(card => card.HasEditableCount).ToArray();
+        Check(editable.Length == 13 && editable.All(c => c.RequestedCount == c.Definition.RequestedCount),
+            "All thirteen non-Boss events retain their original default wave sizes");
+        foreach (var card in editable)
+        {
+            card.CountInput.Text = "150";
+            var wave = waves.ExecuteWaveAsync(card.Id);
+            Await(wave);
+            Check(wave.Result && runtime.Commands.Last(c => c.FeatureId == "fun.event.execute").Arguments.GetProperty("count").GetInt32() == 150,
+                $"Full wave uses one request for 150 registrations: {card.Id}");
+            int sent = runtime.Commands.Count;
+            foreach (string invalid in new[] { "", "0", "1.5", "151" })
+            {
+                card.CountInput.Text = invalid;
+                Await(waves.ExecuteWaveAsync(card.Id));
+            }
+            Check(card.RequestedCount == 150 && runtime.Commands.Count == sent, $"Invalid wave drafts keep the last valid count without sending: {card.Id}");
+        }
+        var boss = waves.Events.Single(c => c.Id == "boss-surprise");
+        Await(waves.ExecuteWaveAsync(boss.Id));
+        Check(!boss.HasEditableCount && boss.RequestedCount == 1 && !runtime.Commands.Last(c => c.FeatureId == "fun.event.execute").Arguments.TryGetProperty("count", out _),
+            "The Boss event keeps the native single-spawn request");
+        runtime.RegisteredCount = 149;
+        editable[0].CountInput.Text = "150";
+        var shortWave = waves.ExecuteWaveAsync(editable[0].Id);
+        Await(shortWave);
+        Check(!shortWave.Result && waves.CurrentWaveStatus.Contains("149"), "A partial wave shows the actual registration");
+        runtime.RegisteredCount = null;
+        foreach (var (id, dead) in new[] { ("generation.item",false), ("generation.fish",false), ("generation.fish",true) })
+        {
+            var feature = Feature(vm, id);
+            feature.SelectedOption = feature.Options.First();
+            feature.DeadFish = dead;
+            feature.SaveAfter = dead;
+            feature.QuantityInput.Text = "100";
+            int before = runtime.Commands.Count(c => c.FeatureId == id);
+            feature.ExecuteCommand.Execute(null);
+            Pump();
+            var command = runtime.Commands.Last(c => c.FeatureId == id);
+            var request = command.Arguments;
+            Check(feature.IsSuccessful && command.RequestNativeSave == dead && request.GetProperty("quantity").GetInt32() == 100 && request.GetProperty("dead").GetBoolean() == dead &&
+                runtime.Commands.Count(c => c.FeatureId == id) == before + 1, $"The generator command accepts 100: {id}, dead={dead}");
+            runtime.RegisteredCount = 99;
+            feature.ExecuteCommand.Execute(null);
+            Pump();
+            Check(!feature.IsSuccessful && feature.Status.Contains("99"), "A short registration reports the count the game returned");
+            runtime.RegisteredCount = null;
+            foreach (string invalid in new[] { "", "0", "1.5", "101" })
+            {
+                feature.QuantityInput.Text = invalid;
+                feature.ExecuteCommand.Execute(null);
+                Pump();
+            }
+            Check(runtime.Commands.Count(c => c.FeatureId == id) == before + 2 && feature.QuantityInput.LastValidValue == 100,
+                "Invalid ordinary spawn counts cannot dispatch");
+        }
+        vm.FlushPreferences();
+        vm.CloseExperience();
+        vm.ClosePreferences();
+        var restored = new MainViewModel(preferencesStore:prefs, experiencePath:experience);
+        Check(restored.FunEventsPage.Events.Where(c => c.HasEditableCount).All(c => c.CountInput.Text == "150"),
+            "Restart restores every event's valid quantity after an invalid draft");
+        restored.CloseExperience();
+        restored.ClosePreferences();
+    }
     [STAThread] static int Main(string[] args)
     {
         bool codeOnly=Environment.GetEnvironmentVariable("ABYSS_CODE_ONLY")=="1";
         if(!codeOnly){var app=new App();app.InitializeComponent();}
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
         string root=args[0],folder=Path.Combine(root,"verification","experience-fixture-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(folder);
+        VerifySpawnQuantities(folder);
         VerifyGullChallenge(folder);
         Await(VerifySlowWaveTransport());
         string path=Path.Combine(folder,"experience-settings.json");
@@ -194,7 +288,7 @@ static class ExperienceVerification
         var raceRuntime=new ExperienceRuntime();var raceVm=new MainViewModel(experiencePath:Path.Combine(folder,"race","experience.json"));raceVm.Connect(raceRuntime,CapabilityMatrix.For(SessionMode.Host,false));Pump();raceVm.PresetName="race";raceVm.SavePresetCommand.Execute(null);
         var oldSpin=Feature(raceVm,"player.spin.lock");raceRuntime.SpinPending=new();var pendingSpin=raceRuntime.SpinPending;oldSpin.Enabled=true;Await(raceVm.ApplySelectedPresetAsync());raceRuntime.SpinPending=null;pendingSpin.SetResult(new(true,"old enable",JsonSerializer.SerializeToElement(new{applied=true}),JsonSerializer.SerializeToElement(new{}),false));Pump();Check(!Feature(raceVm,"player.spin.lock").Enabled&&!raceVm.ActiveFeaturesText.Contains("大陀螺"),"Late toggle completion cannot re-enable UI after preset clear");
         oldSpin=Feature(raceVm,"player.spin.lock");raceRuntime.SpinPending=new();pendingSpin=raceRuntime.SpinPending;oldSpin.Enabled=true;raceVm.SelectedPage=raceVm.Pages[1];raceVm.SelectedPage=raceVm.Pages[0];raceRuntime.SpinPending=null;pendingSpin.SetResult(new(true,"enable",JsonSerializer.SerializeToElement(new{applied=true}),JsonSerializer.SerializeToElement(new{}),false));Pump();Check(Feature(raceVm,"player.spin.lock").Enabled,"Ordinary page changes preserve pending toggle state within same action generation");raceVm.MarkAllLocksDisabled("fixture");
-        var delayedItem=Feature(raceVm,"generation.item");delayedItem.SelectedOption=delayedItem.Options.Single(o=>o.Id==11);delayedItem.QuantityInput.Text="3";delayedItem.DistanceInput.Text="4.25";raceRuntime.GenerationPending=new();var pendingGeneration=raceRuntime.GenerationPending;delayedItem.ExecuteCommand.Execute(null);delayedItem.QuantityInput.Text="77";delayedItem.SelectedOption=delayedItem.Options.Single(o=>o.Id==5);raceRuntime.GenerationPending=null;pendingGeneration.SetResult(new(true,"generated",JsonSerializer.SerializeToElement(new{}),JsonSerializer.SerializeToElement(new{}),false));Pump();delayedItem.CatalogView="最近生成";Check(delayedItem.FilteredOptions.Single().Id==11,"Recent generation records the invoked item, not a later edited choice");delayedItem.RestoreBookmarkedConfigurationCommand.Execute(null);Check(delayedItem.Quantity==3&&delayedItem.Distance==4.25,"Recent generation stores immutable parameters from submission time");raceVm.CloseExperience();raceVm.ClosePreferences();
+        var delayedItem=Feature(raceVm,"generation.item");delayedItem.SelectedOption=delayedItem.Options.Single(o=>o.Id==11);delayedItem.QuantityInput.Text="3";delayedItem.DistanceInput.Text="4.25";raceRuntime.GenerationPending=new();var pendingGeneration=raceRuntime.GenerationPending;delayedItem.ExecuteCommand.Execute(null);delayedItem.QuantityInput.Text="77";delayedItem.SelectedOption=delayedItem.Options.Single(o=>o.Id==5);raceRuntime.GenerationPending=null;pendingGeneration.SetResult(new(true,"generated",JsonSerializer.SerializeToElement(new{registered=3}),JsonSerializer.SerializeToElement(new{registered=3}),false));Pump();delayedItem.CatalogView="最近生成";Check(delayedItem.FilteredOptions.Single().Id==11,"Recent generation records the invoked item, not a later edited choice");delayedItem.RestoreBookmarkedConfigurationCommand.Execute(null);Check(delayedItem.Quantity==3&&delayedItem.Distance==4.25,"Recent generation stores immutable parameters from submission time");raceVm.CloseExperience();raceVm.ClosePreferences();
         var spin=Feature(vm,"player.spin.lock");spin.SpinSpeedText="7.25";spin.SpinSpeedText="-";vm.PresetName="有效草稿";vm.SavePresetCommand.Execute(null);var validDraft=vm.SelectedPreset!;spin.SpinSpeedText="12";vm.SelectedPreset=validDraft;Await(vm.ApplySelectedPresetAsync());Check(Feature(vm,"player.spin.lock").SpinSpeedText=="7.25","Preset saves last valid spin number instead of incomplete draft");
         vm.FlushPreferences();vm.FlushExperience();
         var restarted=new MainViewModel(preferencesStore:prefs,experiencePath:livePath);Check(restarted.Presets.Count==2&&!restarted.AutoRefill&&!restarted.AimAssist.Enabled,"Restart restores presets without automation");
@@ -230,10 +324,10 @@ static class ExperienceVerification
         Check(vm.AutoRefill && vm.AutoRefillCount == 0 && vm.AutoRefillStatus.Contains(vm.GullMigration.CountInput.Error) &&
               runtime.Commands.Count(c => c.FeatureId == "fun.event.execute") == wavesBeforeEdit,
               "A fractional animal count keeps refill armed and explains which draft to correct");
-        vm.GullMigration.CountInput.Text = "8";
+        vm.GullMigration.CountInput.Text = "150";
         vm.UpdateExperienceSession(Session(0));Pump();
         Check(vm.AutoRefill && runtime.Commands.Count(c => c.FeatureId == "fun.event.execute") == wavesBeforeEdit + 1 &&
-              runtime.Commands.Last(c => c.FeatureId == "fun.event.execute").Arguments.GetProperty("count").GetInt32() == 8,
+              runtime.Commands.Last(c => c.FeatureId == "fun.event.execute").Arguments.GetProperty("count").GetInt32() == 150,
               "Correcting both drafts resumes one wave using its corrected count");
         Check(vm.AutoRefillCount==1,"Refill records one confirmed wave");
         typeof(MainViewModel).GetField("_lastRefill",BindingFlags.NonPublic|BindingFlags.Instance)!.SetValue(vm,DateTimeOffset.MinValue);commands=runtime.Commands.Count;vm.UpdateExperienceSession(Session(0));Pump();Check(!vm.AutoRefill&&vm.AutoRefillCount==1&&!runtime.Commands.Skip(commands).Any(c=>c.FeatureId=="fun.event.execute"),"Wave limit preserves count and blocks further generation");

@@ -53,7 +53,7 @@ public sealed partial class MainViewModel
         ObserveParameters(RoomMembersPage, new[] { "HealthScope", "FullnessScope", "PoisonScope", "FireScope", "DropScope", "RareScope", "SearchText" });
         foreach (var input in new[] { CurrentXInput, CurrentYInput, CurrentZInput, AimAssist.StrengthInput, AimAssist.AngleInput, AimAssist.DistanceInput, FunEventsPage.Roulette.MultiplierInput, RefillLimitInput, EntityOverlayDistanceInput })
             ObserveParameters(input, new[] { nameof(NumericInput.Text) });
-        foreach (var card in FunEventsPage.Events.Where(card => card.HasAnimalCount))
+        foreach (var card in FunEventsPage.Events.Where(card => card.HasEditableCount))
             ObserveParameters(card.CountInput, new[] { nameof(NumericInput.Text) });
         CombatFeedback.SettingsChanged += SchedulePreferencesSave;
         _parameterUnsubscribe.Add(() => CombatFeedback.SettingsChanged -= SchedulePreferencesSave);
@@ -74,7 +74,7 @@ public sealed partial class MainViewModel
             if(p.General.TryGetValue("animalCounts",out var animalCounts)&&animalCounts.ValueKind==System.Text.Json.JsonValueKind.Object)
             {
                 var counts=System.Text.Json.JsonSerializer.Deserialize<AnimalCountSettings>(animalCounts.GetRawText());
-                foreach(var card in FunEventsPage.Events.Where(c=>c.HasAnimalCount))if(counts!=null&&counts.TryGetValue(card.Id,out int count))card.CountInput.Value=count;
+                foreach(var card in FunEventsPage.Events.Where(c=>c.HasEditableCount))if(counts!=null&&counts.TryGetValue(card.Id,out int count))card.CountInput.Value=count;
             }
             if(p.General.Text("spinCurve") is string curve && SpinCurves.Contains(curve)) SpinCurve=curve;
             RestoreNumber(p.General,"refillLimit",RefillLimitInput);
@@ -212,7 +212,7 @@ public sealed partial class MainViewModel
             p.General.Put("rustProjection", RustProjection);
             p.General.Put("rustSelection", RustSelection);
             p.General.Put("combatFeedback",CombatFeedback.Capture());
-            p.General.Put("animalCounts",FunEventsPage.Events.Where(c=>c.HasAnimalCount).ToDictionary(c=>c.Id,c=>c.RequestedCount));
+            p.General.Put("animalCounts",FunEventsPage.Events.Where(c=>c.HasEditableCount).ToDictionary(c=>c.Id,c=>c.RequestedCount));
             var t = p.Teleport;
             t.Put("query", TeleportPointQuery); t.Put("selectedGroup", SelectedTeleportGroup);
             t.Put("selectedPointGroup", SelectedTeleportPoint?.Group); t.Put("selectedPointName", SelectedTeleportPoint?.Name);

@@ -181,7 +181,7 @@ public sealed class RuntimeBridgeClient : IGameRuntimeClient, IAsyncDisposable
 					_pipe.Dispose();
 					throw;
 				}
-			}, TimeSpan.FromSeconds(command.FeatureId == "fun.challenge.start" ? 30 : 12), cancellationToken);
+			}, ReplyTimeout(command), cancellationToken);
 		}
 		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
 		{
@@ -193,6 +193,24 @@ public sealed class RuntimeBridgeClient : IGameRuntimeClient, IAsyncDisposable
 			_pipe.Dispose();
 			throw;
 		}
+	}
+
+	private static TimeSpan ReplyTimeout(FeatureCommand command)
+	{
+		int minimumSeconds = command.FeatureId == "fun.challenge.start" ? 30 : 12;
+		var (field, limit) = command.FeatureId switch
+		{
+			"fun.event.execute" or "fun.challenge.start" => ("count", FunEventDefinitions.MaxWaveEntities),
+			"generation.item" or "generation.fish" => ("quantity", FeatureItemViewModel.MaxGenerationQuantity),
+			_ => (string.Empty, 0)
+		};
+		if (limit == 0 || command.Arguments.ValueKind != JsonValueKind.Object ||
+			!command.Arguments.TryGetProperty(field, out var value) || value.ValueKind != JsonValueKind.Number ||
+			!value.TryGetInt32(out int count) || count < 1 || count > limit)
+			return TimeSpan.FromSeconds(minimumSeconds);
+
+		// A full fish batch takes at least 35 seconds before registration is checked.
+		return TimeSpan.FromSeconds(Math.Max(minimumSeconds, 60d * count / limit));
 	}
 
 	public async Task<bool> IsHostAsync(CancellationToken cancellationToken)

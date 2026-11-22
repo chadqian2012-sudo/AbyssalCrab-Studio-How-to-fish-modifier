@@ -202,7 +202,7 @@ public sealed partial class MainViewModel
             !envelope.TryGetProperty("gullChallenge", out var round) || round.ValueKind != JsonValueKind.Object ||
             !round.TryGetProperty("roundId", out var id) || id.ValueKind != JsonValueKind.String || id.GetString() != _gullRoundId ||
             !round.TryGetProperty("active",out var active) || active.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
-            !round.TryGetProperty("total",out var total) || total.ValueKind != JsonValueKind.Number || !total.TryGetInt32(out int targets) || targets is < 0 or > 50 || targets == 0 && active.GetBoolean() ||
+            !round.TryGetProperty("total",out var total) || total.ValueKind != JsonValueKind.Number || !total.TryGetInt32(out int targets) || targets is < 0 or > FunEventDefinitions.MaxWaveEntities || targets == 0 && active.GetBoolean() ||
             !round.TryGetProperty("hits",out var hits) || hits.ValueKind != JsonValueKind.Number || !hits.TryGetInt32(out int hitCount) || hitCount < 0 ||
             !round.TryGetProperty("kills",out var kills) || kills.ValueKind != JsonValueKind.Number || !kills.TryGetInt32(out int killCount) || killCount < 0 || killCount > targets || killCount > hitCount)
             return false;
@@ -313,7 +313,7 @@ public sealed partial class MainViewModel
         CombatFeedback.Load(_experience.CombatFeedback);
         CombatFeedback.SettingsChanged+=()=>{_experience.CombatFeedback=CombatFeedback.Capture();ScheduleExperienceSave();};
         CombatFeedback.PropertyChanged+=(_,e)=>{if(e.PropertyName==nameof(CombatFeedback.Active))OnPropertyChanged(nameof(ActiveFeaturesText));};
-        foreach(var card in FunEventsPage.Events.Where(e=>e.HasAnimalCount))
+        foreach(var card in FunEventsPage.Events.Where(e=>e.HasEditableCount))
         {
             if(_experience.AnimalCounts.TryGetValue(card.Id,out int count))card.CountInput.Value=count;
             card.CountInput.PropertyChanged+=(_,e)=>{if(e.PropertyName==nameof(NumericInput.Text)){_experience.AnimalCounts[card.Id]=card.RequestedCount;ScheduleExperienceSave();}};

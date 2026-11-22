@@ -79,7 +79,6 @@ public sealed class ExperienceSettingsStore
                 && !string.IsNullOrWhiteSpace(p.Key) && p.Key.Length <= 256 && p.Group != null && p.Group.Length <= 256).Distinct().Take(200).ToList();
         if (value.RefillLimit < 1 || value.RefillLimit > 20) value.RefillLimit = 3;
         value.AnimalCounts??=new();
-        foreach(string key in value.AnimalCounts.Where(p=>!FunEventDefinitions.All.Any(d=>d.Id==p.Key&&d.HasAnimalCount)||p.Value<1||p.Value>50).Select(p=>p.Key).ToArray())value.AnimalCounts.Remove(key);
         value.CombatFeedback ??= new();
         if (value.SpinCurve is not ("固定" or "缓慢加速" or "脉冲")) value.SpinCurve = "固定";
         return value;

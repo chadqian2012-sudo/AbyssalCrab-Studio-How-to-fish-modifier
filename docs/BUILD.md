@@ -1,5 +1,15 @@
 # 构建指南 | Build Guide
 
+## r32 数量调整需要配套的 Core 和 Runtime
+
+使用 r31 交付包内的构建输入。常规生成上限在 Core 和 Runtime 各校验一次，趣味事件的分批执行由 Runtime 负责。在源码根目录执行下列命令，然后使用本页的两种单文件发布命令。构建时保留 r31 的手记和标注原生库。
+
+```powershell
+& '.\build\Build-TargetOptions.ps1' -SpawnQuantities -DotnetPath '<SDK>/dotnet.exe' -GameManagedDirectory '<game>/How to Fish_Data/Managed' -DnlibPath '<dnlib>/dnlib.dll' -ParentRuntimePath '<r31>/HowToFishTrainer.Runtime.dll' -ParentCorePath '<r31>/HowToFishTrainer.Core.dll'
+```
+
+脚本核对父版本后将新 Core 和 Runtime 放入桌面项目的构建位置。修改清单保存在 `build/staging/spawn-quantities/runtime-audit.json`。
+
 ## Rust 对照版以已交付的 r29 为基线
 
 准备 r29 合并交付版的 Runtime、Core、Memory 和 Harmony，以及同次核对的游戏程序集。构建机需要 .NET 8、Windows x64 MSVC Rust 工具链、MSVC 链接器和 Windows SDK。Rust 库使用静态 C 运行库。

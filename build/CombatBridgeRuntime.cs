@@ -94,19 +94,19 @@ namespace AbyssalCrab.Runtime
             }
             if (!start && (id != "fun.event.execute" || args["count"] == null)) return false;
             string eventId = start ? "seagull-migration" : args.Value<string>("eventId");
-            if (!Animal(eventId)) throw new ArgumentException("此事件不支持自定义动物数量");
-            if (args["count"] == null || args["count"].Type != JTokenType.Integer) throw new ArgumentException("动物数量需要整数");
-            long count = args.Value<long>("count");
-            if (count < 1 || count > 50) throw new ArgumentOutOfRangeException("count", "每波动物数量需要在 1–50 之间");
+            if (!Animal(eventId) && eventId != "weapon-rain" && eventId != "rod-forest" &&
+                eventId != "frisbee-storm" && eventId != "junk-bundle")
+                throw new ArgumentException("此事件不支持自定义数量");
+            int count = CheckedCount(args["count"], 150);
             // Use the original authority, preflight, registration, cancellation and rollback.
             if (!start) Call(host, "ValidateAuthority", new object[] { id });
             if (start) round = CombatFeedbackRuntime.PrepareRound(host,(string)args["roundId"]);
-            _count = (int)count;
+            _count = count;
             try
             {
                 Call(host, "BeginFunEvent", new object[] { correlation, eventId });
                 _waveHost=host;_wave=Read(host,"_activeFunWave");_waveIndex=0;
-                _waveDeadline=Time.realtimeSinceStartup+(start ? 28f : 10.5f);_nextWaveCheck=0;
+                _waveDeadline=Time.realtimeSinceStartup+Math.Max(start ? 28f : 10.5f, count * .4f - 1.5f);_nextWaveCheck=0;
                 if (start) round.WaveId = (string)Read(_wave,"WaveId");
             }
             catch
@@ -125,6 +125,19 @@ namespace AbyssalCrab.Runtime
             receipt["gullChallenge"] = round.Snapshot();
             return receipt;
         }
+        internal static int CheckedCount(JToken token, int maximum)
+        {
+            if (token == null || token.Type != JTokenType.Integer)
+                throw new ArgumentException("生成数量需要整数");
+            long value = (long)token;
+            if (value < 1 || value > maximum)
+                throw new ArgumentOutOfRangeException("count", "生成数量需要在 1–" + maximum + " 之间");
+            return (int)value;
+        }
+        public static void ValidateGeneratorQuantity(JObject args)
+        {
+            CheckedCount(args["quantity"], 100);
+        }
         public static void ChallengeRollback(TrainerBridgeHost host, string waveId)
         {
             var round = CombatFeedbackRuntime.RoundFor(host);
@@ -138,7 +151,7 @@ namespace AbyssalCrab.Runtime
             if(_wave==null||host!=_waveHost||Time.realtimeSinceStartup<_nextWaveCheck)return;
             _nextWaveCheck=Time.realtimeSinceStartup+.5f;
             // A large wave is one in-flight request. Only actual native generation progress
-            // can extend its heartbeat, and never beyond its 10.5s bounded deadline.
+            // can extend its heartbeat, and only within the request deadline.
             // Native channel close, cancellation and error rollback continue to run normally.
             if(Time.realtimeSinceStartup>_waveDeadline||Read(host,"_activeFunWave")!=_wave){_wave=null;_waveHost=null;return;}
             int progress=(int)Read(_wave,"NextIndex");
@@ -153,7 +166,7 @@ namespace AbyssalCrab.Runtime
         {DropCleanup.Cancel(host);if(_waveHost!=null&&host!=_waveHost)return;_wave=null;_waveHost=null;_count=0;}
         public static object AdjustDefinition(object definition)
         {
-            if (definition == null || _count == 0 || !Animal((string)Read(definition,"Id"))) return definition;
+            if (definition == null || _count == 0) return definition;
             return Activator.CreateInstance(definition.GetType(), BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
                 null, new object[] { Read(definition,"Id"), Read(definition,"Title"), Read(definition,"Risk"), _count }, null);
         }
