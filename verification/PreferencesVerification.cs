@@ -126,7 +126,7 @@ static class PreferencesVerification
             p.SlotMachine.Put("rarity",2);p.Roulette.Put("outcome","green");p.Roulette.Put("rounds",10);p.Roulette.Put("useOriginalMultiplier",false);p.Roulette.Put("multiplier",17);
             ParameterValues Values(string id){var values=new ParameterValues();p.Features[id]=values;return values;}
             Values(speedId).Put("value",2.75);
-            var spin=Values("player.spin.lock");spin.Put("spinSpeed",7.25);spin.Put("spinAutoJump",true);
+            var spin=Values("player.spin.lock");spin.Put("spinSpeed",29.75);spin.Put("spinAutoJump",true);
             var magic=Values("combat.silent_aim");magic.Put("angle",12.5);magic.Put("distance",222.75);magic.Put("strength",83.25);magic.Put("magicTrigger","ads");magic.Put("targetTeammates",true);
             p.Session.Put("snapshot",true);
             foreach(string id in new[]{"player.health.lock","player.fullness.lock","player.spin.lock","combat.silent_aim"})p.Session.Put("toggle:"+id,enabled);
@@ -170,9 +170,9 @@ static class PreferencesVerification
         Check(!restored.SoundEnabled&&Feature(restored,speedId).ValueInput.Value==2.75,"Explicit restore uses the independent last-session parameters rather than newer editor autosaves");
         Check(Feature(restored,"player.health.lock").Enabled&&Feature(restored,"player.fullness.lock").Enabled,"Independent toggles survive cross-category restore");
         var spinRestored=Feature(restored,"player.spin.lock");var magicRestored=Feature(restored,"combat.silent_aim");
-        Check(spinRestored.Enabled&&spinRestored.SpinSpeedText=="7.25"&&spinRestored.SpinAutoJump,"Spin restore retains decimal speed and model jump option");
+        Check(spinRestored.Enabled&&spinRestored.SpinSpeedText=="29.75"&&spinRestored.SpinAutoJump,"Spin restore retains decimal speed and model jump option");
         var spinCommand=runtime.Commands.Last(c=>c.FeatureId=="player.spin.lock"&&c.Arguments.GetProperty("enabled").GetBoolean());
-        Check(spinCommand.Arguments.GetProperty("rotationsPerSecond").GetDouble()==7.25,"Spin enable transmits the restored speed");
+        Check(spinCommand.Arguments.GetProperty("rotationsPerSecond").GetDouble()==29.75,"Spin enable transmits the restored speed");
         var magicCommand=runtime.Commands.Last(c=>c.FeatureId=="combat.silent_aim"&&c.Arguments.GetProperty("enabled").GetBoolean());
         Check(magicRestored.Enabled&&magicCommand.Arguments.GetProperty("angle").GetDouble()==12.5&&magicCommand.Arguments.GetProperty("distance").GetDouble()==222.75
             &&magicCommand.Arguments.GetProperty("strength").GetDouble()==83.25&&magicCommand.Arguments.GetProperty("trigger").GetString()=="ads"&&magicCommand.Arguments.GetProperty("targetTeammates").GetBoolean(),

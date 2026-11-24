@@ -68,6 +68,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
         }
     }
 
+    internal const int MaxSpinSpeed = 30;
     public bool IsSpin => Descriptor.Id == "player.spin.lock";
     public bool IsStandardToggle => !IsSpin && !IsMagicBullet;
     public bool HasSpinSpeedError => IsSpin && !TrySpinSpeed(SpinSpeedText, out _);
@@ -85,22 +86,17 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
             NotifyStateChanged();
         }
     }
-    public string SpinSpeedValidationMessage => IsSpin && !TrySpinSpeed(SpinSpeedText, out _) ? "请输入每秒 2–15 圈的转速" : string.Empty;
+    public string SpinSpeedValidationMessage => HasSpinSpeedError ? $"请输入每秒 2–{MaxSpinSpeed} 圈的转速" : string.Empty;
     public bool CanApplySpinSpeed => IsSpin && Enabled && CanInteract && TrySpinSpeed(SpinSpeedText, out _);
     public ICommand ApplySpinSpeedCommand { get; }
     public static bool TrySpinSpeed(string text, out double speed)
     {
-        return NumericInput.TryReadNumber(text, out speed) && speed >= 2d && speed <= 15d;
+        return NumericInput.TryReadNumber(text, out speed) && speed is >= 2 and <= MaxSpinSpeed;
     }
     public static JsonElement SpinArguments(bool enabled, double speed, bool autoJump = false)
     {
         return enabled ? JsonSerializer.SerializeToElement(new { enabled, rotationsPerSecond = speed, autoJump }) :
             JsonSerializer.SerializeToElement(new { enabled });
-    }
-    private double RequireSpinSpeed()
-    {
-        if (!TrySpinSpeed(SpinSpeedText, out double speed)) throw new ArgumentException("请输入每秒 2–15 圈的转速");
-        return speed;
     }
 
 	private double _distance;
@@ -816,7 +812,7 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
         bool spinAutoJump = SpinAutoJump;
         if (IsSpin && desired && !TrySpinSpeed(SpinSpeedText, out spinSpeed))
         {
-            Status = "请输入每秒 2–15 圈的转速";
+            Status = SpinSpeedValidationMessage;
             RevertToggle(previous);
             return;
         }
@@ -972,7 +968,6 @@ public sealed partial class FeatureItemViewModel : INotifyPropertyChanged
             }
 			JsonElement arguments = JsonSerializer.SerializeToElement(Descriptor.Control switch
 			{
-                FeatureControl.Toggle when IsSpin => SpinArguments(Enabled, Enabled ? RequireSpinSpeed() : 4d, SpinAutoJump),
 				FeatureControl.Toggle => (object)new
 				{
 					enabled = Enabled

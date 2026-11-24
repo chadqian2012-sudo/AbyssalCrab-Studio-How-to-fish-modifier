@@ -13,8 +13,8 @@ namespace AbyssalCrab.Runtime
             var descriptors = new FeatureDescriptor[baseline.Count + 1];
             for (int i = 0; i < baseline.Count; i++) descriptors[i] = baseline[i];
             descriptors[baseline.Count] = new FeatureDescriptor("player.spin.lock", "玩家", "大陀螺",
-                Capability.OwnedPlayer, FeatureControl.Toggle, 2d, 15d, false,
-                "低头持物朝地旋转，转速每秒 2–15 圈，默认 4 圈；可选择模型自动跳跃，收腿仅在跳跃时出现，手动跳跃优先。第一人称镜头、持物、移动和瞄准保持正常。运行中点击“应用设置”更新；关闭后恢复原生姿态。");
+                Capability.OwnedPlayer, FeatureControl.Toggle, 2d, 30d, false,
+                "低头持物朝地旋转，转速每秒 2–30 圈，默认 4 圈；可选择模型自动跳跃，收腿仅在跳跃时出现，手动跳跃优先。第一人称镜头、持物、移动和瞄准保持正常。运行中点击“应用设置”更新；关闭后恢复原生姿态。");
             _cached = descriptors;
             return _cached;
         }
@@ -28,7 +28,7 @@ namespace AbyssalCrab.Runtime
                 autoJump.ValueKind != JsonValueKind.True && autoJump.ValueKind != JsonValueKind.False) return false;
             if (!arguments.TryGetProperty("rotationsPerSecond", out var speed)) return true;
             return speed.ValueKind == JsonValueKind.Number && speed.TryGetDouble(out double number) &&
-                !double.IsNaN(number) && !double.IsInfinity(number) && number >= 2d && number <= 15d;
+                !double.IsNaN(number) && !double.IsInfinity(number) && number >= 2d && number <= 30d;
         }
     }
 }

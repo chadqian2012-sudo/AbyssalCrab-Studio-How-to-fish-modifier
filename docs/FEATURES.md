@@ -186,9 +186,9 @@ In Fun Events, choose 1–150 items or animals per wave. Regular generators acce
 
 Movement, sprint, jump, and cast parameters are adjusted in the player-feel panels at the top of their categories. The slider and numeric input share one parameter. A valid value is applied only after clicking **Apply**.
 
-大陀螺转速范围为每秒 2–15 圈。曲线可选固定、10 秒缓慢加速或 4 秒周期脉冲；大陀螺仍需手动开启。海鸥自动补充默认关闭；波数上限为 1–20（默认 3），每波沿用「海鸥迁徙」的数量，默认 8 只，并设有冷却和并发限制。出错、清理、断线、世界或预设切换、紧急停用时会停止补充。
+大陀螺转速范围为每秒 2–30 圈，默认 4 圈，支持小数。曲线可选固定、10 秒缓慢加速或 4 秒周期脉冲；大陀螺仍需手动开启。海鸥自动补充默认关闭；波数上限为 1–20（默认 3），每波沿用「海鸥迁徙」的数量，默认 8 只，并设有冷却和并发限制。出错、清理、断线、世界或预设切换、紧急停用时会停止补充。
 
-Gyroscope speed ranges from 2 to 15 revolutions per second. Curves include fixed speed, a 10-second gradual ramp, and a 4-second pulse cycle; the gyroscope still requires manual activation. Seagull replenishment is off by default; its wave limit is 1–20 (default 3), with the migration count (8 birds by default), a cooldown, and one request at a time. Errors, cleanup, disconnection, world or preset changes, and emergency shutdown stop replenishment.
+Gyroscope speed accepts decimal values from 2 to 30 revolutions per second and defaults to 4. Curves include fixed speed, a 10-second gradual ramp, and a 4-second pulse cycle; the gyroscope still requires manual activation. Seagull replenishment is off by default; its wave limit is 1–20 (default 3), with the migration count (8 birds by default), a cooldown, and one request at a time. Errors, cleanup, disconnection, world or preset changes, and emergency shutdown stop replenishment.
 
 ## 战斗与辅助瞄准 | Combat and Aim Assist
 

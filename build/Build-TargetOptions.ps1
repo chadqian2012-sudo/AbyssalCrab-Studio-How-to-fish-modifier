@@ -9,12 +9,13 @@ param(
     [string]$CargoPath='',
     [string]$ParentCorePath='',
     [switch]$RustKernels,
-    [switch]$SpawnQuantities
+    [switch]$SpawnQuantities,
+    [switch]$SpinSpeed30
 )
 $ErrorActionPreference='Stop'
 if($ProjectileR29){throw 'Build the historical r29 from its merged source. Use -RustKernels to patch r29 with the current source.'}
 if($RustKernels -and $WorldDrops){throw 'Select either -RustKernels or -WorldDrops.'}
-if($SpawnQuantities -and ($WorldDrops -or $RustKernels)){throw 'Select a single patch target.'}
+if(($SpawnQuantities -and ($WorldDrops -or $RustKernels)) -or ($SpinSpeed30 -and ($WorldDrops -or $RustKernels -or $SpawnQuantities))){throw 'Select a single patch target.'}
 $root=Split-Path -Parent $PSScriptRoot
 $stage=if($OutputDirectory){[IO.Path]::GetFullPath($OutputDirectory)}elseif($RustKernels){Join-Path $PSScriptRoot 'staging\rust-kernels'}elseif($WorldDrops){Join-Path $PSScriptRoot 'staging\world-drops'}else{Join-Path $PSScriptRoot 'staging\combat-challenge'}
 $runtime=Join-Path $root 'source\HowToFishTrainer\HowToFishTrainer.Runtime.dll'
@@ -26,6 +27,12 @@ if($SpawnQuantities){
     $parentName='r31-runtime.dll'
     $parent=Join-Path $stage $parentName
     $expected='8c582a20044a1c132d6df54a49082fd74e883f253cc3a7890b21617a0e2caaa1'
+}
+if($SpinSpeed30){
+    if(!$OutputDirectory){$stage=Join-Path $PSScriptRoot 'staging\spin-speed'}
+    $parentName='r32-runtime.dll'
+    $parent=Join-Path $stage $parentName
+    $expected='cd2826ff62a0c984a9b71b884ecfb26d82e3f75af29fb263654157f237d7140f'
 }
 $DotnetPath=(Resolve-Path -LiteralPath $DotnetPath).Path
 $GameManagedDirectory=(Resolve-Path -LiteralPath $GameManagedDirectory).Path
@@ -59,23 +66,31 @@ $gameReferences+=@($parent,(Join-Path $root 'source\HowToFishTrainer\0Harmony.dl
 $netReferences=Get-ChildItem -LiteralPath (Join-Path $refs.FullName 'ref\net8.0') -Filter '*.dll' -File | Select-Object -ExpandProperty FullName
 if([IO.Path]::GetFullPath($DnlibPath) -ne (Join-Path $stage 'dnlib.dll')){Copy-Item -LiteralPath $DnlibPath -Destination (Join-Path $stage 'dnlib.dll') -Force}
 Compile 'PatchTargetOptions' @((Join-Path $PSScriptRoot 'PatchSpin.cs'),(Join-Path $PSScriptRoot 'PatchTargetOptions.cs')) ($netReferences+@($DnlibPath)) 'PatchTargetOptions'
-if($SpawnQuantities){
+if($SpawnQuantities -or $SpinSpeed30){
     $core=Join-Path $root 'patched\HowToFishTrainer.Core.dll'
-    $parentCore=Join-Path $stage 'r31-core.dll'
+    $parentCore=Join-Path $stage $parentName.Replace('runtime','core')
+    $coreHash=if($SpinSpeed30){'c54c86db5aec8f944a70cfe046080440819acb748512487f47b7687870646846'}else{'6aa9e2c1778c37b02cd72ebc7e1b8c80bc8be6e0b9c08739b7fd2af3e314aee7'}
     if(!(Test-Path -LiteralPath $parentCore)){
         $inputCore=if($ParentCorePath){$ParentCorePath}else{$core}
-        if((Get-FileHash -LiteralPath $inputCore).Hash -ne '6aa9e2c1778c37b02cd72ebc7e1b8c80bc8be6e0b9c08739b7fd2af3e314aee7'){throw 'Provide the r31 Core using -ParentCorePath'}
+        if((Get-FileHash -LiteralPath $inputCore).Hash -ne $coreHash){throw 'Provide the matching Core using -ParentCorePath'}
         Copy-Item -LiteralPath $inputCore -Destination $parentCore
     }
-    Compile 'SpawnQuantities' @(($names+@('GameplayHooks.cs','OverlayMeshKernel.cs','OverlayBatchRenderer.cs'))|ForEach-Object {Join-Path $PSScriptRoot $_}) $gameReferences
-    & $DotnetPath (Join-Path $stage 'PatchTargetOptions.dll') --spawn-quantities $stage
-    if($LASTEXITCODE -ne 0){throw 'Spawn quantity patch audit failed'}
-    $quantityFixture=Join-Path $root 'verification\SpawnQuantityVerification.cs'
-    Compile 'SpawnQuantityVerification' @($quantityFixture) $gameReferences 'SpawnQuantityVerification'
+    if($SpinSpeed30){
+        & $DotnetPath (Join-Path $stage 'PatchTargetOptions.dll') --spin-speed $stage
+        if($LASTEXITCODE -ne 0){throw 'Spin speed patch audit failed'}
+        $fixtureName='SpinSpeedVerification'
+    }else{
+        Compile 'SpawnQuantities' @(($names+@('GameplayHooks.cs','OverlayMeshKernel.cs','OverlayBatchRenderer.cs'))|ForEach-Object {Join-Path $PSScriptRoot $_}) $gameReferences
+        & $DotnetPath (Join-Path $stage 'PatchTargetOptions.dll') --spawn-quantities $stage
+        if($LASTEXITCODE -ne 0){throw 'Spawn quantity patch audit failed'}
+        $fixtureName='SpawnQuantityVerification'
+    }
+    Compile $fixtureName @((Join-Path $root "verification/$fixtureName.cs")) $gameReferences $fixtureName
     Copy-Item -LiteralPath (Join-Path $root 'source\HowToFishTrainer\0Harmony.dll') -Destination (Join-Path $stage '0Harmony.dll') -Force
-    & python (Join-Path $root 'verification\verify_spawn_quantities.py') $GameManagedDirectory (Join-Path $stage 'SpawnQuantityVerification.dll') (Join-Path $stage 'candidate-runtime.dll') |
-        Tee-Object -FilePath (Join-Path $stage 'quantity-verification.log')
-    if($LASTEXITCODE -ne 0){throw 'Offline spawn queue verification failed'}
+    $fixtureLog=if($SpinSpeed30){'spin-speed-verification.log'}else{'quantity-verification.log'}
+    & python (Join-Path $root 'verification\verify_spawn_quantities.py') $GameManagedDirectory (Join-Path $stage "$fixtureName.dll") (Join-Path $stage 'candidate-runtime.dll') |
+        Tee-Object -FilePath (Join-Path $stage $fixtureLog)
+    if($LASTEXITCODE -ne 0){throw "Offline $fixtureName failed"}
     $audit=Get-Content -Raw -LiteralPath (Join-Path $stage 'runtime-audit.json') | ConvertFrom-Json
     $files=[ordered]@{runtime=$runtime;core=$core}
     $candidates=@{runtime=(Join-Path $stage 'candidate-runtime.dll');core=(Join-Path $stage 'candidate-core.dll')}
@@ -116,12 +131,13 @@ if($SpawnQuantities){
     $candidates=@{runtime=(Join-Path $stage 'candidate-runtime.dll');core=(Join-Path $stage 'candidate-core.dll')}
     $hashes=@{runtime=$audit.runtime.sha256;core=$audit.core.sha256}
 }
-if($RustKernels -or $WorldDrops -or $SpawnQuantities){
+if($RustKernels -or $WorldDrops -or $SpawnQuantities -or $SpinSpeed30){
     $suffix=[guid]::NewGuid().ToString('N')
     $installed=@()
     try{
         foreach($kind in $files.Keys){
             $path=$files[$kind]+'.'+$suffix+'.new'
+            [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($path)) | Out-Null
             Copy-Item -LiteralPath $candidates[$kind] -Destination $path
             if((Get-FileHash -LiteralPath $path).Hash -ne $hashes[$kind]){throw "Staged $kind changed after verification"}
         }
