@@ -2,6 +2,8 @@
 
 **A Windows game assistant for How to Fish / 面向《How to Fish》的 Windows 游戏助手**
 
+下载 [r26 功能介绍网页](docs/index.html) 后，可用浏览器离线查阅功能目录和操作说明。
+
 ## 简介 | Overview
 
 AbyssalCrab Studio 是一款面向《How to Fish》的 Windows 桌面助手。它采用 WPF 界面，并通过游戏内 Runtime Bridge 提供玩家、钓鱼、战斗、传送、物品和趣味事件相关控制。主界面包含 11 个功能分类，并提供搜索、参数预设、收藏、最近生成配置、传送点管理、辅助瞄准选项和状态组件。
