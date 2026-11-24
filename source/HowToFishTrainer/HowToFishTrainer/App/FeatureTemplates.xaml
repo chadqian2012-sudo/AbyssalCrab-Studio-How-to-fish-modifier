@@ -37,12 +37,9 @@
           <ToggleButton Grid.Column="1" Margin="14,0,0,0" Style="{StaticResource FeatureSwitch}" IsChecked="{Binding Enabled, Mode=TwoWay}" IsEnabled="{Binding CanInteract}"/>
             <Grid Visibility="{Binding IsSpin, Converter={StaticResource BoolToVisibility}}" ToolTip="{Binding Status}" AutomationProperties.HelpText="{Binding Status}">
               <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-              <!-- 转速标签（大陀螺）：「转速（圈/秒，2–15）」在 10px 下需要约 105.3 DIP，原先只有 98 DIP，
-                   被 CharacterEllipsis 截掉约 7.3 DIP（独立验收矩阵实测）。这里给它一个 MinWidth 保证
-                   不被压，同时补 ToolTip 作为兜底 —— 交接文档 §14 要求「字段错误不能仅省略得看不懂」。 -->
               <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" MinWidth="108"/><ColumnDefinition Width="76"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-              <TextBlock Text="转速（圈/秒，2–15）" FontSize="10" VerticalAlignment="Center" Margin="0,0,6,0" Style="{StaticResource Muted}" ToolTip="转速（圈/秒，2–15）"/>
-              <TextBox Grid.Column="1" Height="32" Padding="8,4" AutomationProperties.Name="大陀螺转速" ToolTip="每秒 2–15 圈，默认 4；开启时采用输入值，开启后点击应用设置更新" Text="{Binding SpinSpeedText, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding CanInteract}"/>
+              <TextBlock Text="转速（圈/秒，2–30）" FontSize="10" VerticalAlignment="Center" Margin="0,0,6,0" Style="{StaticResource Muted}" ToolTip="转速（圈/秒，2–30）"/>
+              <TextBox Grid.Column="1" Height="32" Padding="8,4" AutomationProperties.Name="大陀螺转速" ToolTip="每秒 2–30 圈，默认 4 圈。开启后点击「应用设置」可更新转速。" Text="{Binding SpinSpeedText, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding CanInteract}"/>
               <Button Grid.Column="2" Height="32" Padding="10,4" Content="应用设置" Margin="8,0,0,0" Style="{StaticResource PrimaryButton}" Command="{Binding ApplySpinSpeedCommand}" IsEnabled="{Binding CanApplySpinSpeed}"/>
               <CheckBox Grid.Row="1" Grid.ColumnSpan="3" Margin="0,8,0,0" Content="模型自动跳跃" AutomationProperties.Name="大陀螺模型自动跳跃" IsChecked="{Binding SpinAutoJump, Mode=TwoWay}" IsEnabled="{Binding CanInteract}" ToolTip="只改变第三人称模型外观；手动跳跃优先。开启时采用选择，运行中点击应用设置更新。"/>
             </Grid>

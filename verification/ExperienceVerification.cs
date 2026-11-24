@@ -289,7 +289,7 @@ static class ExperienceVerification
         var oldSpin=Feature(raceVm,"player.spin.lock");raceRuntime.SpinPending=new();var pendingSpin=raceRuntime.SpinPending;oldSpin.Enabled=true;Await(raceVm.ApplySelectedPresetAsync());raceRuntime.SpinPending=null;pendingSpin.SetResult(new(true,"old enable",JsonSerializer.SerializeToElement(new{applied=true}),JsonSerializer.SerializeToElement(new{}),false));Pump();Check(!Feature(raceVm,"player.spin.lock").Enabled&&!raceVm.ActiveFeaturesText.Contains("大陀螺"),"Late toggle completion cannot re-enable UI after preset clear");
         oldSpin=Feature(raceVm,"player.spin.lock");raceRuntime.SpinPending=new();pendingSpin=raceRuntime.SpinPending;oldSpin.Enabled=true;raceVm.SelectedPage=raceVm.Pages[1];raceVm.SelectedPage=raceVm.Pages[0];raceRuntime.SpinPending=null;pendingSpin.SetResult(new(true,"enable",JsonSerializer.SerializeToElement(new{applied=true}),JsonSerializer.SerializeToElement(new{}),false));Pump();Check(Feature(raceVm,"player.spin.lock").Enabled,"Ordinary page changes preserve pending toggle state within same action generation");raceVm.MarkAllLocksDisabled("fixture");
         var delayedItem=Feature(raceVm,"generation.item");delayedItem.SelectedOption=delayedItem.Options.Single(o=>o.Id==11);delayedItem.QuantityInput.Text="3";delayedItem.DistanceInput.Text="4.25";raceRuntime.GenerationPending=new();var pendingGeneration=raceRuntime.GenerationPending;delayedItem.ExecuteCommand.Execute(null);delayedItem.QuantityInput.Text="77";delayedItem.SelectedOption=delayedItem.Options.Single(o=>o.Id==5);raceRuntime.GenerationPending=null;pendingGeneration.SetResult(new(true,"generated",JsonSerializer.SerializeToElement(new{registered=3}),JsonSerializer.SerializeToElement(new{registered=3}),false));Pump();delayedItem.CatalogView="最近生成";Check(delayedItem.FilteredOptions.Single().Id==11,"Recent generation records the invoked item, not a later edited choice");delayedItem.RestoreBookmarkedConfigurationCommand.Execute(null);Check(delayedItem.Quantity==3&&delayedItem.Distance==4.25,"Recent generation stores immutable parameters from submission time");raceVm.CloseExperience();raceVm.ClosePreferences();
-        var spin=Feature(vm,"player.spin.lock");spin.SpinSpeedText="7.25";spin.SpinSpeedText="-";vm.PresetName="有效草稿";vm.SavePresetCommand.Execute(null);var validDraft=vm.SelectedPreset!;spin.SpinSpeedText="12";vm.SelectedPreset=validDraft;Await(vm.ApplySelectedPresetAsync());Check(Feature(vm,"player.spin.lock").SpinSpeedText=="7.25","Preset saves last valid spin number instead of incomplete draft");
+        var spin=Feature(vm,"player.spin.lock");spin.SpinSpeedText="29.75";spin.SpinSpeedText="-";vm.PresetName="有效草稿";vm.SavePresetCommand.Execute(null);var validDraft=vm.SelectedPreset!;spin.SpinSpeedText="12";vm.SelectedPreset=validDraft;Await(vm.ApplySelectedPresetAsync());Check(Feature(vm,"player.spin.lock").SpinSpeedText=="29.75","Preset saves last valid spin number instead of incomplete draft");
         vm.FlushPreferences();vm.FlushExperience();
         var restarted=new MainViewModel(preferencesStore:prefs,experiencePath:livePath);Check(restarted.Presets.Count==2&&!restarted.AutoRefill&&!restarted.AimAssist.Enabled,"Restart restores presets without automation");
         restarted.Connect(new ExperienceRuntime(),CapabilityMatrix.For(SessionMode.Host,false));Pump();item=Feature(restarted,"generation.item");Check(item.CatalogView=="最近生成"&&item.FilteredOptions.Single().Id==11,"Generator view and recent entries survive restart/catalog load");item.CatalogView="收藏";item.SelectedOption=item.Options.Single(o=>o.Id==11);Check(item.IsFavorite,"Favorite survives restart");
@@ -333,10 +333,31 @@ static class ExperienceVerification
         typeof(MainViewModel).GetField("_lastRefill",BindingFlags.NonPublic|BindingFlags.Instance)!.SetValue(vm,DateTimeOffset.MinValue);commands=runtime.Commands.Count;vm.UpdateExperienceSession(Session(0));Pump();Check(!vm.AutoRefill&&vm.AutoRefillCount==1&&!runtime.Commands.Skip(commands).Any(c=>c.FeatureId=="fun.event.execute"),"Wave limit preserves count and blocks further generation");
         vm.SelectedTeleportPoint=vm.TeleportPoints.Single();vm.CurrentXInput.Text="17.5";commands=runtime.Commands.Count;vm.TeleportSelectedCommand.Execute(null);Pump();Check(runtime.Commands.Skip(commands).Last(c=>c.FeatureId=="world.teleport").Arguments.GetProperty("x").GetDouble()==17.5,"Selected point supplies initial coordinates; edited coordinates control actual teleport");
         vm.CurrentXInput.Text="-";commands=runtime.Commands.Count;vm.TeleportSelectedCommand.Execute(null);Pump();Check(runtime.Commands.Count==commands,"Invalid edited coordinate blocks teleport even with saved point selected");
-        foreach(string curve in new[]{"固定","缓慢加速","脉冲"})foreach(double speed in new[]{2,4,7.25,15})foreach(double second in new[]{0,.5,2,5,10,50})Check(MainViewModel.SpinCurveValue(curve,speed,second)>=2&&MainViewModel.SpinCurveValue(curve,speed,second)<=15,$"Bounded spin curve {curve}/{speed}/{second}");
+        foreach (var (curve, peakTime) in new[] { ("固定", 0), ("缓慢加速", 10), ("脉冲", 2) })
+        {
+            foreach (double speed in new[] { 2, 4, 7.25, 15, 29.75, 30 })
+            {
+                Check(MainViewModel.SpinCurveValue(curve,speed,peakTime)==speed, $"Spin curve reaches {speed} rps: {curve}");
+                foreach (double second in new[] { 0, .5, 2, 5, 10, 50 })
+                {
+                    double actual = MainViewModel.SpinCurveValue(curve,speed,second);
+                    Check(actual >= 2 && actual <= speed, $"Bounded spin curve {curve}/{speed}/{second}");
+                }
+            }
+        }
         var curvedSpin=Feature(vm,"player.spin.lock");curvedSpin.SpinSpeedText="4";curvedSpin.SpinAutoJump=true;curvedSpin.Enabled=true;Pump();
-        vm.SelectedPage=vm.Pages.Single(p=>p.Category=="钓鱼");vm.SpinCurve="脉冲";Await(vm.TickExperienceAsync(DateTimeOffset.UtcNow));
-        Check(runtime.Commands.Last(c=>c.FeatureId=="player.spin.lock").Arguments.GetProperty("autoJump").GetBoolean(),"Spin curve preserves applied cosmetic jump while another category is selected");
+        curvedSpin.SpinSpeedText="30";curvedSpin.ApplySpinSpeedCommand.Execute(null);Pump();
+        Check(runtime.Commands.Last(c=>c.FeatureId=="player.spin.lock").Arguments.GetProperty("rotationsPerSecond").GetDouble()==30,"Applying the upper limit to an enabled spin sends 30 rps");
+        int appliedCommands = runtime.Commands.Count;
+        curvedSpin.SpinSpeedText="30.01";curvedSpin.ApplySpinSpeedCommand.Execute(null);Pump();
+        Check(!curvedSpin.CanApplySpinSpeed && curvedSpin.SpinSpeedText=="30.01" && runtime.Commands.Count==appliedCommands,"An above-limit draft stays visible without sending another spin command");
+        vm.SelectedPage=vm.Pages.Single(p=>p.Category=="钓鱼");vm.SpinCurve="脉冲";
+        var pulseStart=DateTimeOffset.UtcNow;
+        Await(vm.TickExperienceAsync(pulseStart));
+        Await(vm.TickExperienceAsync(pulseStart.AddSeconds(2)));
+        var pulseCommand=runtime.Commands.Last(c=>c.FeatureId=="player.spin.lock").Arguments;
+        Check(pulseCommand.GetProperty("autoJump").GetBoolean() && Math.Abs(pulseCommand.GetProperty("rotationsPerSecond").GetDouble()-30)<.001,
+            "The pulse reaches the applied 30 rps and preserves cosmetic jump while another category is selected");
         vm.MarkAllLocksDisabled("fixture curve cleanup");vm.SpinCurve="固定";
         vm.SelectedPage=vm.Pages.Single(p=>p.Category=="战斗");vm.DiagnosticOnly=true;commands=runtime.Commands.Count;vm.AimAssist.Enabled=true;var silent=vm.Features.Single(f=>f.Descriptor.Id=="combat.silent_aim");silent.Enabled=true;Pump();Check(!vm.AimAssist.Enabled&&!silent.Enabled&&!runtime.Commands.Skip(commands).Any(c=>c.FeatureId is "combat.silent_aim" or "combat.aim_assist"&&c.Arguments.GetProperty("enabled").GetBoolean()),"Observation mode blocks aim and silent lock activation");
         vm.FeatureQuery = "大陀螺";

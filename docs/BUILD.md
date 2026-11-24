@@ -1,5 +1,13 @@
 # 构建指南 | Build Guide
 
+## r33 大陀螺使用每秒 30 圈的上限
+
+从 r32 的 Core 和 Runtime 生成配套程序集，再用下文的单文件发布命令构建桌面程序。构建脚本会核对父版本，并将修改记录写入 `build/staging/spin-speed/runtime-audit.json`。
+
+```powershell
+& '.\build\Build-TargetOptions.ps1' -SpinSpeed30 -DotnetPath '<SDK>/dotnet.exe' -GameManagedDirectory '<game>/How to Fish_Data/Managed' -DnlibPath '<dnlib>/dnlib.dll' -ParentRuntimePath '<r32>/HowToFishTrainer.Runtime.dll' -ParentCorePath '<r32>/HowToFishTrainer.Core.dll'
+```
+
 ## r32 数量调整需要配套的 Core 和 Runtime
 
 使用 r31 交付包内的构建输入。常规生成上限在 Core 和 Runtime 各校验一次，趣味事件的分批执行由 Runtime 负责。在源码根目录执行下列命令，然后使用本页的两种单文件发布命令。构建时保留 r31 的手记和标注原生库。

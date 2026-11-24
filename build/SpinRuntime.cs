@@ -163,8 +163,8 @@ namespace AbyssalCrab.Runtime
             if (speed.Type != JTokenType.Integer && speed.Type != JTokenType.Float)
                 throw new ArgumentException("rotationsPerSecond must be a number");
             double number = speed.Value<double>();
-            if (double.IsNaN(number) || double.IsInfinity(number) || number < 2d || number > 15d)
-                throw new ArgumentOutOfRangeException("rotationsPerSecond", "转速范围为每秒 2–15 圈。");
+            if (double.IsNaN(number) || double.IsInfinity(number) || number < 2d || number > 30d)
+                throw new ArgumentOutOfRangeException("rotationsPerSecond", "转速范围为每秒 2–30 圈。");
             return (float)number;
         }
 

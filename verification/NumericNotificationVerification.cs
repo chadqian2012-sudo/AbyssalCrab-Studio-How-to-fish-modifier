@@ -41,8 +41,10 @@ static class NumericNotificationVerification
             Check(!n.HasError && n.Value == 2.75, "Existing dot-decimal input keeps its value under a comma-decimal culture");
             n.Text = "1.234,5";
             Check(n.HasError && n.LastValidValue == 2.75, "Ambiguous grouping does not replace the last valid number");
-            Check(FeatureItemViewModel.TrySpinSpeed("7,5", out double speed) && speed == 7.5
-                && !FeatureItemViewModel.TrySpinSpeed("15,1", out _), "Spin speed uses the same separator and enforces its 15 rps limit");
+            Check(FeatureItemViewModel.TrySpinSpeed("29,75", out double speed) && speed == 29.75
+                && FeatureItemViewModel.TrySpinSpeed("2", out _) && FeatureItemViewModel.TrySpinSpeed("30", out _)
+                && !FeatureItemViewModel.TrySpinSpeed("1,99", out _) && !FeatureItemViewModel.TrySpinSpeed("30,01", out _),
+                "Spin speed accepts localized decimals and both endpoints of 2–30 revolutions per second");
             using var journal = new FishingViewModel(gameRunning: () => false, startTimer: false);
             journal.BeginSession();
             journal.SpeciesText = "Test fish";

@@ -108,7 +108,7 @@ public sealed partial class FeatureItemViewModel
             if (IsSpin)
             {
                 SpinAutoJump = values.Boolean("spinAutoJump") ?? false;
-                if (values.Number("spinSpeed") is double speed && speed >= 2 && speed <= 15)
+                if (values.Number("spinSpeed") is double speed && speed is >= 2 and <= MaxSpinSpeed)
                 { _lastValidSpinSpeed = speed; SpinSpeedText = speed.ToString("G", CultureInfo.InvariantCulture); }
                 if (drafts != null && drafts.TryGetValue("spinSpeed", out var draft)) SpinSpeedText = draft;
             }

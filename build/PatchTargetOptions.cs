@@ -25,6 +25,11 @@ internal static class PatchTargetOptions
     }
     public static void Main(string[] args)
     {
+        if (args[0] == "--spin-speed")
+        {
+            PatchSpinSpeed(args[1]);
+            return;
+        }
         if (args[0] == "--spawn-quantities")
         {
             PatchSpawnQuantities(args[1]);
@@ -127,6 +132,46 @@ internal static class PatchTargetOptions
             retainedMethods = before.Count - changed.Count, changedMethods = changed, addedMethods, noHelperDependency = true, gameInjected = false, gameAssetsWritten = false };
         File.WriteAllText(Path.Combine(Path.GetDirectoryName(output)!, "runtime-audit.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine($"Combat challenge audited: {changed.Count} changed, {before.Count - changed.Count} retained, {addedMethods.Length} new methods; {Hash(output)}");
+    }
+
+    static void PatchSpinSpeed(string stage)
+    {
+        object RaiseLimit(string kind, string parentHash, string type, params string[] methodNames)
+        {
+            var parent = Path.Combine(stage, $"r32-{kind}.dll");
+            if (Hash(parent) != parentHash) throw new InvalidDataException($"Unexpected r32 {kind}");
+            using var module = ModuleDefMD.Load(parent);
+            var original = module.GetTypes().SelectMany(t => t.Methods).ToDictionary(m => m.FullName, Body);
+            var methods = module.Find("AbyssalCrab.Runtime." + type, false).Methods;
+            foreach (var name in methodNames)
+            {
+                var il = methods.Single(m => m.Name == name).Body.Instructions;
+                il.Single(i => i.OpCode == OpCodes.Ldc_R8 && Equals(i.Operand, 15d)).Operand = 30d;
+                if (name == "ValidateSpinArguments") continue;
+                var label = il.Single(i => i.OpCode == OpCodes.Ldstr && ((string)i.Operand).Contains("2–15"));
+                label.Operand = ((string)label.Operand).Replace("2–15", "2–30");
+            }
+
+            byte[] identity = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(parentHash + ":spin:30"));
+            module.Mvid = new Guid(identity.AsSpan(0, 16));
+            if (kind == "runtime") module.Assembly.Name = "HowToFishTrainer.Runtime.Spin30." + Convert.ToHexString(identity)[..16];
+            var output = Path.Combine(stage, $"candidate-{kind}.dll");
+            module.Write(output);
+            using var result = ModuleDefMD.Load(output);
+            var actual = result.GetTypes().SelectMany(t => t.Methods).ToArray();
+            var changed = actual.Where(m => Body(m) != original[m.FullName]).Select(m => m.FullName).ToHashSet();
+            var allowed = methods.Where(m => methodNames.Contains(m.Name.String)).Select(m => m.FullName);
+            if (actual.Length != original.Count || !changed.SetEquals(allowed))
+                throw new InvalidDataException($"Unexpected changes to r32 {kind} methods");
+            return new { parent = parentHash, sha256 = Hash(output), changed, retained = original.Count - changed.Count };
+        }
+
+        var core = RaiseLimit("core", "c54c86db5aec8f944a70cfe046080440819acb748512487f47b7687870646846",
+            "SpinRegistry", "Add", "ValidateSpinArguments");
+        var runtime = RaiseLimit("runtime", "cd2826ff62a0c984a9b71b884ecfb26d82e3f75af29fb263654157f237d7140f",
+            "SpinRuntime", "ReadPublicSpeed");
+        File.WriteAllText(Path.Combine(stage, "runtime-audit.json"), JsonSerializer.Serialize(
+            new { passed = true, core, runtime, maximumRotationsPerSecond = 30 }, new JsonSerializerOptions { WriteIndented = true }));
     }
 
     static void PatchSpawnQuantities(string stage)

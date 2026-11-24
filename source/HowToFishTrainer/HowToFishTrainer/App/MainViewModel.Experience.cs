@@ -639,7 +639,7 @@ public sealed partial class MainViewModel
     }
     public static double SpinCurveValue(string curve,double speed,double seconds)
     {
-        speed=Math.Clamp(double.IsFinite(speed)?speed:4,2,15);seconds=double.IsFinite(seconds)?Math.Max(0,seconds):0;
+        speed=Math.Clamp(double.IsFinite(speed)?speed:4,2,FeatureItemViewModel.MaxSpinSpeed);seconds=double.IsFinite(seconds)?Math.Max(0,seconds):0;
         return curve switch{"缓慢加速"=>2+(speed-2)*Math.Min(1,seconds/10),"脉冲"=>2+(speed-2)*(.5-.5*Math.Cos(seconds*Math.PI/2)),_=>speed};
     }
     private async Task StopSpinAsync()
